@@ -97,7 +97,6 @@ export const markAttendance = async (req, res) => {
   try {
     const records = req.body.records; 
     
-    // 🔴 FIX: BulkWrite use kiya hai taaki agar same date ki entry pehle se ho toh wo UPDATE ho jaye, duplicate na bane
     const ops = records.map(r => ({
       updateOne: {
         filter: { employee: r.employee, date: r.date },
@@ -107,11 +106,11 @@ export const markAttendance = async (req, res) => {
     }));
     
     await Attendance.bulkWrite(ops);
-    res.status(200).json({ message: 'Attendance saved successfully' });
+    res.status(200).json({ message: 'Attendance & Locations saved successfully' });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
-};
+};  
 
 export const getAttendance = async (req, res) => {
   try {

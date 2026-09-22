@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   UserCircle, Building2, Briefcase, Mail, Phone, 
-  Calendar, Clock, CheckCircle2, AlertCircle, Save, LogIn, LogOut
+  Calendar, Clock, CheckCircle2, AlertCircle, Save, LogIn, LogOut, MapPin, ExternalLink, Lock
 } from 'lucide-react';
 
 const MyPortal = () => {
@@ -12,6 +12,7 @@ const MyPortal = () => {
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [fetchingLocation, setFetchingLocation] = useState(false);
   
   const [myProfile, setMyProfile] = useState(null);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
@@ -19,14 +20,22 @@ const MyPortal = () => {
   // Date Utilities
   const offset = new Date().getTimezoneOffset() * 60000;
   const localToday = new Date(Date.now() - offset).toISOString().split('T')[0];
-  const currentMonthStr = localToday.substring(0, 7); // YYYY-MM
+  const currentMonthStr = localToday.substring(0, 7);
+
+  // 🔴 LOCK STATES
+  const [isStatusLocked, setIsStatusLocked] = useState(false);
+  const [isInTimeLocked, setIsInTimeLocked] = useState(false);
+  const [isOutTimeLocked, setIsOutTimeLocked] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false); // Enable/Disable Save button
 
   const [todayRecord, setTodayRecord] = useState({
     date: localToday,
     inTime: '',
     outTime: '',
+    inLocation: '',
+    outLocation: '',
     totalHours: '',
-    status: 'Present',
+    status: '', // Blank initally
     remarks: ''
   });
 
@@ -52,21 +61,33 @@ const MyPortal = () => {
         setAttendanceHistory(thisMonthAtt);
 
         const todayData = thisMonthAtt.find(a => a.date.startsWith(localToday));
+        
         if (todayData) {
           setTodayRecord({
             date: todayData.displayDate || localToday,
             inTime: todayData.inTime || '',
             outTime: todayData.outTime || '',
+            inLocation: todayData.inLocation || '',   
+            outLocation: todayData.outLocation || '', 
             totalHours: todayData.totalHours || '',
-            status: todayData.status || 'Present',
+            status: todayData.status || '',
             remarks: todayData.remarks || ''
           });
+
+          // 🔴 CHECKING LOCKS BASED ON SAVED DATA
+          if (todayData.status) setIsStatusLocked(true);
+          if (todayData.inTime) setIsInTimeLocked(true);
+          if (todayData.outTime) setIsOutTimeLocked(true);
+        } else {
+          // If no data exists for today, set default to Present and keep unlocked
+          setTodayRecord(prev => ({ ...prev, status: 'Present' }));
         }
       }
     } catch (error) {
       toast.error("Failed to load your profile data.");
     } finally {
       setLoading(false);
+      setHasUnsavedChanges(false);
     }
   };
 
@@ -75,8 +96,41 @@ const MyPortal = () => {
     // eslint-disable-next-line
   }, [user]);
 
+  // GEOLOCATION FETCH FUNCTION
+  const fetchCurrentLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject("Geolocation is not supported by your browser.");
+      } else {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            const googleMapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
+            
+            try {
+              const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+              if (res.data && res.data.display_name) {
+                const addressParts = res.data.display_name.split(',');
+                const shortAddress = addressParts.slice(0, 3).join(',');
+                resolve(`${shortAddress}|${googleMapsLink}`);
+              } else {
+                resolve(`Lat: ${latitude.toFixed(2)}, Lng: ${longitude.toFixed(2)}|${googleMapsLink}`);
+              }
+            } catch (err) {
+              resolve(`Lat: ${latitude.toFixed(2)}, Lng: ${longitude.toFixed(2)}|${googleMapsLink}`); 
+            }
+          },
+          (error) => {
+            reject("Location access denied or failed.");
+          }
+        );
+      }
+    });
+  };
+
   const handleRecordChange = (field, value) => {
     const updated = { ...todayRecord, [field]: value };
+    setHasUnsavedChanges(true); // 🔴 Enable save button
 
     if (field === 'inTime' || field === 'outTime') {
       const inT = updated.inTime;
@@ -100,26 +154,78 @@ const MyPortal = () => {
     if (field === 'status' && ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(value)) {
       updated.inTime = '';
       updated.outTime = '';
+      updated.inLocation = '';  
+      updated.outLocation = ''; 
       updated.totalHours = '';
     }
 
     setTodayRecord(updated);
   };
 
-  const handlePunchIn = () => {
+  const handlePunchIn = async () => {
+    if (isInTimeLocked) return;
+    
     const now = new Date();
     const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    handleRecordChange('inTime', timeStr);
+    
+    setFetchingLocation(true);
+    let locStr = '';
+    try {
+      locStr = await fetchCurrentLocation();
+      toast.success("Check-In location captured!");
+    } catch (err) {
+      toast.error("Could not capture location. Ensure GPS is enabled.");
+      locStr = 'Location Denied';
+    }
+    setFetchingLocation(false);
+
+    const updated = { ...todayRecord, inTime: timeStr, inLocation: locStr };
+    setTodayRecord(calculateHours(updated));
+    setHasUnsavedChanges(true);
   };
 
-  const handlePunchOut = () => {
+  const handlePunchOut = async () => {
+    if (isOutTimeLocked) return;
+
     const now = new Date();
     const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    handleRecordChange('outTime', timeStr);
+    
+    setFetchingLocation(true);
+    let locStr = '';
+    try {
+      locStr = await fetchCurrentLocation();
+      toast.success("Check-Out location captured!");
+    } catch (err) {
+      toast.error("Could not capture location. Ensure GPS is enabled.");
+      locStr = 'Location Denied';
+    }
+    setFetchingLocation(false);
+
+    const updated = { ...todayRecord, outTime: timeStr, outLocation: locStr };
+    setTodayRecord(calculateHours(updated));
+    setHasUnsavedChanges(true);
   };
+
+  const calculateHours = (record) => {
+    if (record.inTime && record.outTime) {
+      const [inH, inM] = record.inTime.split(':').map(Number);
+      const [outH, outM] = record.outTime.split(':').map(Number);
+      let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
+      if (diffMins < 0) diffMins += 24 * 60; 
+      const h = Math.floor(diffMins / 60);
+      const m = diffMins % 60;
+      record.totalHours = `${h}h ${m}m`;
+    }
+    return record;
+  }
 
   const submitAttendance = async () => {
-    if (!myProfile) return;
+    if (!myProfile || !hasUnsavedChanges) return;
+    if (!todayRecord.status) {
+        toast.error("Please select a status (Present, Absent, etc.) first.");
+        return;
+    }
+
     setSaving(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
@@ -130,6 +236,8 @@ const MyPortal = () => {
         date: localToday,
         inTime: todayRecord.inTime,
         outTime: todayRecord.outTime,
+        inLocation: todayRecord.inLocation,
+        outLocation: todayRecord.outLocation, 
         totalHours: todayRecord.totalHours,
         status: todayRecord.status,
         remarks: todayRecord.remarks
@@ -137,13 +245,40 @@ const MyPortal = () => {
 
       await axios.post(`${import.meta.env.VITE_API_URL}/hr/attendance`, { records: [payload] }, { headers });
       toast.success("Attendance marked successfully!");
-      fetchData(); 
+      setHasUnsavedChanges(false);
+      fetchData(); // This will lock the inputs automatically because data is now saved
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to mark attendance.");
     } finally {
       setSaving(false);
     }
   };
+
+  const renderLocationDisplay = (locStr, prefix) => {
+    if (!locStr || locStr === 'System Generated' || locStr === 'Location Denied') {
+      return (
+        <span className="truncate">
+          <span className={prefix === 'IN' ? 'text-blue-500' : 'text-amber-500'}>{prefix}:</span> {locStr || '-'}
+        </span>
+      );
+    }
+
+    const [address, link] = locStr.split('|');
+
+    return (
+      <div className="flex flex-col">
+        <span className="truncate" title={address}>
+          <span className={prefix === 'IN' ? 'text-blue-500' : 'text-amber-500'}>{prefix}:</span> {address}
+        </span>
+        {link && (
+          <a href={link} target="_blank" rel="noreferrer" className="text-[9px] text-blue-600 hover:text-blue-800 underline mt-0.5 flex items-center gap-1">
+            <ExternalLink size={10} /> View Map
+          </a>
+        )}
+      </div>
+    );
+  };
+
 
   if (loading) {
     return (
@@ -170,6 +305,17 @@ const MyPortal = () => {
     <div className="max-w-7xl mx-auto p-6 space-y-6 pb-12">
       <Toaster position="top-right" />
 
+      {/* LOCATION LOADER OVERLAY */}
+      {fetchingLocation && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+               <div className="bg-white p-6 rounded-2xl flex flex-col items-center shadow-xl animate-in fade-in zoom-in-95">
+                   <MapPin className="animate-bounce text-blue-500 mb-2" size={32} />
+                   <p className="text-slate-800 font-bold">Capturing GPS Coordinates...</p>
+                   <p className="text-xs text-slate-500 mt-1">Please allow location access if prompted.</p>
+               </div>
+          </div>
+      )}
+
       {/* HEADER */}
       <div>
         <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
@@ -178,7 +324,7 @@ const MyPortal = () => {
         <p className="text-sm text-slate-500 mt-1 font-medium">Manage your daily attendance and view your profile details.</p>
       </div>
 
-      {/* 🔴 TOP SECTION: MARK ATTENDANCE WIDGET */}
+      {/* TOP SECTION: MARK ATTENDANCE WIDGET */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
         
@@ -201,13 +347,17 @@ const MyPortal = () => {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5 items-start">
-          <div className="lg:col-span-1">
-            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5">Status</label>
+          <div className="lg:col-span-1 relative">
+            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5 flex justify-between">
+                Status {isStatusLocked && <Lock size={12} className="text-emerald-500"/>}
+            </label>
             <select 
               value={todayRecord.status} 
               onChange={(e) => handleRecordChange('status', e.target.value)} 
-              className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold bg-slate-50 focus:ring-2 focus:ring-blue-500/20"
+              disabled={isStatusLocked}
+              className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
             >
+              <option value="" disabled>Select...</option>
               <option value="Present">Present</option>
               <option value="Absent">Absent</option>
               <option value="Half Day">Half Day</option>
@@ -219,72 +369,85 @@ const MyPortal = () => {
           </div>
 
           <div className="lg:col-span-1">
-            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5">Punch In</label>
+            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5 flex justify-between">
+                Punch In {isInTimeLocked && <Lock size={12} className="text-emerald-500"/>}
+            </label>
             <div className="flex gap-2">
               <input 
                 type="time" 
                 value={todayRecord.inTime} 
                 onChange={(e) => handleRecordChange('inTime', e.target.value)} 
-                disabled={['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:opacity-50"
+                disabled={isInTimeLocked || ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
+                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
               />
               <button 
                 onClick={handlePunchIn}
-                disabled={['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
-                className="px-3 flex items-center justify-center bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl border border-blue-100 transition-colors disabled:opacity-50"
-                title="Auto Punch In"
+                disabled={isInTimeLocked || ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
+                className="px-3 flex items-center justify-center bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl border border-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Auto Punch In (with GPS)"
               >
                 <LogIn size={16}/>
               </button>
             </div>
+            {todayRecord.inLocation && (
+                <p className="text-[9px] text-blue-500 font-bold mt-1 truncate" title={todayRecord.inLocation.split('|')[0]}>📍 {todayRecord.inLocation.split('|')[0]}</p>
+            )}
           </div>
 
           <div className="lg:col-span-1">
-            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5">Punch Out</label>
+            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5 flex justify-between">
+                Punch Out {isOutTimeLocked && <Lock size={12} className="text-emerald-500"/>}
+            </label>
             <div className="flex gap-2">
               <input 
                 type="time" 
                 value={todayRecord.outTime} 
                 onChange={(e) => handleRecordChange('outTime', e.target.value)} 
-                disabled={['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:opacity-50"
+                disabled={isOutTimeLocked || ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
+                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
               />
               <button 
                 onClick={handlePunchOut}
-                disabled={['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
-                className="px-3 flex items-center justify-center bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl border border-rose-100 transition-colors disabled:opacity-50"
-                title="Auto Punch Out"
+                disabled={isOutTimeLocked || ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
+                className="px-3 flex items-center justify-center bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl border border-rose-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Auto Punch Out (with GPS)"
               >
                 <LogOut size={16}/>
               </button>
             </div>
+            {todayRecord.outLocation && (
+                <p className="text-[9px] text-rose-500 font-bold mt-1 truncate" title={todayRecord.outLocation.split('|')[0]}>📍 {todayRecord.outLocation.split('|')[0]}</p>
+            )}
           </div>
 
           <div className="lg:col-span-1">
-            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5">Remarks / Notes</label>
+            <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5 flex justify-between">
+                Remarks / Notes {isOutTimeLocked && <Lock size={12} className="text-emerald-500"/>}
+            </label>
             <input 
               type="text" 
               placeholder="Any notes..." 
               value={todayRecord.remarks} 
               onChange={(e) => handleRecordChange('remarks', e.target.value)} 
-              className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20"
+              disabled={isOutTimeLocked}
+              className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
             />
           </div>
 
           <div className="lg:col-span-1 flex items-end">
             <button 
               onClick={submitAttendance} 
-              disabled={saving}
-              className="w-full h-[42px] bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              disabled={saving || !hasUnsavedChanges}
+              className={`w-full h-[42px] text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${hasUnsavedChanges ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-400 cursor-not-allowed opacity-80'}`}
             >
               {saving ? <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <Save size={16} />} 
-              {saving ? 'Saving...' : 'Submit'}
+              {saving ? 'Saving...' : (hasUnsavedChanges ? 'Save Info' : 'Up to Date')}
             </button>
           </div>
         </div>
       </div>
 
-      {/* 🔴 BOTTOM SECTION: PROFILE & HISTORY */}
+      {/* BOTTOM SECTION: PROFILE & HISTORY */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* LEFT COLUMN: Profile Card */}
@@ -347,20 +510,21 @@ const MyPortal = () => {
             </div>
             
             <div className="flex-1 overflow-x-auto p-5">
-              <table className="w-full text-left border-collapse min-w-[500px]">
+              <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead>
                   <tr className="border-b-2 border-slate-100 text-slate-400 text-[10px] font-black uppercase tracking-widest">
                     <th className="pb-3 px-2 w-28">Date</th>
                     <th className="pb-3 px-2 w-28">Status</th>
                     <th className="pb-3 px-2 text-center w-20">In</th>
                     <th className="pb-3 px-2 text-center w-20">Out</th>
+                    <th className="pb-3 px-2 w-32">Location Info</th>
                     <th className="pb-3 px-2 text-center w-24">Hours</th>
                     <th className="pb-3 px-2">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
                   {attendanceHistory.length === 0 ? (
-                    <tr><td colSpan="6" className="text-center py-12 text-slate-400">No attendance records found for this month yet.</td></tr>
+                    <tr><td colSpan="7" className="text-center py-12 text-slate-400">No attendance records found for this month yet.</td></tr>
                   ) : (
                     attendanceHistory.map((row) => {
                       const displayDate = row.date.split('T')[0];
@@ -385,6 +549,18 @@ const MyPortal = () => {
                           </td>
                           <td className="py-3 px-2 text-center font-semibold text-slate-600">{row.inTime || '-'}</td>
                           <td className="py-3 px-2 text-center font-semibold text-slate-600">{row.outTime || '-'}</td>
+                          
+                          <td className="py-3 px-2">
+                            <div className="flex flex-col gap-1 text-[9px] font-bold text-slate-500">
+                                <div className="bg-slate-50 px-1.5 py-1 rounded border border-slate-200">
+                                    {renderLocationDisplay(row.inLocation, 'IN')}
+                                </div>
+                                <div className="bg-slate-50 px-1.5 py-1 rounded border border-slate-200">
+                                    {renderLocationDisplay(row.outLocation, 'OUT')}
+                                </div>
+                            </div>
+                          </td>
+
                           <td className="py-3 px-2 text-center">
                             {row.totalHours ? (
                               <span className="font-mono text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded border border-slate-200">

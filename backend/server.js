@@ -16,6 +16,7 @@ import gstRoutes from './routes/gstRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import hrRoutes from './routes/hrRoutes.js';
+import gstScanRoutes from './routes/gstScanRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -42,6 +43,7 @@ app.use('/api/gst', gstRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/hr', hrRoutes);
+app.use('/api/gst-scan', gstScanRoutes);
 
 
 // ==========================================

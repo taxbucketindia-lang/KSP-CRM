@@ -27,8 +27,8 @@ const EmployeeMaster = () => {
 
   const initialForm = {
     name: '', mobile: '', email: '', 
-    password: '', role: 'Sales/Executive', 
-    designation: '', department: '',
+    password: '', role: '', 
+    designation: '', department: '', 
     employmentType: 'Full Time', joiningDate: '', probationPeriod: '', confirmationDate: '',
     salaryType: 'Salary', basic: 0, hra: 0, otherAllowance: 0,
     pan: '', uanEsi: '', status: 'Active', remarks: ''

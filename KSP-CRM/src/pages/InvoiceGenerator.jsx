@@ -1,12 +1,33 @@
 import React, { useState, useContext } from 'react';
-import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2 } from 'lucide-react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
+import toast, { Toaster } from 'react-hot-toast';
+import { toJpeg } from 'html-to-image'; // 🔴 IMPORT
+import jsPDF from 'jspdf'; // 🔴 IMPORT
+
+// HELPER FUNCTION: Number to Words (Indian Format)
+const numberToWords = (num) => {
+  if (num === 0 || isNaN(num)) return "Zero Rupees Only";
+  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  
+  const inWords = (n) => {
+      if (n < 20) return a[n];
+      if (n < 100) return b[Math.floor(n / 10)] + (n % 10 !== 0 ? " " + a[n % 10] : "");
+      if (n < 1000) return a[Math.floor(n / 100)] + " Hundred" + (n % 100 !== 0 ? " " + inWords(n % 100) : "");
+      if (n < 100000) return inWords(Math.floor(n / 1000)) + " Thousand" + (n % 1000 !== 0 ? " " + inWords(n % 1000) : "");
+      if (n < 10000000) return inWords(Math.floor(n / 100000)) + " Lakh" + (n % 100000 !== 0 ? " " + inWords(n % 100000) : "");
+      return inWords(Math.floor(n / 10000000)) + " Crore" + (n % 10000000 !== 0 ? " " + inWords(n % 10000000) : "");
+  };
+  
+  const integerPart = Math.floor(num);
+  return "Rupees " + inWords(integerPart).trim() + " Only";
+};
 
 const InvoiceGenerator = () => {
   const { user } = useContext(AuthContext); 
 
-  // 🔴 DEFAULT TAXBUCKET DETAILS
   const defaultCompany = {
     name: "SkyEdge Taxbucket India Private Limited",
     phone: "011-4747-6266",
@@ -23,9 +44,8 @@ const InvoiceGenerator = () => {
   const [invoiceNo, setInvoiceNo] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   
-  // 🔴 STATES FOR COMPANY & TOGGLES
   const [isTaxbucket, setIsTaxbucket] = useState(true); 
-  const [isProforma, setIsProforma] = useState(false); // 🔴 NAYA STATE: Proforma Toggle ke liye
+  const [isProforma, setIsProforma] = useState(false); 
   
   const [companyDetails, setCompanyDetails] = useState(defaultCompany);
   const [showQr, setShowQr] = useState(true); 
@@ -47,6 +67,11 @@ const InvoiceGenerator = () => {
   const [historyList, setHistoryList] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // 🔴 SEND INVOICE MODAL STATE
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendMethod, setSendMethod] = useState('whatsapp'); // 'whatsapp' | 'email'
+  const [sendContact, setSendContact] = useState('');
 
   const handleCompanyToggle = () => {
     if (isTaxbucket) {
@@ -89,37 +114,41 @@ const InvoiceGenerator = () => {
       setHistoryList(res.data.data || []);
       setShowHistoryModal(true);
     } catch (error) {
-      alert("History load karne mein error aayi!");
+      toast.error("History load karne mein error aayi!");
     }
   };
 
-  const handleSaveInvoice = async () => {
+  const handleSaveInvoice = async (returnIdOnly = false) => {
     try {
       if (!invoiceNo || !customer.name || !companyDetails.name) {
-        alert("Please enter Invoice Number, Customer Name, and Company Name!");
-        return;
+        toast.error("Please enter Invoice Number, Customer Name, and Company Name!");
+        return false;
       }
 
       setLoading(true);
       const headers = { Authorization: `Bearer ${user.token}` };
 
-      // 🔴 PAYLOAD me isProforma bhej rahe hain
       const payload = {
         invoiceNo, invoiceDate, companyDetails, isTaxbucket, isProforma, showQr, customer, items, bank,
         taxableAmount, totalGstAmount, totalAmountAfterTax,
         logoImage, stampImage, customQrImage 
       };
 
+      let savedId = invoiceId;
+
       if (invoiceId) {
         await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${invoiceId}`, payload, { headers });
-        alert("Invoice Updated Successfully!");
+        if(!returnIdOnly) toast.success("Invoice Updated Successfully!");
       } else {
         const res = await axios.post(`${import.meta.env.VITE_API_URL}/invoices`, payload, { headers });
-        setInvoiceId(res.data.data._id);
-        alert("Invoice Saved Successfully!");
+        savedId = res.data.data._id;
+        setInvoiceId(savedId);
+        if(!returnIdOnly) toast.success("Invoice Saved Successfully!");
       }
+      return savedId;
     } catch (error) {
-      alert("Invoice save karne mein fail ho gaya.");
+      toast.error("Invoice save karne mein fail ho gaya.");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -131,7 +160,7 @@ const InvoiceGenerator = () => {
     setInvoiceDate(inv.invoiceDate ? inv.invoiceDate.split('T')[0] : "");
     setCompanyDetails(inv.companyDetails || defaultCompany);
     setIsTaxbucket(inv.isTaxbucket !== undefined ? inv.isTaxbucket : true);
-    setIsProforma(inv.isProforma || false); // Restore Proforma status
+    setIsProforma(inv.isProforma || false); 
     setShowQr(inv.showQr !== undefined ? inv.showQr : true); 
     setCustomer(inv.customer || {});
     setItems(inv.items && inv.items.length > 0 ? inv.items : [{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
@@ -147,7 +176,7 @@ const InvoiceGenerator = () => {
     setInvoiceNo("");
     setInvoiceDate("");
     setIsTaxbucket(true);
-    setIsProforma(false); // Default Tax Invoice
+    setIsProforma(false);
     setCompanyDetails(defaultCompany);
     setShowQr(true);
     setCustomer({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
@@ -157,12 +186,91 @@ const InvoiceGenerator = () => {
     setCustomQrImage(null);
   };
 
+  const openSendModal = () => {
+    if (!invoiceNo || !customer.name) {
+      return toast.error("Please enter Invoice No and Customer Name before sending!");
+    }
+    setSendContact(customer.phone || customer.email || '');
+    setShowSendModal(true);
+  };
+
+  // 🔴 NEW FUNCTION: Generate PDF and Send
+  // 🔴 UPDATED FUNCTION: Generate PDF using html-to-image
+  const handleSendInvoice = async (e) => {
+    e.preventDefault();
+    
+    // 1. Ensure invoice is saved to get ID
+    const currentInvId = await handleSaveInvoice(true);
+    if (!currentInvId) return;
+
+    setLoading(true);
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      
+      // 2. Generate PDF from DOM using html-to-image
+      const element = document.getElementById('invoice-printable');
+      
+      // html-to-image directly gives base64 JPEG and supports all modern CSS
+      const imgData = await toJpeg(element, { quality: 0.95, pixelRatio: 2 });
+      
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      // Calculate height based on element's aspect ratio
+      const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+
+      let payload = {
+        invoiceId: currentInvId,
+        method: sendMethod,
+        contact: sendContact,
+        customerName: customer.name,
+        amount: totalAmountAfterTax,
+        isProforma,
+        invoiceNo
+      };
+
+      if (sendMethod === 'email') {
+        // Get Base64 without the 'data:image/jpeg;base64,' prefix
+        const pdfBase64 = pdf.output('datauristring').split(',')[1];
+        payload.pdfBase64 = pdfBase64;
+        
+        await axios.post(`${import.meta.env.VITE_API_URL}/invoices/${currentInvId}/send`, payload, { headers });
+        toast.success(`Invoice sent via Email to ${sendContact}`);
+      
+      } else if (sendMethod === 'whatsapp') {
+        // For WhatsApp, we trigger auto-download first
+        const fileName = `${invoiceNo.replace(/\//g, '-')}.pdf`;
+        pdf.save(fileName);
+        
+        // Log in backend
+        await axios.post(`${import.meta.env.VITE_API_URL}/invoices/${currentInvId}/send`, payload, { headers });
+        
+        // Open WhatsApp Web with text
+        const text = `Hello ${customer.name},\n\nPlease find attached your ${isProforma ? 'Proforma Invoice' : 'Tax Invoice'} (${invoiceNo}) for Rs. ${totalAmountAfterTax.toLocaleString('en-IN')}.\n\nThank you,\n${companyDetails.name}`;
+        const encodedText = encodeURIComponent(text);
+        const waLink = `https://wa.me/91${sendContact.replace(/\D/g, '')}?text=${encodedText}`;
+        window.open(waLink, '_blank');
+        
+        toast.success(`PDF Downloaded! Please attach it in the WhatsApp chat.`);
+      }
+
+      setShowSendModal(false);
+    } catch (error) {
+      console.error("PDF Generation Error:", error);
+      toast.error("Failed to generate PDF. Check console for details.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const defaultLogo = "/taxbucket-logo.webp";
   const defaultStamp = "/taxbucket-stamp.png";
   const defaultQr = "/taxbucket-qr.png";
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8 pb-12">
+      <Toaster position="top-right"/>
       
       {/* PRINT STYLING */}
       <style dangerouslySetInnerHTML={{__html: `
@@ -184,7 +292,7 @@ const InvoiceGenerator = () => {
           <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
             <FileText className="text-blue-600"/> Tax Invoice Generator {invoiceId ? "(Editing)" : ""}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={handleNewInvoice} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold transition-all">
               + New Invoice
             </button>
@@ -194,13 +302,16 @@ const InvoiceGenerator = () => {
             <button onClick={handleSaveInvoice} disabled={loading} className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md transition-all">
               <Save size={16}/> {invoiceId ? "Update" : "Save"}
             </button>
-            <button onClick={handlePrint} className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all">
+            <button onClick={handlePrint} className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md transition-all">
               <Printer size={16}/> Print / PDF
+            </button>
+            
+            <button onClick={openSendModal} className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all ml-2 border-l border-blue-400">
+              <Send size={16}/> Send PDF
             </button>
           </div>
         </div>
 
-        {/* 🔴 DOUBLE TOGGLES: COMPANY & PROFORMA */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex justify-center items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
              <div className="flex items-center gap-3">
@@ -398,28 +509,101 @@ const InvoiceGenerator = () => {
         </div>
       </div>
 
+      {/* 🔴 MODAL: SEND INVOICE AS PDF */}
+      {showSendModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <Send className="text-blue-600" size={20}/> Send PDF Invoice
+              </h3>
+              <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
+                <X size={16}/>
+              </button>
+            </div>
+            
+            <form onSubmit={handleSendInvoice} className="space-y-5">
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setSendMethod('whatsapp')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${sendMethod === 'whatsapp' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                  <MessageCircle size={24} className="mb-1"/>
+                  <span className="text-xs font-bold">WhatsApp</span>
+                </button>
+                <button type="button" onClick={() => setSendMethod('email')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${sendMethod === 'email' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                  <Mail size={24} className="mb-1"/>
+                  <span className="text-xs font-bold">Email</span>
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                  Enter {sendMethod === 'whatsapp' ? 'Mobile Number' : 'Email Address'}
+                </label>
+                <input 
+                  type={sendMethod === 'whatsapp' ? 'tel' : 'email'}
+                  required
+                  value={sendContact}
+                  onChange={(e) => setSendContact(e.target.value)}
+                  placeholder={sendMethod === 'whatsapp' ? '9876543210' : 'client@email.com'}
+                  className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all shadow-sm"
+                />
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-[10px] text-slate-500 italic">
+                {sendMethod === 'whatsapp' ? (
+                  <><strong>Note:</strong> WhatsApp does not allow auto-attaching files from browser. We will <strong>auto-download the PDF</strong> for you and open the chat. You just need to attach it!</>
+                ) : (
+                  <>The PDF will be automatically generated and sent to this email directly from the server.</>
+                )}
+              </div>
+
+              <button type="submit" disabled={loading} className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2">
+                <Send size={16}/> {loading ? 'Processing PDF...' : `Send via ${sendMethod === 'whatsapp' ? 'WhatsApp' : 'Email'}`}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* HISTORY MODAL */}
       {showHistoryModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-4 max-h-[80vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="text-lg font-bold text-slate-800">Saved Invoices History</h3>
-              <button onClick={() => setShowHistoryModal(false)} className="text-slate-500 hover:text-slate-800 font-bold text-sm">Close</button>
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-purple-600"/> Saved Invoices History</h3>
+              <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-slate-800 bg-slate-100 p-1.5 rounded-lg"><X size={18}/></button>
             </div>
             {historyList.length === 0 ? (
               <p className="text-center text-slate-500 py-6 text-sm">No saved invoices found.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {historyList.map((inv) => (
-                  <div key={inv._id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div key={inv._id} className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
                     <div>
                       <p className="font-bold text-blue-900 text-sm">
                          {inv.invoiceNo} - {inv.customer?.name} 
                          {inv.isProforma && <span className="ml-2 bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded uppercase">Proforma</span>}
                       </p>
-                      <p className="text-xs text-slate-500">{inv.companyDetails?.name || 'Taxbucket'} | Total: ₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</p>
+                      <p className="text-xs font-semibold text-slate-500 mt-1">{inv.companyDetails?.name || 'Taxbucket'} | Total: ₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</p>
+                      
+                      {inv.sendLogs && inv.sendLogs.length > 0 && (
+  <div className="mt-2 space-y-1">
+    {inv.sendLogs.map((log, idx) => (
+      <p key={idx} className="text-[10px] font-bold text-emerald-700 flex flex-wrap items-center gap-1.5 bg-emerald-50 w-fit px-2 py-1 rounded-md border border-emerald-100">
+        <CheckCircle2 size={12}/> 
+        Sent via <span className="uppercase text-emerald-900">{log.method}</span> 
+        to <span className="text-emerald-900">{log.contact}</span> 
+        by <span className="text-emerald-900">{log.sentBy?.name || 'Employee'}</span> 
+        on {new Date(log.sentAt).toLocaleString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric', 
+          hour: '2-digit', minute: '2-digit'
+        })}
+      </p>
+    ))}
+  </div>
+)}
                     </div>
-                    <button onClick={() => loadInvoiceForEdit(inv)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">
-                      Load / Edit
+                    <button onClick={() => loadInvoiceForEdit(inv)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm">
+                      Load Invoice
                     </button>
                   </div>
                 ))}
@@ -430,10 +614,9 @@ const InvoiceGenerator = () => {
       )}
 
       {/* ========================================================= */}
-      {/* PRINTABLE INVOICE TEMPLATE */}
+      {/* PRINTABLE INVOICE TEMPLATE (NO CHANGES HERE) */}
       {/* ========================================================= */}
       <div id="invoice-printable" className="bg-white p-8 border-2 border-blue-900 rounded-none shadow-xl max-w-[800px] mx-auto text-slate-900 font-sans relative">
-        
         <div className="flex justify-between items-start border-b-2 border-blue-900 pb-4 mb-4">
           <div className="w-48">
             {logoImage ? (
@@ -460,7 +643,6 @@ const InvoiceGenerator = () => {
           </div>
         </div>
 
-        {/* 🔴 CONDITIONAL: PROFORMA VS TAX INVOICE TITLE */}
         <div className="grid grid-cols-3 border border-blue-900 text-xs mb-4">
           <div className="p-2 border-r border-blue-900 font-bold bg-slate-50 flex items-center">
             GSTIN : <span className="text-blue-900 font-mono ml-1">{companyDetails.gstin || '---'}</span>
@@ -549,20 +731,20 @@ const InvoiceGenerator = () => {
           </tfoot>
         </table>
 
-        <div className="border border-blue-900 text-xs mb-4">
+        <div className="border border-blue-900 text-xs mb-4 flex flex-col">
           <div className="grid grid-cols-12 border-b border-blue-900 bg-slate-50 font-bold p-1.5 text-center">
-            <div className="col-span-7 border-r border-blue-900">Total in words:</div>
+            <div className="col-span-7 border-r border-blue-900 text-left px-2">Total in words:</div>
             <div className="col-span-5">Taxable Amount: <span className="float-right font-mono">{taxableAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
           </div>
           
-          <div className="grid grid-cols-12 p-2 items-center">
-            <div className="col-span-7 text-center font-black text-blue-900 tracking-wider text-sm border-r border-blue-900 h-full flex items-center justify-center">
-              AUTOMATED CALCULATION
+          <div className="grid grid-cols-12 items-stretch">
+            <div className="col-span-7 text-left font-bold text-blue-900 text-xs border-r border-blue-900 flex items-center justify-start p-3 uppercase leading-relaxed bg-white">
+              {numberToWords(totalAmountAfterTax)}
             </div>
-            <div className="col-span-5 space-y-1 text-slate-700 pl-2">
+            <div className="col-span-5 space-y-1 text-slate-700 pl-2 p-2">
               <div className="flex justify-between"><span>Add : IGST @ 18%</span> <span className="font-mono">{totalGstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
-              <div className="flex justify-between"><span>Add : CGST @ 9%</span> <span className="font-mono">00</span></div>
-              <div className="flex justify-between"><span>Add : SGST @ 9%</span> <span className="font-mono">00</span></div>
+              <div className="flex justify-between"><span>Add : CGST @ 9%</span> <span className="font-mono">0.00</span></div>
+              <div className="flex justify-between"><span>Add : SGST @ 9%</span> <span className="font-mono">0.00</span></div>
             </div>
           </div>
 
@@ -576,7 +758,6 @@ const InvoiceGenerator = () => {
         </div>
 
         <div className="grid grid-cols-12 border border-blue-900 text-xs">
-          
           <div className="col-span-6 border-r border-blue-900 p-3 flex flex-col justify-between">
             <div>
               <p className="font-bold text-blue-900 border-b border-blue-100 pb-1 mb-2">Bank Details:</p>

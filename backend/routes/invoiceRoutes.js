@@ -4,7 +4,8 @@ import {
   getInvoices, 
   getInvoiceById, 
   updateInvoice, 
-  deleteInvoice 
+  deleteInvoice ,
+  sendInvoice
 } from '../controllers/invoiceController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -18,5 +19,7 @@ router.route('/:id')
   .get(protect, getInvoiceById)
   .put(protect, updateInvoice)
   .delete(protect, deleteInvoice);
+
+router.route('/:id/send').post(protect, sendInvoice);
 
 export default router;

@@ -4,7 +4,6 @@ const invoiceSchema = new mongoose.Schema({
   invoiceNo: { type: String, required: true },
   invoiceDate: { type: String, required: true },
   
-  // 🔴 NAYA: Company/Biller Details (Ab dynamic hongi)
   companyDetails: {
     name: String,
     phone: String,
@@ -14,7 +13,7 @@ const invoiceSchema = new mongoose.Schema({
     udyam: String,
     gstin: String
   },
-  showQr: { type: Boolean, default: true }, // 🔴 NAYA: QR Code dikhana hai ya nahi
+  showQr: { type: Boolean, default: true },
   isProforma: { type: Boolean, default: false },
 
   customer: {
@@ -43,7 +42,15 @@ const invoiceSchema = new mongoose.Schema({
   taxableAmount: { type: Number, required: true },
   totalGstAmount: { type: Number, required: true },
   totalAmountAfterTax: { type: Number, required: true },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  
+  // 🔴 NEW: Logs history for sent invoices
+  sendLogs: [{
+    method: String,
+    contact: String,
+    sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    sentAt: Date
+  }]
 }, { timestamps: true });
 
 export default mongoose.model('Invoice', invoiceSchema);

@@ -5,7 +5,8 @@ import { AuthContext } from '../context/AuthContext';
 import { 
   LayoutDashboard, Users, UserCircle, Briefcase, LogOut, Menu,
   X, Bell, ChevronRight, ChevronDown, ShieldCheck, PhoneCall, CheckCircle2,
-  Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness 
+  Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
+  Activity // 🔴 NAYA: Activity icon for GST Health Scan
 } from 'lucide-react';
 
 const Layout = () => {
@@ -24,13 +25,10 @@ const Layout = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
-  // 🔴 NAYA STATE: Sidebar permissions ko dynamically control karne ke liye
   const [activePermissions, setActivePermissions] = useState(user?.permissions || []);
 
-  // 🔴 NAYA FIX: Silently fetch latest permissions whenever user changes a page
   useEffect(() => {
     const syncPermissions = async () => {
-      // Agar Admin hai, toh usko sab waise hi dikhta hai, permission check mat karo
       if (!user?.token || user?.role === 'Admin') return; 
       
       try {
@@ -38,11 +36,9 @@ const Layout = () => {
           headers: { Authorization: `Bearer ${user.token}` }
         });
         
-        // State update karo jisse sidebar turant refresh hoga
         setActivePermissions(data.permissions || []);
         
-        // Browser ke localStorage me bhi silently update kardo taaki F5 (Refresh) karne par purana na aaye
-        const storedUser = JSON.parse(localStorage.getItem('user')); // Check if your storage key is 'user' or 'userInfo'
+        const storedUser = JSON.parse(localStorage.getItem('user')); 
         if (storedUser) {
           storedUser.permissions = data.permissions || [];
           localStorage.setItem('user', JSON.stringify(storedUser));
@@ -53,7 +49,7 @@ const Layout = () => {
     };
 
     syncPermissions();
-  }, [location.pathname, user?.token]); // Har page click par chalega
+  }, [location.pathname, user?.token]); 
 
   useEffect(() => {
     setShowNotifications(true);
@@ -110,10 +106,15 @@ const Layout = () => {
     setExpandedMenu(prev => ({ ...prev, [name]: !prev[name] }));
   };
 
-  // 🔴 MENU STRUCTURE - Ab `activePermissions` state use kar raha hai
   const menuItems = [
     { path: '/', name: 'Dashboard', icon: LayoutDashboard },
     
+    ...(user?.role === 'Admin' ? [{ 
+      path: '/ceo-panel', 
+      name: 'CEO Snapshot', 
+      icon: Target 
+    }] : []),
+
     ...(user?.role !== 'Admin' ? [{ 
       path: '/my-portal', 
       name: 'My Portal', 
@@ -121,6 +122,10 @@ const Layout = () => {
     }] : []),
     
     { path: '/leads', name: 'Leads & Prospects', icon: UserCircle },
+    
+    // 🔴 NAYA TAB: GST Health Report
+    { path: '/gst-health', name: 'GST Health Scan', icon: Activity },
+
     { 
       name: 'Existing Clients', 
       icon: Users,
@@ -148,7 +153,6 @@ const Layout = () => {
       ]
     },
     
-    // 🔴 DHYAN DEIN: Yahan `user?.permissions` ki jagah `activePermissions` use hua hai
     ...(user?.role === 'Admin' || activePermissions.includes('HR') ? [{ 
       name: 'HR Ops', 
       icon: BriefcaseBusiness,

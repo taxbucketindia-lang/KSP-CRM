@@ -65,7 +65,6 @@ const Leads = () => {
     fetchData();
   }, []);
 
-  // 🔴 AUTO-OPEN LEAD PROFILE LOGIC FROM NOTIFICATION OR DASHBOARD
   useEffect(() => {
     if (leads.length > 0 && location.state?.openLeadId) {
       const leadToOpen = leads.find(l => l._id === location.state.openLeadId);
@@ -355,13 +354,18 @@ const Leads = () => {
     }
   };
 
+  // 🔴 FIX: This is where the issue was. Removed any restrictive logic.
+  // It now only applies Search text and Status dropdown filters.
   const filteredLeads = useMemo(() => {
     return leads.filter((item) => {
+      const searchTxt = searchQuery.toLowerCase();
       const matchesSearch = 
-        item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.leadId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.mobile?.toString().includes(searchQuery);
+        (item.name && item.name.toLowerCase().includes(searchTxt)) ||
+        (item.leadId && item.leadId.toLowerCase().includes(searchTxt)) ||
+        (item.mobile && item.mobile.toString().includes(searchTxt));
+        
       const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter;
+      
       return matchesSearch && matchesStatus;
     });
   }, [leads, searchQuery, statusFilter]);

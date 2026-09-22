@@ -7,6 +7,8 @@ const attendanceSchema = new mongoose.Schema({
   inTime: { type: String }, // Format: "09:30"
   outTime: { type: String }, // Format: "18:30"
   totalHours: { type: String }, // Auto Calculate In & Out time difference
+  inLocation: { type: String, default: '' },
+  outLocation: { type: String, default: '' },
   status: { 
     type: String, 
     enum: ['Present', 'Absent', 'Half Day', 'Leave', 'WFH', 'Holiday', 'Weekly Off'],
