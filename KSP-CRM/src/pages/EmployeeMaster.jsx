@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   Users, Search, Plus, X, Briefcase, Mail, Phone, 
-  IndianRupee, Calendar, CheckCircle2, Edit, AlertCircle, RefreshCw, KeyRound, ShieldCheck, Trash2, AlertTriangle
+  IndianRupee, Calendar, CheckCircle2, Edit, AlertCircle, RefreshCw, KeyRound, ShieldCheck, Trash2, AlertTriangle, Clock
 } from 'lucide-react';
 
 const EmployeeMaster = () => {
@@ -22,14 +22,15 @@ const EmployeeMaster = () => {
   const [resetPassModal, setResetPassModal] = useState({ open: false, employee: null });
   const [newPassword, setNewPassword] = useState('');
 
-  // 🔴 NAYA STATE: Delete Modal
   const [deleteModal, setDeleteModal] = useState({ open: false, employee: null });
 
+  // 🔴 NAYA UPDATE: shiftStartTime added to initial state
   const initialForm = {
     name: '', mobile: '', email: '', 
-    password: '', role: '', 
+    password: '', role: 'Sales/Executive', 
     designation: '', department: '', 
     employmentType: 'Full Time', joiningDate: '', probationPeriod: '', confirmationDate: '',
+    shiftStartTime: '09:30', // Default shift time
     salaryType: 'Salary', basic: 0, hra: 0, otherAllowance: 0,
     pan: '', uanEsi: '', status: 'Active', remarks: ''
   };
@@ -72,7 +73,7 @@ const EmployeeMaster = () => {
       
       const payload = {
         ...formData,
-        companyName: 'SkyEdge Taxbucket India', // Backend ke liye default bheja, UI se hata diya
+        companyName: 'SkyEdge Taxbucket India', 
         salaryStructure: {
           basic: Number(formData.basic),
           hra: Number(formData.hra),
@@ -110,6 +111,7 @@ const EmployeeMaster = () => {
       joiningDate: emp.joiningDate ? emp.joiningDate.split('T')[0] : '',
       probationPeriod: emp.probationPeriod || '',
       confirmationDate: emp.confirmationDate ? emp.confirmationDate.split('T')[0] : '',
+      shiftStartTime: emp.shiftStartTime || '09:30', // 🔴 Load existing shift time
       salaryType: emp.salaryType || 'Salary',
       basic: emp.salaryStructure?.basic || 0,
       hra: emp.salaryStructure?.hra || 0,
@@ -144,7 +146,6 @@ const EmployeeMaster = () => {
     }
   };
 
-  // 🔴 NAYA FUNCTION: Employee Delete Logic
   const confirmDelete = (emp) => {
     const isCurrentUser = emp.userId?._id === user._id || emp.email === user.email;
     if (isCurrentUser) {
@@ -156,7 +157,6 @@ const EmployeeMaster = () => {
   const executeDelete = async () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      // Yahan endpoint '/hr/employees/:id' call ho raha hai, backend me delete route ensure kar lena
       await axios.delete(`${import.meta.env.VITE_API_URL}/hr/employees/${deleteModal.employee._id}`, { headers });
       toast.success("Employee deleted permanently.");
       setDeleteModal({ open: false, employee: null });
@@ -183,7 +183,7 @@ const EmployeeMaster = () => {
         </button>
       </div>
 
-      {/* FILTERS - Cleaned up without Company Filter */}
+      {/* FILTERS */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 bg-slate-50/50 flex flex-col md:flex-row gap-4 items-center justify-between border-b border-slate-100">
           <div className="relative w-full md:max-w-md">
@@ -268,7 +268,6 @@ const EmployeeMaster = () => {
                         <button onClick={() => handleEdit(emp)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Employee">
                           <Edit size={16}/>
                         </button>
-                        {/* 🔴 NAYA: Delete Button */}
                         {!isCurrentUser ? (
                           <button onClick={() => confirmDelete(emp)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Employee">
                             <Trash2 size={16}/>
@@ -339,12 +338,12 @@ const EmployeeMaster = () => {
                 {/* SECTION 1: Personal & Job Details */}
                 <div className="md:col-span-3 mt-2">
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b pb-2 mb-4 flex items-center gap-2"><Briefcase size={14}/> Job Details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="md:col-span-2">
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Full Name *</label>
                       <input type="text" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold"/>
                     </div>
-                    <div>
+                    <div className="md:col-span-2">
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Mobile Number *</label>
                       <input type="text" required value={formData.mobile} onChange={(e) => setFormData({...formData, mobile: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold"/>
                     </div>
@@ -356,6 +355,13 @@ const EmployeeMaster = () => {
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Department</label>
                       <input type="text" placeholder="e.g. Accounts" value={formData.department} onChange={(e) => setFormData({...formData, department: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold"/>
                     </div>
+                    
+                    {/* 🔴 NEW FIELD: Shift Start Time */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-purple-600 mb-1 flex items-center gap-1"><Clock size={12}/> Shift Time (In)</label>
+                      <input type="time" value={formData.shiftStartTime} onChange={(e) => setFormData({...formData, shiftStartTime: e.target.value})} className="w-full p-2.5 border border-purple-200 bg-purple-50/50 rounded-xl text-sm font-bold text-purple-700"/>
+                    </div>
+
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Employment Type</label>
                       <select value={formData.employmentType} onChange={(e) => setFormData({...formData, employmentType: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold">
@@ -474,7 +480,7 @@ const EmployeeMaster = () => {
         </div>
       )}
 
-      {/* 🔴 DELETE CONFIRMATION MODAL */}
+      {/* DELETE CONFIRMATION MODAL */}
       {deleteModal.open && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 p-8 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">

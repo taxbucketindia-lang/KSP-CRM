@@ -20,11 +20,12 @@ const Settings = () => {
   const [deleteModal, setDeleteModal] = useState({ open: false, employee: null });
   const [newPassword, setNewPassword] = useState('');
 
-  // 🔴 NAYA STATE: Permission Modal
   const [permModal, setPermModal] = useState({ open: false, employee: null, selectedPerms: [] });
 
-  // 🔴 Available Modules for Access Control
+  // 🔴 NAYA UPDATE: Added LEADS and GST to available modules
   const availableModules = [
+    { id: 'LEADS', label: 'Leads & Prospects' },
+    { id: 'GST_SCAN', label: 'GST Health Reports' },
     { id: 'HR', label: 'HR Ops (Employee, Attendance, Salary)' },
     { id: 'BAS', label: 'Business Associates' },
     { id: 'WORK', label: 'Work Management' },
@@ -105,7 +106,6 @@ const Settings = () => {
     }
   };
 
-  // 🔴 NAYA FUNCTION: Open Permission Modal
   const openPermissionModal = (emp) => {
     if (emp.role === 'Admin') {
       return showToast("Admin already has full access to all modules.", "error");
@@ -113,11 +113,10 @@ const Settings = () => {
     setPermModal({ 
       open: true, 
       employee: emp, 
-      selectedPerms: emp.permissions || [] // Load existing permissions
+      selectedPerms: emp.permissions || [] 
     });
   };
 
-  // 🔴 NAYA FUNCTION: Toggle Checkbox
   const handlePermToggle = (permId) => {
     const isSelected = permModal.selectedPerms.includes(permId);
     if (isSelected) {
@@ -127,7 +126,6 @@ const Settings = () => {
     }
   };
 
-  // 🔴 NAYA FUNCTION: Save Permissions
   const handleSavePermissions = async () => {
     try {
       await axios.put(`${import.meta.env.VITE_API_URL}/users/${permModal.employee._id}/permissions`, { 
@@ -232,7 +230,6 @@ const Settings = () => {
                             </td>
                             <td className="py-4 px-5 text-right">
                               <div className="flex items-center justify-end gap-1.5">
-                                {/* 🔴 NAYA BUTTON: Manage Permissions */}
                                 <button 
                                   onClick={() => openPermissionModal(emp)} 
                                   className={`p-2 rounded-lg transition-colors border border-transparent ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50'}`} 
@@ -276,7 +273,6 @@ const Settings = () => {
 
       {/* --- MODALS BELOW --- */}
 
-      {/* 🔴 MANAGE PERMISSIONS MODAL */}
       {permModal.open && (
         <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
@@ -313,10 +309,8 @@ const Settings = () => {
         </div>
       )}
 
-      {/* RESET PASSWORD MODAL */}
       {resetPassModal.open && (
          <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-           {/* ... (Same as your old reset password modal) ... */}
            <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl border border-slate-100 p-8 animate-in zoom-in-95 duration-200">
              <div className="flex flex-col items-center text-center mb-6">
                <div className="h-16 w-16 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 mb-4"><KeyRound size={32}/></div>
@@ -336,7 +330,6 @@ const Settings = () => {
          </div>
       )}
 
-      {/* CUSTOM DELETE CONFIRMATION MODAL */}
       {deleteModal.open && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 p-8 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">

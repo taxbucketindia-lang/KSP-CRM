@@ -13,6 +13,10 @@ const employeeSchema = new mongoose.Schema({
     enum: ['Full Time', 'Part Time', 'Intern', 'Freelancer'],
     default: 'Full Time'
   },
+  shiftStartTime: { 
+    type: String, 
+    default: '09:30' // Har employee ka alag aane ka time yahan save hoga
+  },
   joiningDate: { type: Date },
   probationPeriod: { type: String },
   confirmationDate: { type: Date },

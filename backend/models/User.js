@@ -6,6 +6,11 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+
+  shiftStartTime: { 
+    type: String, 
+    default: "09:30" // Har employee ka alag time set kiya ja sakta hai (HH:mm format)
+  },
   
   // 🔴 NAYA FIX: Isko Array banaya gaya hai taaki multiple module access store ho sakein
   permissions: [{ type: String }], 

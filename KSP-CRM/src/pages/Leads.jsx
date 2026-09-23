@@ -9,7 +9,7 @@ import {
   Plus, Search, X, Phone, Mail, Calendar, Flame, Sparkles, CheckCircle2, 
   AlertCircle, Briefcase, Pencil, History, Eye, UserCircle, CalendarDays, 
   CalendarClock, MessageCircle, Trash2, AlertTriangle, UserCheck, 
-  Download, Upload, Lock, ShieldUser, MessageSquare 
+  Download, Upload, Lock, ShieldUser, MessageSquare, Activity
 } from 'lucide-react';
 
 const Leads = () => {
@@ -354,8 +354,6 @@ const Leads = () => {
     }
   };
 
-  // 🔴 FIX: This is where the issue was. Removed any restrictive logic.
-  // It now only applies Search text and Status dropdown filters.
   const filteredLeads = useMemo(() => {
     return leads.filter((item) => {
       const searchTxt = searchQuery.toLowerCase();
@@ -520,7 +518,6 @@ const Leads = () => {
           </div>
         </div>
 
-        {/* RESTRUCTURED TABLE HEADERS */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -552,93 +549,102 @@ const Leads = () => {
                   </td>
                 </tr>
               ) : (
-                filteredLeads.map((lead) => (
-                  <tr key={lead._id} className="hover:bg-slate-50/70 transition-colors group">
-                    <td className="py-4 px-6 font-semibold text-blue-600 text-xs tracking-wide">
-                      {lead.leadId || '—'}
-                    </td>
-                    <td className="py-4 px-6">
-                      <div className="font-semibold text-slate-800">{lead.name}</div>
-                      <div className="flex items-center gap-1 mt-1 text-[11px] font-medium text-slate-500">
-                        <Phone size={11} className="text-slate-400" /> {lead.mobile}
-                      </div>
-                    </td>
-                    <td className="py-4 px-6">
-                      <span className="text-indigo-600 font-semibold text-[11px] bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
-                        {Array.isArray(lead.queryService) ? lead.queryService.join(', ') : lead.queryService || 'General Inquiry'}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6">
-                      <div className="flex flex-col gap-1.5 items-start">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ring-1 ${getStatusBadge(lead.status)}`}>
-                          {lead.status}
-                        </span>
-                        {lead.status === 'Follow-up' && lead.nextFollowUpDate && (
-                          <div className="flex items-center gap-1 text-[11px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
-                            <CalendarDays size={11} /> 
-                            {new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 w-6 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-[10px] font-bold">
-                          {lead.createdBy?.name ? lead.createdBy.name.charAt(0).toUpperCase() : 'A'}
+                filteredLeads.map((lead) => {
+                  // 🔴 CHECKS IF THIS IS A GST SCAN LEAD
+                  const isGstScanLead = lead.queryService?.includes('GST Health Scan') || lead.remarks?.includes('GSTIN:');
+                  
+                  return (
+                    <tr key={lead._id} className={`hover:bg-slate-50/70 transition-colors group ${isGstScanLead ? 'bg-indigo-50/30' : ''}`}>
+                      <td className="py-4 px-6 font-semibold text-blue-600 text-xs tracking-wide">
+                        {lead.leadId || '—'}
+                      </td>
+                      <td className="py-4 px-6">
+                        <div className="font-semibold text-slate-800">{lead.name}</div>
+                        <div className="flex items-center gap-1 mt-1 text-[11px] font-medium text-slate-500">
+                          <Phone size={11} className="text-slate-400" /> {lead.mobile}
                         </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-slate-700">
-                            {lead.createdBy?.name || 'System / Admin'}
+                      </td>
+                      <td className="py-4 px-6">
+                        <span className={`font-semibold text-[11px] px-2.5 py-1 rounded-md border ${isGstScanLead ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}>
+                          {isGstScanLead ? (
+                            <span className="flex items-center gap-1"><Activity size={12}/> GST Health Scan</span>
+                          ) : (
+                            Array.isArray(lead.queryService) ? lead.queryService.join(', ') : lead.queryService || 'General Inquiry'
+                          )}
+                        </span>
+                      </td>
+                      <td className="py-4 px-6">
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ring-1 ${getStatusBadge(lead.status)}`}>
+                            {lead.status}
                           </span>
-                          {lead.createdBy?.empId && (
-                            <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                              {lead.createdBy.empId}
-                            </span>
+                          {lead.status === 'Follow-up' && lead.nextFollowUpDate && (
+                            <div className="flex items-center gap-1 text-[11px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                              <CalendarDays size={11} /> 
+                              {new Date(lead.nextFollowUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            </div>
                           )}
                         </div>
-                      </div>
-                    </td>
+                      </td>
+                      
+                      <td className="py-4 px-6">
+                        <div className="flex items-center gap-2">
+                          <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isGstScanLead ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>
+                            {isGstScanLead ? 'SYS' : (lead.createdBy?.name ? lead.createdBy.name.charAt(0).toUpperCase() : 'A')}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={`text-xs font-bold ${isGstScanLead ? 'text-emerald-700' : 'text-slate-700'}`}>
+                              {isGstScanLead ? 'Auto-Scan' : (lead.createdBy?.name || 'System / Admin')}
+                            </span>
+                            {lead.createdBy?.empId && !isGstScanLead && (
+                              <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                                {lead.createdBy.empId}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
 
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button 
-                          onClick={() => handleView(lead)}
-                          className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="View Full Details"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        
-                        <button 
-                          onClick={() => handleOpenRemarks(lead)} 
-                          className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" 
-                          title="View Remarks & History"
-                        >
-                          <MessageSquare size={16} />
-                        </button>
-
-                        <button 
-                          onClick={() => handleEdit(lead)}
-                          className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Edit / Update Lead"
-                        >
-                          <Pencil size={16} />
-                        </button>
-
-                        {isAdmin && (
+                      <td className="py-4 px-6 text-right">
+                        <div className="flex items-center justify-end gap-1">
                           <button 
-                            onClick={() => confirmDelete(lead)}
-                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                            title="Delete Lead"
+                            onClick={() => handleView(lead)}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                            title="View Full Details"
                           >
-                            <Trash2 size={16} />
+                            <Eye size={16} />
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          
+                          <button 
+                            onClick={() => handleOpenRemarks(lead)} 
+                            className={`inline-flex items-center justify-center p-2 rounded-lg transition-colors ${isGstScanLead ? 'text-blue-500 bg-blue-50 hover:bg-blue-100 hover:text-blue-700 border border-blue-200' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'}`}
+                            title="View Remarks & GST Scan History"
+                          >
+                            <MessageSquare size={16} />
+                          </button>
+
+                          <button 
+                            onClick={() => handleEdit(lead)}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Edit / Update Lead"
+                          >
+                            <Pencil size={16} />
+                          </button>
+
+                          {isAdmin && (
+                            <button 
+                              onClick={() => confirmDelete(lead)}
+                              className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                              title="Delete Lead"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -687,7 +693,7 @@ const Leads = () => {
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Created & Managed By</p>
                   <span className="text-sm font-bold text-slate-700 flex items-center gap-2">
                     <ShieldUser size={15} className="text-blue-500"/>
-                    {viewLeadData.createdBy?.name || 'System / Admin'}
+                    {viewLeadData.createdBy?.name || 'System / Auto Scan'}
                   </span>
                 </div>
 
@@ -728,7 +734,7 @@ const Leads = () => {
             
             <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => { setIsViewModalOpen(false); handleOpenRemarks(viewLeadData); }} className="px-4 py-2 text-xs font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg transition-colors flex items-center gap-2">
-                 <MessageSquare size={14} /> Remarks
+                 <MessageSquare size={14} /> Remarks & GST Details
                </button>
                <button onClick={() => { setIsViewModalOpen(false); handleEdit(viewLeadData); }} className="px-4 py-2 text-xs font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg transition-colors flex items-center gap-2">
                  <Pencil size={14} /> Edit This Lead
@@ -741,15 +747,17 @@ const Leads = () => {
       {/* DEDICATED REMARKS & TIMELINE MODAL */}
       {isRemarksModalOpen && leadForRemarks && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl border border-slate-100 flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95">
             
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
-                  <MessageSquare size={20} />
+                <div className={`h-10 w-10 rounded-xl flex items-center justify-center font-bold ${leadForRemarks.remarks?.includes('GSTIN:') ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                  {leadForRemarks.remarks?.includes('GSTIN:') ? <Activity size={20} /> : <MessageSquare size={20} />}
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-slate-800 tracking-tight">Lead Remarks & Audit History</h2>
+                  <h2 className="text-base font-bold text-slate-800 tracking-tight">
+                    {leadForRemarks.remarks?.includes('GSTIN:') ? 'GST Health Scan Data & Remarks' : 'Lead Remarks & Audit History'}
+                  </h2>
                   <p className="text-xs text-slate-500">{leadForRemarks.name} • <span className="font-mono font-semibold text-blue-600">{leadForRemarks.leadId}</span></p>
                 </div>
               </div>
@@ -757,7 +765,7 @@ const Leads = () => {
             </div>
 
             <div className="overflow-y-auto p-6 space-y-4 custom-scrollbar">
-              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/80 text-sm text-slate-700 font-medium whitespace-pre-wrap min-h-[160px] shadow-inner leading-relaxed">
+              <div className={`rounded-2xl p-5 border text-sm text-slate-700 font-medium whitespace-pre-wrap min-h-[160px] shadow-inner leading-relaxed ${leadForRemarks.remarks?.includes('GSTIN:') ? 'bg-emerald-50/30 border-emerald-200 font-mono text-[13px]' : 'bg-slate-50 border-slate-200/80'}`}>
                 {leadForRemarks.remarks ? (
                   leadForRemarks.remarks
                 ) : (

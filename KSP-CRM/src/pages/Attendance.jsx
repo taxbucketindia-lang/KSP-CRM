@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   CalendarDays, Search, Building2, UserCircle, Save, 
-  Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users
+  Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle
 } from 'lucide-react';
 
 const Attendance = () => {
@@ -18,34 +18,85 @@ const Attendance = () => {
   const [companyFilter, setCompanyFilter] = useState('SkyEdge Taxbucket India');
   const [selectedEmployee, setSelectedEmployee] = useState('');
   
-  // Date utils
   const offset = new Date().getTimezoneOffset() * 60000;
   const localTodayStr = new Date(Date.now() - offset).toISOString().split('T')[0];
   const currentMonthStr = localTodayStr.substring(0, 7);
 
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
   const [sheetData, setSheetData] = useState([]);
-  
-  // 🔴 NAYA STATE: Aaj ki poori team ki attendance store karne ke liye
   const [todayTeamAtt, setTodayTeamAtt] = useState([]);
 
-  // Fetch Employees & Today's Team Status
+  // 🔴 1. ADVANCED TIME CHECKER (Handles AM/PM & 24hr formats flawlessly)
+  const checkIsLate = (inTimeStr, shiftStartStr) => {
+    if (!inTimeStr || !shiftStartStr) return false;
+    const parseTime = (timeStr) => {
+      let [hStr, mStr] = timeStr.split(':');
+      let h = parseInt(hStr, 10);
+      let m = parseInt(mStr, 10);
+      if (timeStr.toLowerCase().includes('pm') && h < 12) h += 12;
+      if (timeStr.toLowerCase().includes('am') && h === 12) h = 0;
+      return (h * 60) + m;
+    };
+    return parseTime(inTimeStr) > parseTime(shiftStartStr); 
+  };
+
+  // 🔴 2. FULL MONTH SWEEP ALGORITHM (Forces 3-Day Rule across the entire month dynamically)
+  const enforceLatePolicy = (sheet, shiftStartTime) => {
+    let lateCounter = 0;
+    
+    return sheet.map(row => {
+      // Create a fresh copy of the row
+      const newRow = { ...row };
+
+      if (newRow.inTime && !['Absent', 'Leave', 'Holiday', 'Weekly Off'].includes(newRow.status)) {
+         newRow.isLate = checkIsLate(newRow.inTime, shiftStartTime);
+         
+         if (newRow.isLate) {
+           lateCounter++; // Increment late counter chronologically
+           
+           if (lateCounter > 3) {
+             // 4th late and beyond -> Force Auto Half Day
+             if (!newRow.status || newRow.status === 'Present') {
+               newRow.status = 'Half Day';
+               newRow.remarks = `Auto-Half Day (Late mark #${lateCounter} > 3 allowed).`;
+             }
+           } else {
+             // 1st, 2nd, 3rd late -> Warning Only
+             if (newRow.status === 'Half Day' && newRow.remarks?.includes('Auto-Half Day')) {
+               newRow.status = 'Present'; // Revert back if user deleted a previous late mark
+             }
+             if (!newRow.remarks || newRow.remarks.includes('Auto-Half Day') || newRow.remarks.includes('Warning: Late entry')) {
+               newRow.remarks = `Warning: Late entry (${lateCounter}/3 allowed).`;
+             }
+           }
+         } else {
+           // Not Late (On Time)
+           newRow.isLate = false;
+           if (newRow.remarks?.includes('Auto-Half Day') || newRow.remarks?.includes('Warning: Late entry')) {
+             newRow.remarks = ''; // Clear auto-remarks
+             if (newRow.status === 'Half Day') newRow.status = 'Present';
+           }
+         }
+      } else {
+         newRow.isLate = false;
+      }
+      return newRow;
+    });
+  };
+
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
         
-        // Fetch Employees
         const empRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/employees?company=${companyFilter}`, { headers });
         const activeEmps = empRes.data.filter(emp => emp.status === 'Active');
         setEmployees(activeEmps);
         
-        // Auto-select first employee if none selected
         if (activeEmps.length > 0 && !selectedEmployee) {
           setSelectedEmployee(activeEmps[0]._id);
         }
 
-        // Fetch Today's Attendance for the whole company
         const attRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance?company=${companyFilter}`, { headers });
         const todaysRecords = attRes.data.filter(a => a.date && a.date.startsWith(localTodayStr));
         setTodayTeamAtt(todaysRecords);
@@ -59,7 +110,6 @@ const Attendance = () => {
     // eslint-disable-next-line
   }, [companyFilter, user.token]); 
 
-  // Fetch Attendance Sheet for Selected Employee
   useEffect(() => {
     const loadAttendanceSheet = async () => {
       if (!selectedEmployee || !selectedMonth) {
@@ -73,16 +123,17 @@ const Attendance = () => {
         
         const [year, month] = selectedMonth.split('-');
         const daysInMonth = new Date(year, month, 0).getDate();
+        const empDetails = employees.find(e => e._id === selectedEmployee);
+        const shiftStartTime = empDetails?.shiftStartTime || '09:30';
         
-        const generatedSheet = [];
+        let generatedSheet = [];
         
         for (let i = 1; i <= daysInMonth; i++) {
           const dateStr = `${year}-${month}-${String(i).padStart(2, '0')}`;
-          
           const existingRecord = res.data.find(r => r.date === dateStr || (r.date && r.date.startsWith(dateStr)));
           
           if (existingRecord) {
-            generatedSheet.push({ ...existingRecord, displayDate: dateStr });
+            generatedSheet.push({ ...existingRecord, displayDate: dateStr, isLate: existingRecord.isLate || false });
           } else {
             generatedSheet.push({
               employee: selectedEmployee,
@@ -95,11 +146,16 @@ const Attendance = () => {
               outLocation: '', 
               totalHours: '',
               status: '', 
-              remarks: ''
+              remarks: '',
+              isLate: false
             });
           }
         }
-        setSheetData(generatedSheet);
+        
+        // Ensure policies are completely applied on initial load
+        const policyEnforcedSheet = enforceLatePolicy(generatedSheet, shiftStartTime);
+        setSheetData(policyEnforcedSheet);
+
       } catch (error) {
         toast.error("Failed to load attendance sheet");
       } finally {
@@ -108,9 +164,8 @@ const Attendance = () => {
     };
 
     loadAttendanceSheet();
-  }, [selectedEmployee, selectedMonth, companyFilter, user.token]);
+  }, [selectedEmployee, selectedMonth, companyFilter, user.token, employees]);
 
-  // GEOLOCATION FETCH FUNCTION
   const fetchCurrentLocation = () => {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -120,7 +175,6 @@ const Attendance = () => {
           async (position) => {
             const { latitude, longitude } = position.coords;
             const googleMapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
-            
             try {
               const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
               if (res.data && res.data.display_name) {
@@ -142,46 +196,22 @@ const Attendance = () => {
     });
   };
 
-  // Handle Row Changes
-  const handleRowChange = async (index, field, value) => {
-    const updatedSheet = [...sheetData];
+  const handleRowChange = (index, field, value) => {
+    let updatedSheet = [...sheetData];
     updatedSheet[index][field] = value;
 
-    if (field === 'inTime' && value !== '') {
-        setFetchingLocation(true);
-        try {
-            const locationStr = await fetchCurrentLocation();
-            updatedSheet[index].inLocation = locationStr;
-            toast.success("Check-In location captured!");
-        } catch (err) {
-            toast.error(err);
-        }
-        setFetchingLocation(false);
-    }
+    const empDetails = employees.find(e => e._id === selectedEmployee);
+    const shiftStartTime = empDetails?.shiftStartTime || '09:30';
 
-    if (field === 'outTime' && value !== '') {
-        setFetchingLocation(true);
-        try {
-            const locationStr = await fetchCurrentLocation();
-            updatedSheet[index].outLocation = locationStr;
-            toast.success("Check-Out location captured!");
-        } catch (err) {
-            toast.error(err);
-        }
-        setFetchingLocation(false);
-    }
-
+    // Total Hours Logic
     if (field === 'inTime' || field === 'outTime') {
       const inT = updatedSheet[index].inTime;
       const outT = updatedSheet[index].outTime;
-      
       if (inT && outT) {
         const [inH, inM] = inT.split(':').map(Number);
         const [outH, outM] = outT.split(':').map(Number);
-        
         let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
         if (diffMins < 0) diffMins += 24 * 60; 
-        
         const h = Math.floor(diffMins / 60);
         const m = diffMins % 60;
         updatedSheet[index].totalHours = `${h}h ${m}m`;
@@ -190,6 +220,7 @@ const Attendance = () => {
       }
     }
 
+    // Status Reset Logic
     if (field === 'status') {
       if (['Absent', 'Leave', 'Holiday', 'Weekly Off'].includes(value)) {
         updatedSheet[index].inTime = '';
@@ -197,19 +228,50 @@ const Attendance = () => {
         updatedSheet[index].inLocation = '';
         updatedSheet[index].outLocation = '';
         updatedSheet[index].totalHours = '';
+        updatedSheet[index].isLate = false;
       }
     }
 
+    // 🔴 RECALCULATE MONTHLY LATE POLICY INSTANTLY
+    updatedSheet = enforceLatePolicy(updatedSheet, shiftStartTime);
     setSheetData(updatedSheet);
+
+    // BACKGROUND LOCATION FETCH (Does not freeze UI typing)
+    if (field === 'inTime' && value !== '') {
+       setFetchingLocation(true);
+       fetchCurrentLocation().then(loc => {
+           setSheetData(prev => {
+               const newSheet = [...prev];
+               newSheet[index].inLocation = loc;
+               return newSheet;
+           });
+           toast.success("Check-In location captured!");
+       }).catch(err => toast.error(err)).finally(() => setFetchingLocation(false));
+    }
+    
+    if (field === 'outTime' && value !== '') {
+       setFetchingLocation(true);
+       fetchCurrentLocation().then(loc => {
+           setSheetData(prev => {
+               const newSheet = [...prev];
+               newSheet[index].outLocation = loc;
+               return newSheet;
+           });
+           toast.success("Check-Out location captured!");
+       }).catch(err => toast.error(err)).finally(() => setFetchingLocation(false));
+    }
   };
 
   const markRemainingPresent = () => {
-    const updated = sheetData.map(row => {
+    const empDetails = employees.find(e => e._id === selectedEmployee);
+    const shiftStartTime = empDetails?.shiftStartTime || '09:30';
+
+    let updated = sheetData.map(row => {
       if (!row.status) {
         return { 
           ...row, 
           status: 'Present', 
-          inTime: '09:30', 
+          inTime: shiftStartTime, // Put exact shift time so they aren't late
           outTime: '18:30', 
           totalHours: '9h 0m',
           inLocation: 'System Generated',
@@ -218,6 +280,8 @@ const Attendance = () => {
       }
       return row;
     });
+
+    updated = enforceLatePolicy(updated, shiftStartTime);
     setSheetData(updated);
     toast.success("Remaining days marked as Present");
   };
@@ -238,7 +302,6 @@ const Attendance = () => {
       await axios.post(`${import.meta.env.VITE_API_URL}/hr/attendance`, { records: recordsToSave }, { headers });
       toast.success("Monthly Attendance & Locations Saved Successfully!");
       
-      // Refresh today's team status
       const attRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance?company=${companyFilter}`, { headers });
       const todaysRecords = attRes.data.filter(a => a.date && a.date.startsWith(localTodayStr));
       setTodayTeamAtt(todaysRecords);
@@ -253,6 +316,7 @@ const Attendance = () => {
   const summary = useMemo(() => {
     let totalDays = sheetData.length;
     let present = 0, absent = 0, halfDay = 0, leave = 0, wfh = 0, holiday = 0, weeklyOff = 0;
+    let totalLateMarks = 0;
 
     sheetData.forEach(row => {
       if (row.status === 'Present') present++;
@@ -262,15 +326,16 @@ const Attendance = () => {
       else if (row.status === 'WFH') wfh++;
       else if (row.status === 'Holiday') holiday++;
       else if (row.status === 'Weekly Off') weeklyOff++;
+
+      if (row.isLate) totalLateMarks++;
     });
 
     const paidDays = present + wfh + holiday + weeklyOff + (halfDay * 0.5);
     const lopDays = absent + leave + (halfDay * 0.5); 
 
-    return { totalDays, present, absent, halfDay, leave, wfh, holiday, weeklyOff, paidDays, lopDays };
+    return { totalDays, present, absent, halfDay, leave, wfh, holiday, weeklyOff, paidDays, lopDays, totalLateMarks };
   }, [sheetData]);
 
-  // 🔴 NAYA FUNCTION: Aaj ki attendance ko categorize karne ke liye
   const teamTodayStats = useMemo(() => {
     let present = [];
     let absent = [];
@@ -325,6 +390,8 @@ const Attendance = () => {
     );
   };
 
+  const activeEmployeeData = employees.find(e => e._id === selectedEmployee);
+
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6 pb-12">
       <Toaster position="top-right" />
@@ -339,50 +406,50 @@ const Attendance = () => {
           </div>
       )}
 
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
-            <CalendarDays size={28} className="text-blue-600" /> Attendance & Location Tracking
+            <CalendarDays size={28} className="text-blue-600" /> Attendance & Tracking
           </h1>
-          <p className="text-sm text-slate-500 mt-1 font-medium">Track daily in/out time and GPS check-in locations.</p>
+          <p className="text-sm text-slate-500 mt-1 font-medium">Track daily in/out time, GPS location, and automatic late marks.</p>
         </div>
       </div>
 
-      {/* MONTHLY SUMMARY CARDS (Individual Employee) */}
       {sheetData.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-slate-800 text-white p-4 rounded-2xl shadow-sm border border-slate-700">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Days</p>
-            <h3 className="text-2xl font-black mt-1">{summary.totalDays}</h3>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <div className="bg-slate-800 text-white p-3 rounded-2xl shadow-sm border border-slate-700">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Total Days</p>
+            <h3 className="text-xl font-black mt-1">{summary.totalDays}</h3>
           </div>
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Present & WFH</p>
-            <h3 className="text-2xl font-black text-blue-700 mt-1">{summary.present + summary.wfh}</h3>
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Present</p>
+            <h3 className="text-xl font-black text-blue-700 mt-1">{summary.present + summary.wfh}</h3>
           </div>
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-rose-500">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Absent / Leave</p>
-            <h3 className="text-2xl font-black text-rose-700 mt-1">{summary.absent + summary.leave}</h3>
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-rose-500">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Absent/Leave</p>
+            <h3 className="text-xl font-black text-rose-700 mt-1">{summary.absent + summary.leave}</h3>
           </div>
-          <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 shadow-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Total Paid Days</p>
-            <h3 className="text-2xl font-black text-emerald-700 mt-1">{summary.paidDays}</h3>
+          
+          <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-amber-600">Late Entries</p>
+            <h3 className="text-xl font-black text-amber-700 mt-1">{summary.totalLateMarks} <span className="text-[10px] text-amber-500 font-medium">/ 3 Allowed</span></h3>
           </div>
-          <div className="bg-rose-50 p-4 rounded-2xl border border-rose-200 shadow-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Total LOP Days</p>
-            <h3 className="text-2xl font-black text-rose-700 mt-1">{summary.lopDays}</h3>
+          <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-200 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Paid Days</p>
+            <h3 className="text-xl font-black text-emerald-700 mt-1">{summary.paidDays}</h3>
+          </div>
+          <div className="bg-rose-50 p-3 rounded-2xl border border-rose-200 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-rose-600">LOP Days</p>
+            <h3 className="text-xl font-black text-rose-700 mt-1">{summary.lopDays}</h3>
           </div>
         </div>
       )}
 
-      {/* 🔴 NAYA WIDGET: TODAY'S TEAM ATTENDANCE SNAPSHOT */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
           <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
               <Users size={18} className="text-blue-600" /> Today's Team Status ({new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })})
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              
-              {/* Present Box */}
               <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-4">
                  <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3 border-b border-emerald-100 pb-2 flex justify-between items-center">
                     Present & WFH <span className="bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-md">{teamTodayStats.present.length}</span>
@@ -394,11 +461,9 @@ const Attendance = () => {
                              <span className="text-emerald-600 font-bold shrink-0">{e.status} {e.inTime && <span className="text-emerald-400 font-mono ml-1">({e.inTime})</span>}</span>
                          </div>
                      ))}
-                     {teamTodayStats.present.length === 0 && <p className="text-[10px] text-slate-400 text-center mt-2">No one marked present yet.</p>}
                  </div>
               </div>
 
-              {/* Absent Box */}
               <div className="border border-rose-100 bg-rose-50/40 rounded-2xl p-4">
                  <h4 className="text-xs font-bold text-rose-700 uppercase tracking-wider mb-3 border-b border-rose-100 pb-2 flex justify-between items-center">
                     Absent & Leave <span className="bg-rose-200 text-rose-800 px-2 py-0.5 rounded-md">{teamTodayStats.absent.length}</span>
@@ -410,11 +475,9 @@ const Attendance = () => {
                              <span className="text-rose-600 font-bold shrink-0">{e.status}</span>
                          </div>
                      ))}
-                     {teamTodayStats.absent.length === 0 && <p className="text-[10px] text-slate-400 text-center mt-2">No absentees marked.</p>}
                  </div>
               </div>
 
-              {/* Not Marked Box */}
               <div className="border border-slate-200 bg-slate-50/50 rounded-2xl p-4">
                  <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3 border-b border-slate-200 pb-2 flex justify-between items-center">
                     Not Marked <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md">{teamTodayStats.notMarked.length}</span>
@@ -423,42 +486,50 @@ const Attendance = () => {
                      {teamTodayStats.notMarked.map(e => (
                          <span key={e._id} className="bg-white border border-slate-200 px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-600 shadow-sm">{e.name}</span>
                      ))}
-                     {teamTodayStats.notMarked.length === 0 && <p className="text-[10px] text-slate-400 text-center w-full mt-2">Everyone has marked attendance.</p>}
                  </div>
               </div>
-
           </div>
       </div>
 
-      
-
-      {/* CONFIGURATION BAR */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="w-full md:w-1/3">
-          <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><UserCircle size={12}/> Select Employee</label>
-          <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none">
-            {employees.length === 0 ? <option value="">No Active Employees</option> : null}
-            {employees.map(emp => (
-              <option key={emp._id} value={emp._id}>{emp.name} ({emp.empId})</option>
-            ))}
-          </select>
+        <div className="w-full md:w-2/3 flex flex-col sm:flex-row gap-4">
+          <div className="flex-1">
+            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><UserCircle size={12}/> Select Employee</label>
+            <div className="flex items-center gap-2">
+              <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none">
+                {employees.length === 0 ? <option value="">No Active Employees</option> : null}
+                {employees.map(emp => (
+                  <option key={emp._id} value={emp._id}>{emp.name} ({emp.empId})</option>
+                ))}
+              </select>
+              {activeEmployeeData && (
+                <div className="bg-blue-50 border border-blue-100 text-blue-700 text-[10px] font-bold px-3 py-2 rounded-xl whitespace-nowrap" title="Shift Start Time">
+                  Shift: {activeEmployeeData.shiftStartTime || '09:30'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1">
+            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><Clock size={12}/> Select Month</label>
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none" />
+          </div>
         </div>
 
-        <div className="w-full md:w-1/3">
-          <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><Clock size={12}/> Select Month</label>
-          <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none" />
-        </div>
-
-        <button onClick={handleSave} disabled={saving || sheetData.length === 0} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50">
+        <button onClick={handleSave} disabled={saving || sheetData.length === 0} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50 mt-4 md:mt-0">
           {saving ? <RefreshCw size={18} className="animate-spin"/> : <Save size={18} strokeWidth={2.5} />} 
           Save Attendance Sheet
         </button>
       </div>
 
-      {/* ATTENDANCE SHEET TABLE */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-           <h3 className="text-sm font-bold text-slate-700">Monthly Time & Location Sheet</h3>
+           <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+             Monthly Time & Location Sheet 
+             <span className="bg-amber-100 text-amber-700 text-[9px] px-2 py-0.5 rounded font-bold uppercase ml-2 flex items-center gap-1">
+               <AlertTriangle size={10}/> Auto Half-Day Active
+             </span>
+           </h3>
            <button onClick={markRemainingPresent} className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors border border-blue-100">
              <CheckSquare size={14}/> Mark Remaining as Present
            </button>
@@ -474,7 +545,7 @@ const Attendance = () => {
                 <th className="py-3 px-4 w-28">Out Time</th>
                 <th className="py-3 px-4 w-48">GPS Location Info</th>
                 <th className="py-3 px-4 w-24">Total Hrs</th>
-                <th className="py-3 px-4">Remarks</th>
+                <th className="py-3 px-4">Remarks / Auto-Notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
@@ -488,7 +559,7 @@ const Attendance = () => {
                   const isWeekend = dayName === 'Sat' || dayName === 'Sun';
 
                   return (
-                    <tr key={row.displayDate} className={`hover:bg-slate-50/50 transition-colors ${isWeekend ? 'bg-slate-50/80' : ''}`}>
+                    <tr key={row.displayDate} className={`hover:bg-slate-50/50 transition-colors ${isWeekend ? 'bg-slate-50/80' : ''} ${row.isLate ? 'bg-amber-50/30' : ''}`}>
                       <td className="py-2 px-4 whitespace-nowrap">
                         <span className="font-bold text-slate-800 mr-2">{new Date(row.displayDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isWeekend ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>{dayName}</span>
@@ -500,6 +571,7 @@ const Attendance = () => {
                           className={`w-full p-1.5 border rounded-lg text-xs font-bold shadow-sm outline-none focus:ring-2 focus:ring-blue-500/20 ${
                             row.status === 'Present' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' :
                             row.status === 'Absent' ? 'border-rose-200 bg-rose-50 text-rose-700' :
+                            row.status === 'Half Day' ? 'border-amber-300 bg-amber-100 text-amber-800' :
                             row.status === 'Weekly Off' ? 'border-slate-300 bg-slate-200 text-slate-600' :
                             row.status ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'
                           }`}
@@ -514,14 +586,15 @@ const Attendance = () => {
                           <option value="Weekly Off">Weekly Off</option>
                         </select>
                       </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-4 relative">
                         <input 
                           type="time" 
                           value={row.inTime || ''} 
                           onChange={(e) => handleRowChange(index, 'inTime', e.target.value)} 
                           disabled={['Absent', 'Leave', 'Holiday', 'Weekly Off'].includes(row.status)}
-                          className="w-full p-1.5 border border-slate-200 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50 disabled:bg-slate-100"
+                          className={`w-full p-1.5 border rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50 disabled:bg-slate-100 ${row.isLate ? 'border-rose-300 text-rose-700 bg-rose-50' : 'border-slate-200'}`}
                         />
+                        {row.isLate && <span className="absolute top-0 right-3 text-[8px] bg-rose-600 text-white px-1 rounded-sm">LATE</span>}
                       </td>
                       <td className="py-2 px-4">
                         <input 
@@ -555,7 +628,7 @@ const Attendance = () => {
                           placeholder="Note..." 
                           value={row.remarks || ''} 
                           onChange={(e) => handleRowChange(index, 'remarks', e.target.value)} 
-                          className="w-full p-1.5 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500/20"
+                          className={`w-full p-1.5 border rounded-lg text-[11px] font-medium focus:ring-2 focus:ring-blue-500/20 ${row.isLate ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200'}`}
                         />
                       </td>
                     </tr>
