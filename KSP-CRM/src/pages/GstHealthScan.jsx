@@ -1,5 +1,5 @@
 import React, { useState, useContext } from 'react';
-import { ArrowRight, Printer, ShieldCheck, Search, CheckCircle2, AlertTriangle, RefreshCw, FileText } from 'lucide-react';
+import { ArrowRight, Printer, ShieldCheck, Search, CheckCircle2, AlertTriangle, RefreshCw, FileText, Save } from 'lucide-react';
 import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import { AuthContext } from '../context/AuthContext';
@@ -22,8 +22,13 @@ const healthLabel = {
 const GstHealthScan = () => {
   const { user } = useContext(AuthContext); 
   const [formData, setFormData] = useState({ gstin: '', mobile: '', email: '', businessName: '' });
+  
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState(null);
+  
+  // 🔴 NAYE STATES FOR SAVING LOGIC
+  const [isSaved, setIsSaved] = useState(false);
+  const [savingCRM, setSavingCRM] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,61 +37,43 @@ const GstHealthScan = () => {
     }
 
     setLoading(true);
+    setIsSaved(false); // Naya scan hai toh saved status false kardo
     try {
       const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
       
-      const res = await axios.post(`${import.meta.env.VITE_API_URL}/gst-scan`, formData, { headers });
+      // 🔴 Action: 'preview' bhej rahe hain taaki auto-save na ho
+      const payload = { ...formData, action: 'preview' };
+      const res = await axios.post(`${import.meta.env.VITE_API_URL}/gst-scan`, payload, { headers });
+      
       setReportData(res.data.data);
-      toast.success('GST Health Scan Generated successfully!');
+      toast.success('GST Health Scan Preview Generated!');
     } catch (error) {
-      console.warn("Backend failed, using Mock Data", error);
-      // 🔴 UPDATED MOCK DATA WITH 10 RETURNS FOR TESTING
-      setReportData({
-        reportId: `TB-GST-${Math.floor(1000 + Math.random() * 9000)}`,
-        reportVersion: 'v1.0',
-        scanDateTime: new Date().toISOString(),
-        gstin: formData.gstin.toUpperCase(),
-        businessName: formData.businessName || "TAXBUCKET TECHNOLOGIES PRIVATE LIMITED",
-        tradeName: "TAXBUCKET",
-        registrationStatus: "Active",
-        constitution: "Private Limited Company",
-        taxpayerType: "Regular",
-        registrationDate: "15-Apr-2023",
-        stateJurisdiction: "Delhi",
-        centralJurisdiction: "Ward 42",
-        address: "123, Tech Park, New Delhi",
-        additionalPlaces: "Not available from current data source",
-        registrationHealth: "Green",
-        returnFilingHealth: "Yellow",
-        dataAvailabilityHealth: "Green",
-        overallScanStatus: "Yellow",
-        filingPattern: "Review Required",
-        recentFilingGapMonths: 3,
-        latestGstr1Period: "052026",
-        latestGstr3bPeriod: "052026",
-        filingReturns: [
-           { rtntype: 'GSTR3B', taxp: '052026', status: 'Filed', dof: '20-06-2026' },
-           { rtntype: 'GSTR1',  taxp: '052026', status: 'Filed', dof: '11-06-2026' },
-           { rtntype: 'GSTR3B', taxp: '042026', status: 'Filed', dof: '20-05-2026' },
-           { rtntype: 'GSTR1',  taxp: '042026', status: 'Filed', dof: '11-05-2026' },
-           { rtntype: 'GSTR3B', taxp: '032026', status: 'Filed', dof: '20-04-2026' },
-           { rtntype: 'GSTR1',  taxp: '032026', status: 'Filed', dof: '11-04-2026' },
-           { rtntype: 'GSTR3B', taxp: '022026', status: 'Filed', dof: '20-03-2026' },
-           { rtntype: 'GSTR1',  taxp: '022026', status: 'Filed', dof: '11-03-2026' },
-           { rtntype: 'GSTR3B', taxp: '012026', status: 'Filed', dof: '20-02-2026' },
-           { rtntype: 'GSTR1',  taxp: '012026', status: 'Filed', dof: '11-02-2026' }
-        ],
-        dataObservations: [
-           { observation: "Registration: GSTIN status shows as \"Active\" based on publicly available information." },
-           { observation: "Return Filing: Late/gap indication in recent filings (latest GSTR-3B period: 052026)." },
-           { observation: "Possible Filing Gap: Approximately 3 month(s) since the latest available return period — one or more periods may require review." },
-           { observation: "Data Availability: Public data available and sufficient for this preliminary scan." },
-           { observation: "Public data alone does not establish ITC mismatch, tax liability or complete GST compliance." }
-        ]
-      });
-      toast.success('Report loaded (Mock Mode - API Error)');
+      console.error("Backend error during GST scan:", error);
+      const errorMsg = error.response?.data?.message || 'Failed to fetch live GST records. Please try again.';
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 🔴 NAYA FUNCTION: Manually Save to Leads
+  const handleSaveToCRM = async () => {
+    if (!reportData) return;
+    
+    setSavingCRM(true);
+    try {
+      const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+      const payload = { action: 'save', reportData };
+      
+      await axios.post(`${import.meta.env.VITE_API_URL}/gst-scan`, payload, { headers });
+      
+      setIsSaved(true);
+      toast.success('Report Saved to Leads & CRM Successfully!');
+    } catch (error) {
+      console.error("Error saving to CRM:", error);
+      toast.error(error.response?.data?.message || 'Failed to save to CRM.');
+    } finally {
+      setSavingCRM(false);
     }
   };
 
@@ -186,24 +173,39 @@ const GstHealthScan = () => {
               className="w-full py-4 mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white rounded-2xl font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
             >
               {loading ? <RefreshCw className="animate-spin" size={18} /> : <Search size={18}/>} 
-              {loading ? 'Fetching Live GST Records...' : 'Run Free GST Scan'}
+              {loading ? 'Fetching Live GST Records...' : 'Preview Free GST Scan'}
             </button>
           </form>
         </div>
       ) : (
         <div className="space-y-6">
           {/* Action Bar (Not printed) */}
-          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm print:hidden">
+          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm print:hidden flex-wrap gap-4">
             <div className="flex items-center gap-3">
                <button onClick={() => setReportData(null)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors">← Back</button>
-               <span className="text-sm font-bold text-slate-700">Report ID: <span className="font-mono">{reportData.reportId}</span></span>
+               <span className="text-sm font-bold text-slate-700 hidden sm:inline">Report ID: <span className="font-mono">{reportData.reportId}</span></span>
             </div>
-            <button
-              onClick={handlePrint}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-colors"
-            >
-              <Printer size={16} /> Save / Print PDF
-            </button>
+            
+            <div className="flex items-center gap-3">
+              {/* 🔴 NAYA BUTTON: Save to Leads */}
+              <button
+                onClick={handleSaveToCRM}
+                disabled={isSaved || savingCRM}
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all ${
+                  isSaved ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                {savingCRM ? <RefreshCw size={16} className="animate-spin"/> : (isSaved ? <CheckCircle2 size={16}/> : <Save size={16} />)} 
+                {isSaved ? 'Saved in Leads' : 'Save to Leads'}
+              </button>
+
+              <button
+                onClick={handlePrint}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-colors"
+              >
+                <Printer size={16} /> Save / Print PDF
+              </button>
+            </div>
           </div>
 
           {/* ========================================================= */}
@@ -224,7 +226,7 @@ const GstHealthScan = () => {
               <div className="text-right text-xs">
                 <p><strong>Report ID:</strong> {reportData.reportId}</p>
                 <p><strong>Report Version:</strong> {reportData.reportVersion || 'v1.0'}</p>
-                <p><strong>Scan Date:</strong> {new Date(reportData.scanDateTime).toLocaleDateString('en-IN')}</p>
+                <p><strong>Scan Date:</strong> {new Date(reportData.scanDateTime || Date.now()).toLocaleDateString('en-IN')}</p>
               </div>
             </div>
 
@@ -239,7 +241,7 @@ const GstHealthScan = () => {
                 <div className="p-2 border-t border-r border-slate-300"><strong>Trade Name:</strong> {reportData.tradeName || 'N/A'}</div>
                 <div className="p-2 border-t border-slate-300">
                   <strong>Registration Status:</strong>{' '}
-                  <span className={`font-bold ${reportData.registrationHealth === 'Green' ? 'text-emerald-700' : 'text-rose-600'}`}>{reportData.registrationStatus}</span>
+                  <span className={`font-bold ${healthColor[reportData.registrationHealth]?.split(' ')[0] || 'text-slate-800'}`}>{reportData.registrationStatus}</span>
                 </div>
                 <div className="p-2 border-t border-r border-slate-300"><strong>Constitution:</strong> {reportData.constitution}</div>
                 <div className="p-2 border-t border-slate-300"><strong>Taxpayer Type:</strong> {reportData.taxpayerType || 'N/A'}</div>
@@ -315,7 +317,7 @@ const GstHealthScan = () => {
               </div>
             </div>
 
-            {/* Section 4: Return Filing Snapshot Table (Now shows 10 items) */}
+            {/* Section 4: Return Filing Snapshot Table */}
             <div>
               <h3 className="text-xs font-bold bg-slate-100 p-2 border border-slate-300 uppercase text-slate-700 flex justify-between">
                 <span>Return Filing Snapshot (Recent Activity)</span>
