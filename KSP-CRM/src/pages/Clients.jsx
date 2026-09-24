@@ -64,7 +64,6 @@ const Clients = () => {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  // 🔴 FIX 1: URL BADALNE PAR PAGE UPDATE HOGA (NAVBAR CLICK FIX)
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     const urlService = queryParams.get('service');
@@ -1090,6 +1089,8 @@ const Clients = () => {
                     <option value="Company Registration">Company Registration</option>
                     <option value="Trademark Registration">Trademark Registration</option>
                     <option value="Accounting">Accounting & Audit</option>
+                    {/* 🔴 NEW OPTION ADDED HERE */}
+                    <option value="Other Services">Other Services</option>
                   </select>
                 </div>
 

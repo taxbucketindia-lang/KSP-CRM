@@ -142,7 +142,9 @@ const Layout = () => {
             { path: '/clients?service=GST Registration', name: 'GST Registration' },
             { path: '/clients?service=Company Reg', name: 'Company Reg' },
             { path: '/clients?service=Trademark Reg', name: 'Trademark Reg' },
-            { path: '/clients?service=Accounting & Audit', name: 'Accounting & Audit' }
+            { path: '/clients?service=Accounting & Audit', name: 'Accounting & Audit' },
+            // 🔴 NAYA OPTION ADD KIYA
+            { path: '/clients?service=Other Services', name: 'Other Services' }
           ]
         },
         {
@@ -153,7 +155,9 @@ const Layout = () => {
             { path: '/itr-returns', name: 'ITR Return' },
             { path: '/gst-returns', name: 'GST Return' },
             { path: '/roc-returns', name: 'ROC Return' },
-            { path: '/audit', name: 'Audit' }
+            { path: '/tds-returns', name: 'TDS Return' },
+            { path: '/audit', name: 'Audit' },
+            { path: '/oth-returns', name: 'Other Return' }
           ]
         },
         ...(user?.role === 'Admin' || activePermissions.includes('WORK') ? [{ 
