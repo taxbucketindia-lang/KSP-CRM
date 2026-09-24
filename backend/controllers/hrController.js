@@ -14,9 +14,21 @@ export const createEmployee = async (req, res) => {
       return res.status(400).json({ message: 'A user with this email already exists' });
     }
 
-    // 2. Generate EmpID: TB-EMP-001
-    const count = await Employee.countDocuments();
-    const empId = `TB-EMP-${(count + 1).toString().padStart(3, '0')}`;
+    // 2. Generate EmpID: TB-EMP-XXX (Naya Bulletproof Logic)
+    // Sabse latest employee dhundho
+    const lastEmployee = await Employee.findOne({}, { empId: 1 }).sort({ createdAt: -1 });
+
+    let nextNumber = 1;
+    if (lastEmployee && lastEmployee.empId) {
+        // "TB-EMP-003" se "003" nikal kar number banayenge
+        const lastNumber = parseInt(lastEmployee.empId.split('-')[2], 10);
+        if (!isNaN(lastNumber)) {
+            nextNumber = lastNumber + 1; // Usme +1 add kar do
+        }
+    }
+    
+    // Nayi ID set karo (e.g., TB-EMP-004)
+    const empId = `TB-EMP-${String(nextNumber).padStart(3, '0')}`;
     
     // 3. Create Login Account for portal access
     const newUser = await User.create({
@@ -42,7 +54,6 @@ export const createEmployee = async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 };
-
 
 export const updateEmployee = async (req, res) => {
   try {
