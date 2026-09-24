@@ -270,11 +270,11 @@ const MyPortal = () => {
         <span className="truncate" title={address}>
           <span className={prefix === 'IN' ? 'text-blue-500' : 'text-amber-500'}>{prefix}:</span> {address}
         </span>
-        {link && (
+        {/* {link && (
           <a href={link} target="_blank" rel="noreferrer" className="text-[9px] text-blue-600 hover:text-blue-800 underline mt-0.5 flex items-center gap-1">
             <ExternalLink size={10} /> View Map
           </a>
-        )}
+        )} */}
       </div>
     );
   };
