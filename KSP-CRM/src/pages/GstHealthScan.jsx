@@ -4,7 +4,6 @@ import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import { AuthContext } from '../context/AuthContext';
 
-// TODO: replace with TaxBucket's actual WhatsApp Business number
 const WHATSAPP_NUMBER = '91XXXXXXXXXX';
 
 const healthColor = {
@@ -19,6 +18,19 @@ const healthLabel = {
   Red: 'Important review required',
 };
 
+// Helper function to format "082026" into Financial Year and Month Name
+const formatTaxPeriod = (taxp) => {
+  if (!taxp || taxp.length !== 6) return { fy: 'N/A', month: taxp };
+  const m = parseInt(taxp.substring(0, 2), 10);
+  const y = parseInt(taxp.substring(2), 10);
+  
+  const date = new Date(y, m - 1);
+  const monthName = date.toLocaleString('default', { month: 'long' });
+  const fy = m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`; // Indian FY logic
+  
+  return { fy, month: monthName };
+};
+
 const GstHealthScan = () => {
   const { user } = useContext(AuthContext); 
   const [formData, setFormData] = useState({ gstin: '', mobile: '', email: '', businessName: '' });
@@ -26,7 +38,6 @@ const GstHealthScan = () => {
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState(null);
   
-  // 🔴 NAYE STATES FOR SAVING LOGIC
   const [isSaved, setIsSaved] = useState(false);
   const [savingCRM, setSavingCRM] = useState(false);
 
@@ -37,11 +48,9 @@ const GstHealthScan = () => {
     }
 
     setLoading(true);
-    setIsSaved(false); // Naya scan hai toh saved status false kardo
+    setIsSaved(false);
     try {
       const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
-      
-      // 🔴 Action: 'preview' bhej rahe hain taaki auto-save na ho
       const payload = { ...formData, action: 'preview' };
       const res = await axios.post(`${import.meta.env.VITE_API_URL}/gst-scan`, payload, { headers });
       
@@ -56,17 +65,13 @@ const GstHealthScan = () => {
     }
   };
 
-  // 🔴 NAYA FUNCTION: Manually Save to Leads
   const handleSaveToCRM = async () => {
     if (!reportData) return;
-    
     setSavingCRM(true);
     try {
       const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
       const payload = { action: 'save', reportData };
-      
       await axios.post(`${import.meta.env.VITE_API_URL}/gst-scan`, payload, { headers });
-      
       setIsSaved(true);
       toast.success('Report Saved to Leads & CRM Successfully!');
     } catch (error) {
@@ -87,8 +92,12 @@ const GstHealthScan = () => {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  // Filter lists for two separate tables
+  const gstr3bList = reportData?.filingReturns?.filter(r => r.rtntype === 'GSTR3B') || [];
+  const gstr1List = reportData?.filingReturns?.filter(r => r.rtntype === 'GSTR1' || r.rtntype === 'GSTR-1') || [];
+
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-8 print:p-0 print:max-w-none">
+    <div className="max-w-5xl mx-auto p-6 space-y-8 print:p-0 print:max-w-none">
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -106,7 +115,7 @@ const GstHealthScan = () => {
       </div>
 
       {!reportData ? (
-        <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl space-y-6 print:hidden">
+        <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl space-y-6 print:hidden max-w-3xl mx-auto">
           <div className="text-center space-y-2">
             <img src="/taxbucket-logo.webp" alt="TaxBucket" className='w-32 mx-auto pb-2'/>
             <h1 className="text-2xl font-black text-slate-800 flex justify-center items-center gap-2">
@@ -179,7 +188,6 @@ const GstHealthScan = () => {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Action Bar (Not printed) */}
           <div className="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm print:hidden flex-wrap gap-4">
             <div className="flex items-center gap-3">
                <button onClick={() => setReportData(null)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors">← Back</button>
@@ -187,7 +195,6 @@ const GstHealthScan = () => {
             </div>
             
             <div className="flex items-center gap-3">
-              {/* 🔴 NAYA BUTTON: Save to Leads */}
               <button
                 onClick={handleSaveToCRM}
                 disabled={isSaved || savingCRM}
@@ -208,14 +215,10 @@ const GstHealthScan = () => {
             </div>
           </div>
 
-          {/* ========================================================= */}
-          {/* PRINTABLE PDF TEMPLATE */}
-          {/* ========================================================= */}
           <div
             id="gst-report-printable"
-            className="bg-white p-8 border-2 border-slate-900 shadow-2xl max-w-[800px] mx-auto text-slate-900 font-sans space-y-6"
+            className="bg-white p-8 border-2 border-slate-900 shadow-2xl max-w-[1000px] mx-auto text-slate-900 font-sans space-y-6"
           >
-            {/* PDF Header */}
             <div className="flex justify-between items-center border-b-2 border-slate-900 pb-4">
               <div>
                 <img src="/taxbucket-logo.webp" alt="TaxBucket" className='w-28 pb-2' onError={(e) => e.target.outerHTML = '<h2 class="text-xl font-black text-blue-900">TaxBucket</h2>'}/>
@@ -230,7 +233,6 @@ const GstHealthScan = () => {
               </div>
             </div>
 
-            {/* Section 1: Client Information & Jurisdictions */}
             <div>
               <h3 className="text-xs font-bold bg-slate-100 p-2 border border-slate-300 uppercase text-slate-700">
                 Client Information & Jurisdictions
@@ -247,13 +249,26 @@ const GstHealthScan = () => {
                 <div className="p-2 border-t border-slate-300"><strong>Taxpayer Type:</strong> {reportData.taxpayerType || 'N/A'}</div>
                 <div className="p-2 border-t border-r border-slate-300"><strong>Reg. Date:</strong> {reportData.registrationDate}</div>
                 <div className="p-2 border-t border-slate-300"><strong>State Jurisdiction:</strong> {reportData.stateJurisdiction || 'N/A'}</div>
+                
+                <div className="p-2 border-t border-r border-slate-300"><strong>Filing Frequency:</strong> <span className="font-bold text-blue-700">{reportData.filingFrequency || 'N/A'}</span></div>
+                <div className="p-2 border-t border-slate-300">
+                  <strong>Nature of Business:</strong>
+                  {reportData.natureOfBusiness?.length > 0 ? (
+                    <ul className="list-disc list-inside mt-1 ml-1 text-slate-700 space-y-0.5">
+                      {reportData.natureOfBusiness.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="ml-1">N/A</span>
+                  )}
+                </div>
                 <div className="col-span-2 p-2 border-t border-slate-300"><strong>Central Jurisdiction:</strong> {reportData.centralJurisdiction || 'N/A'}</div>
                 <div className="col-span-2 p-2 border-t border-slate-300"><strong>Principal Address:</strong> {reportData.address}</div>
                 <div className="col-span-2 p-2 border-t border-slate-300"><strong>Additional Places:</strong> {reportData.additionalPlaces || 'N/A'}</div>
               </div>
             </div>
 
-            {/* Section 2: GST Health Snapshot */}
             <div>
               <h3 className="text-xs font-bold bg-slate-100 p-2 border border-slate-300 uppercase text-slate-700">
                 GST Health Snapshot
@@ -302,7 +317,6 @@ const GstHealthScan = () => {
               </table>
             </div>
 
-            {/* Section 3: Key Observations */}
             <div>
               <h3 className="text-xs font-bold bg-slate-100 p-2 border border-slate-300 uppercase text-slate-700">
                 Key Observations
@@ -317,40 +331,73 @@ const GstHealthScan = () => {
               </div>
             </div>
 
-            {/* Section 4: Return Filing Snapshot Table */}
-            <div>
-              <h3 className="text-xs font-bold bg-slate-100 p-2 border border-slate-300 uppercase text-slate-700 flex justify-between">
-                <span>Return Filing Snapshot (Recent Activity)</span>
-                <span className="font-normal text-[10px] text-slate-500 lowercase pr-1">showing latest available</span>
-              </h3>
-              <table className="w-full text-xs border-collapse border border-slate-300">
-                <thead>
-                  <tr className="bg-slate-50 text-left">
-                    <th className="border border-slate-300 p-2">Return Type</th>
-                    <th className="border border-slate-300 p-2">Period</th>
-                    <th className="border border-slate-300 p-2">Filing Status</th>
-                    <th className="border border-slate-300 p-2">Filing Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportData.filingReturns && reportData.filingReturns.length > 0 ? (
-                    reportData.filingReturns.map((ret, idx) => (
-                      <tr key={idx}>
-                        <td className="border border-slate-300 p-2 font-bold">{ret.rtntype || ret.ret_type || 'GSTR'}</td>
-                        <td className="border border-slate-300 p-2">{ret.taxp || ret.ret_period || ret.fp || 'N/A'}</td>
-                        <td className="border border-slate-300 p-2 font-bold text-slate-700">{ret.status || 'Filed'}</td>
-                        <td className="border border-slate-300 p-2">{ret.dof || 'N/A'}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="4" className="border border-slate-300 p-3 text-center text-slate-500 font-medium">
-                        No recent filing history found in public records.
-                      </td>
+            {/* 🔴 NAYA DO-COLUMN RETURN FILING TABLE */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Table 1: GSTR3B */}
+              <div className="w-full">
+                <h4 className="text-sm font-bold text-blue-900 mb-2">Filing details for GSTR3B</h4>
+                <table className="w-full text-xs border-collapse border border-slate-300 text-center">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-700">
+                      <th className="border border-slate-300 p-2">Financial Year</th>
+                      <th className="border border-slate-300 p-2">Tax Period</th>
+                      <th className="border border-slate-300 p-2">Date of filing</th>
+                      <th className="border border-slate-300 p-2">Status</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {gstr3bList.length > 0 ? (
+                      gstr3bList.map((ret, idx) => {
+                        const { fy, month } = formatTaxPeriod(ret.taxp);
+                        return (
+                          <tr key={idx}>
+                            <td className="border border-slate-300 p-2">{fy}</td>
+                            <td className="border border-slate-300 p-2">{month}</td>
+                            <td className="border border-slate-300 p-2">{ret.dof}</td>
+                            <td className="border border-slate-300 p-2">{ret.status}</td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr><td colSpan="4" className="border border-slate-300 p-3 text-slate-500 font-medium">No recent filing history</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Table 2: GSTR1 / IFF */}
+              <div className="w-full">
+                <h4 className="text-sm font-bold text-blue-900 mb-2">Filing details for GSTR-1/IFF</h4>
+                <table className="w-full text-xs border-collapse border border-slate-300 text-center">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-700">
+                      <th className="border border-slate-300 p-2">Financial Year</th>
+                      <th className="border border-slate-300 p-2">Tax Period</th>
+                      <th className="border border-slate-300 p-2">Date of filing</th>
+                      <th className="border border-slate-300 p-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gstr1List.length > 0 ? (
+                      gstr1List.map((ret, idx) => {
+                        const { fy, month } = formatTaxPeriod(ret.taxp);
+                        return (
+                          <tr key={idx}>
+                            <td className="border border-slate-300 p-2">{fy}</td>
+                            <td className="border border-slate-300 p-2">{month}</td>
+                            <td className="border border-slate-300 p-2">{ret.dof}</td>
+                            <td className="border border-slate-300 p-2">{ret.status}</td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr><td colSpan="4" className="border border-slate-300 p-3 text-slate-500 font-medium">No recent filing history</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
             </div>
 
             {/* CTA Box */}

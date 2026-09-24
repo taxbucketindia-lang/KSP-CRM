@@ -18,18 +18,16 @@ const gstinStatusHealth = (status) => {
 const parseDateString = (dateStr) => {
   if (!dateStr || dateStr === 'N/A') return null;
   const str = String(dateStr).trim();
-
   const parts = str.split(/[\/\-]/);
   if (parts.length === 3) {
       const day = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       let year = parseInt(parts[2], 10);
       if (year < 100) year += 2000; 
-      
-      const parsedDate = new Date(year, month, day);
-      if (!isNaN(parsedDate.getTime())) return parsedDate;
+      if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+          return new Date(year, month, day);
+      }
   }
-
   let m = str.match(/^(\d{2})-?(\d{4})$/); 
   if (m) return new Date(Number(m[2]), Number(m[1]) - 1, 1);
   m = str.match(/^(\d{4})-(\d{2})$/); 
@@ -44,14 +42,12 @@ const monthsBetween = (date) => {
   return (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth());
 };
 
-const returnFilingHealth = (latestGstr3b, latestGstr1, sortedReturnsArray) => {
-  let date = parseDateString(latestGstr3b) || parseDateString(latestGstr1);
-  
-  if (!date && sortedReturnsArray && sortedReturnsArray.length > 0) {
+const returnFilingHealth = (sortedReturnsArray) => {
+  let date = null;
+  if (sortedReturnsArray && sortedReturnsArray.length > 0) {
      const latestFilingDateStr = sortedReturnsArray[0].dof;
      date = parseDateString(latestFilingDateStr);
   }
-
   if (!date) return { health: 'Yellow', gapMonths: null }; 
   const gap = monthsBetween(date);
   const safeGap = gap < 0 ? 0 : gap; 
@@ -60,12 +56,8 @@ const returnFilingHealth = (latestGstr3b, latestGstr1, sortedReturnsArray) => {
   return { health: 'Red', gapMonths: safeGap };
 };
 
-const dataAvailabilityHealth = (apiData) => {
-  const coreFields = ['lgnm', 'sts', 'rgdt', 'ctb', 'adr', 'stj', 'ctj'];
-  const present = coreFields.filter((f) => apiData[f] && apiData[f] !== '').length;
-  const ratio = present / coreFields.length;
-  if (ratio >= 0.8) return 'Green';
-  if (ratio >= 0.5) return 'Yellow';
+const dataAvailabilityHealth = (legalName) => {
+  if (legalName && legalName !== 'Valued Taxpayer' && legalName !== 'N/A') return 'Green';
   return 'Red';
 };
 
@@ -80,15 +72,77 @@ const filingPatternFromGap = (gapMonths) => {
   return gapMonths <= 3 ? 'Regular' : 'Review Required';
 };
 
-// --- Main Controller ---
+// 🔴 NAYA FUNCTION: Estimate Filing Frequency
+// 🔴 NAYA SUPER BULLETPROOF FUNCTION: Estimate Filing Frequency
+const estimateFilingFrequency = (returnsArray) => {
+  if (!returnsArray || returnsArray.length === 0) return 'Unknown';
+
+  // 1. Sirf GSTR1 aur GSTR3B returns lo, jinme taxp 6 character ka ho (MMYYYY)
+  const validReturns = returnsArray.filter(r => 
+      (r.rtntype === 'GSTR1' || r.rtntype === 'GSTR3B') && 
+      r.taxp && r.taxp.length === 6
+  );
+
+  if (validReturns.length === 0) return 'Unknown';
+
+  // 2. Sirf unique "MMYYYY" periods nikal lo
+  const uniquePeriodsSet = new Set(validReturns.map(r => r.taxp));
+  const uniquePeriodsArray = Array.from(uniquePeriodsSet);
+
+  if (uniquePeriodsArray.length < 2) return 'Monthly (Assumed)';
+
+  // 3. String (MMYYYY) ko Date format me convert karke sort karo (Latest first)
+  const sortedDates = uniquePeriodsArray.map(p => {
+      const month = parseInt(p.substring(0, 2), 10);
+      const year = parseInt(p.substring(2), 10);
+      return new Date(year, month - 1, 1); // JS months are 0-indexed
+  }).sort((a, b) => b - a);
+
+  // 4. Sabse latest aur uske pichle period ke beech ka gap check karo
+  // Difference in months = (YearDiff * 12) + MonthDiff
+  const diffMonths = (sortedDates[0].getFullYear() - sortedDates[1].getFullYear()) * 12 
+                   + (sortedDates[0].getMonth() - sortedDates[1].getMonth());
+
+  const gap = Math.abs(diffMonths);
+
+  // Agar gap 3 ya usse zyaada mahine ka hai (e.g. June-March = 3, Sept-June = 3), toh Quarterly
+  if (gap >= 3) {
+      return 'Quarterly';
+  } 
+  
+  // Agar gap exactly 1 mahine ka hai, toh pakka Monthly
+  if (gap === 1) {
+      return 'Monthly';
+  }
+
+  // Agar 2 mahine ka gap aata hai (jo generally late filing mein hota hai), 
+  // toh safe side rehne ke liye usko pattern check ke liye bhej do, but usually Regular taxpayers monthly hote hain
+  return 'Monthly'; 
+};
+
+const getSandboxToken = async () => {
+  try {
+    const response = await axios.post('https://api.sandbox.co.in/authenticate', {}, {
+      headers: {
+        'accept': 'application/json',
+        'x-api-key': process.env.SANDBOX_API_KEY,
+        'x-api-secret': process.env.SANDBOX_API_SECRET,
+        'x-api-version': '1.0.0'
+      }
+    });
+    return response.data.access_token;
+  } catch (error) {
+    console.error("Sandbox Auth Failed:", error.response?.data || error.message);
+    throw new Error("Failed to authenticate with Sandbox.");
+  }
+};
+
 export const runGstHealthScan = async (req, res) => {
   try {
     const { action, reportData, gstin, mobile, email, businessName } = req.body;
 
-    // 🔴 1. ACTION: SAVE TO DB (Jab User button click karega)
     if (action === 'save' && reportData) {
       let gstLeadId = 'GUEST-LEAD-' + Date.now();
-      
       try {
         const detailedRemarks = `
 Lead generated manually via Free GST Health Scan.
@@ -98,6 +152,8 @@ Lead generated manually via Free GST Health Scan.
 📅 Registration Date: ${reportData.registrationDate}
 ⚖️ Constitution: ${reportData.constitution}
 🧑‍💼 Taxpayer Type: ${reportData.taxpayerType}
+📊 Nature of Business: ${reportData.natureOfBusiness.join(', ')}
+🔄 Filing Frequency: ${reportData.filingFrequency}
 
 📊 HEALTH SCAN PREVIEW:
 - Return Filing Pattern: ${reportData.filingPattern}
@@ -124,9 +180,9 @@ Lead generated manually via Free GST Health Scan.
 
       try {
         const newScan = new GstScan({
-          ...reportData, // Destructure all data directly
+          ...reportData, 
           gstLeadId,
-          dataSourceCategory: 'Public GST information'
+          dataSourceCategory: 'Hybrid (Sandbox + GST Insights)'
         });
         await newScan.save();
         return res.status(201).json({ success: true, message: 'Saved to Leads & CRM successfully!' });
@@ -135,78 +191,128 @@ Lead generated manually via Free GST Health Scan.
       }
     }
 
-    // 🔴 2. ACTION: PREVIEW (Default - Jab scan form submit hoga)
     if (!gstin || !mobile || !email) {
       return res.status(400).json({ success: false, message: 'GSTIN, Mobile, and Email are mandatory.' });
     }
 
-    let apiData = {};
-    let apiReachable = true;
+    // 🟢 A. FETCH PROFILE FROM SANDBOX API
+    let sandboxData = {};
+    let isSandboxSuccess = false;
+    let natureOfBusiness = [];
+
     try {
-      const response = await axios.get(`https://gst-return-status.p.rapidapi.com/free/gstin/${gstin}`, {
-        headers: {
-          'content-type': 'application/json',
-          'x-rapidapi-key': process.env.RAPIDAPI_KEY,
-          'x-rapidapi-host': 'gst-return-status.p.rapidapi.com',
-        },
+      const accessToken = await getSandboxToken();
+      const sbResponse = await axios.post('https://api.sandbox.co.in/gst/compliance/public/gstin/search', 
+        { gstin: gstin.toUpperCase() },
+        { headers: { 'accept': 'application/json', 'content-type': 'application/json', 'authorization': accessToken, 'x-api-key': process.env.SANDBOX_API_KEY, 'x-api-version': '1.0.0' } }
+      );
+      
+      if (sbResponse.data && sbResponse.data.data) {
+        sandboxData = sbResponse.data.data.data || sbResponse.data.data;
+        isSandboxSuccess = true;
+      }
+    } catch (sbErr) {
+      console.error('[SANDBOX API ERROR]', sbErr.message);
+    }
+
+    // 🟢 B. FETCH RETURNS FROM GST INSIGHTS API
+    let filingReturns = [];
+    let apiReachable = true;
+
+    try {
+      const response = await axios.get(`https://gst-insights-api.p.rapidapi.com/getGSTReturnFilingStatus/${gstin}`, {
+        headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'gst-insights-api.p.rapidapi.com' },
       });
-      if (response.data && response.data.data && Object.keys(response.data.data).length > 0) {
-        apiData = response.data.data;
+
+      let respData = response.data;
+      let rawReturns = [];
+      
+      if (respData.data && respData.data.fillingData) respData = respData.data;
+
+      // 🔴 Extract Nature of Business from Insights API
+      if (respData.natureOfBusinessActivity && Array.isArray(respData.natureOfBusinessActivity)) {
+         natureOfBusiness = respData.natureOfBusinessActivity;
+      } else if (sandboxData.nba) {
+         natureOfBusiness = sandboxData.nba; // Fallback to sandbox if available
+      }
+
+      if (respData && respData.fillingData && typeof respData.fillingData === 'object') {
+          rawReturns = Object.values(respData.fillingData).flat();
+      } else if (Array.isArray(respData)) {
+          rawReturns = respData;
+      } else if (respData && Array.isArray(respData.data)) {
+          rawReturns = respData.data;
+      }
+
+      if (rawReturns.length > 0) {
+        filingReturns = rawReturns.map(r => ({
+          rtntype: r.returnType || r.rtntype || 'N/A',
+          taxp: r.returnPeriod || r.taxp || 'N/A',
+          status: (r.isValid === 'Y' || r.status === 'Filed') ? 'Filed' : (r.status || 'N/A'),
+          dof: r.dateOfFiling || r.dof || 'N/A'
+        }));
       } else {
         apiReachable = false;
       }
     } catch (apiErr) {
       apiReachable = false;
-      console.error('[GST SCAN ERROR]', apiErr.message);
+      console.error('[GST INSIGHTS API ERROR]', apiErr.message);
     }
 
-    const legalName = apiData.lgnm || businessName || 'Valued Taxpayer';
-    const tradeName = apiData.tradeName || legalName;
-    const gstinStatus = apiData.sts || (apiReachable ? 'N/A' : 'Data not available');
-    const cancellationDate = apiData.cxdt || null;
-    const constitution = apiData.ctb || 'N/A';
-    const registrationDate = apiData.rgdt || 'N/A';
-    const taxpayerType = apiData.dty || 'N/A';
-    const address = apiData.adr || 'N/A';
-    const pincode = apiData.pincode || 'N/A';
-    const stateJurisdiction = apiData.stj || 'N/A';
-    const centralJurisdiction = apiData.ctj || 'N/A';
-    const pan = apiData.pan || null;
-    const apiCompCategory = apiData.compCategory || null;
-
-    const latestGstr1Period = apiData.meta?.latestgstr1 || 'N/A';
-    const latestGstr3bPeriod = apiData.meta?.latestgstr3b || 'N/A';
-
-    let filingReturns = apiData.returns || [];
+    // SORT RETURNS
     if (filingReturns.length > 0) {
         filingReturns.sort((a, b) => {
             const dateA = parseDateString(a.dof);
             const dateB = parseDateString(b.dof);
             if (dateA && dateB) return dateB.getTime() - dateA.getTime();
-            if (dateA) return -1;
-            if (dateB) return 1;
+            if (!dateA && dateB) return 1;
+            if (dateA && !dateB) return -1;
             return 0;
         });
     }
 
-    const registrationHealth = apiReachable ? gstinStatusHealth(gstinStatus) : 'Red';
-    const { health: filingHealth, gapMonths } = apiReachable
-      ? returnFilingHealth(latestGstr3bPeriod, latestGstr1Period, filingReturns)
-      : { health: 'Red', gapMonths: null };
+    // MAP PROFILE FIELDS
+    const legalName = sandboxData.lgnm || businessName || 'Valued Taxpayer';
+    const tradeName = sandboxData.tradeNam || sandboxData.tradeName || legalName;
+    const gstinStatus = sandboxData.sts || (isSandboxSuccess ? 'Active' : 'N/A');
+    const cancellationDate = sandboxData.cxdt || null;
+    const constitution = sandboxData.ctb || 'N/A';
+    const registrationDate = sandboxData.rgdt || 'N/A';
+    const taxpayerType = sandboxData.dty || 'N/A';
     
-    const dataAvailHealth = apiReachable ? dataAvailabilityHealth(apiData) : 'Red';
+    let address = 'N/A';
+    if (sandboxData.pradr && sandboxData.pradr.addr) {
+      const addr = sandboxData.pradr.addr;
+      address = `${addr.bno || ''} ${addr.st || ''} ${addr.loc || ''}`.trim();
+    } else if (sandboxData.adr) {
+      address = sandboxData.adr;
+    }
+
+    const pincode = sandboxData.pradr?.addr?.pncd || sandboxData.pincode || 'N/A';
+    const stateJurisdiction = sandboxData.stj || 'N/A';
+    const centralJurisdiction = sandboxData.ctj || 'N/A';
+    const pan = sandboxData.pan || null;
+    const filingFrequency = estimateFilingFrequency(filingReturns);
+
+    // RULE ENGINE
+    const registrationHealth = isSandboxSuccess ? gstinStatusHealth(gstinStatus) : 'Red';
+    const { health: filingHealth, gapMonths } = apiReachable ? returnFilingHealth(filingReturns) : { health: 'Red', gapMonths: null };
+    const dataAvailHealth = isSandboxSuccess ? dataAvailabilityHealth(legalName) : 'Red';
     const overallScanStatus = worstOf(registrationHealth, filingHealth, dataAvailHealth);
     const filingPattern = filingPatternFromGap(gapMonths);
 
+    const latestGstr1 = filingReturns.find(r => r.rtntype === 'GSTR1');
+    const latestGstr3b = filingReturns.find(r => r.rtntype === 'GSTR3B');
+    const latestGstr1Period = latestGstr1 ? latestGstr1.taxp : 'N/A';
+    const latestGstr3bPeriod = latestGstr3b ? latestGstr3b.taxp : 'N/A';
+
     const observations = [
-      { observation: `Registration: GSTIN status shows as "${gstinStatus}" based on publicly available information.` },
-      { observation: filingHealth === 'Green' ? `Return Filing: Recent filing history appears regular (latest period identified).` : `Return Filing: ${filingHealth === 'Red' ? 'Significant gap' : 'Late/gap indication'} in recent filings.` },
-      { observation: gapMonths && gapMonths > MONTHS_YELLOW ? `Possible Filing Gap: Approximately ${gapMonths} month(s) since the latest available return period — one or more periods may require review.` : 'Possible Filing Gap: No significant gap detected in the periods captured.' },
-      { observation: dataAvailHealth === 'Green' ? 'Data Availability: Public data available and sufficient for this preliminary scan.' : dataAvailHealth === 'Yellow' ? 'Data Availability: Public data only partially available; some fields could not be verified.' : 'Data Availability: Public data insufficient at the time of scan — a detailed review is recommended.' },
+      { observation: `Registration: GSTIN status shows as "${gstinStatus}" based on public registry verification.` },
+      { observation: filingHealth === 'Green' ? `Return Filing: Recent filing history appears regular.` : `Return Filing: Late/gap indication in recent filings.` },
+      { observation: gapMonths && gapMonths > MONTHS_YELLOW ? `Possible Filing Gap: Approximately ${gapMonths} month(s) since the latest available return period.` : 'Possible Filing Gap: No significant gap detected.' },
       { observation: 'Public data alone does not establish ITC mismatch, tax liability or complete GST compliance.' }
     ];
 
-    // 🔴 3. RETURN DATA WITHOUT SAVING
     const scanResult = {
       reportId: 'TB-GST-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
       gstin: gstin.toUpperCase(),
@@ -224,6 +330,8 @@ Lead generated manually via Free GST Health Scan.
       stateJurisdiction,
       centralJurisdiction,
       pan,
+      natureOfBusiness, // Array of strings
+      filingFrequency, // Derived string
       filingReturns: filingReturns.slice(0, 20),
       latestGstr1Period,
       latestGstr3bPeriod,
@@ -233,12 +341,11 @@ Lead generated manually via Free GST Health Scan.
       returnFilingHealth: filingHealth,
       dataAvailabilityHealth: dataAvailHealth,
       overallScanStatus,
-      apiCompCategory,
+      apiCompCategory: null,
       dataObservations: observations
     };
 
-    res.status(200).json({ success: true, message: 'Scan generated successfully for preview!', data: scanResult });
-
+    res.status(200).json({ success: true, message: 'Scan generated successfully!', data: scanResult });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
