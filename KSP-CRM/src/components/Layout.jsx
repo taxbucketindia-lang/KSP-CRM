@@ -152,6 +152,7 @@ const Layout = () => {
           icon: FileText,
           isGroup: true,
           subItems: [
+            { path: '/client-master', name: 'Client Master' },
             { path: '/itr-returns', name: 'ITR Return' },
             { path: '/gst-returns', name: 'GST Return' },
             { path: '/roc-returns', name: 'ROC Return' },

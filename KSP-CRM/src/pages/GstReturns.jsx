@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -10,7 +10,7 @@ import {
   CheckCircle2, IndianRupee, AlertCircle, CalendarClock, Pencil,
   Plus, X, UserCheck, Key, Activity, Eye, MessageSquare, Trash2, MapPin, ShieldUser, Briefcase,
   UserCircle, Mail, AlertTriangle, Send, Calculator, CreditCard, Download, Upload, Building2, ShieldCheck, User, Info, Hash, Navigation,
-  Wallet, CheckSquare, History, Filter
+  Wallet, CheckSquare, History, Filter, Loader2
 } from 'lucide-react';
 
 const GstReturns = () => {
@@ -20,7 +20,12 @@ const GstReturns = () => {
   const [gstClients, setGstClients] = useState([]); 
   const [loading, setLoading] = useState(true);
   
-  // 🔴 FILTERS STATE
+  // 🔴 Autocomplete ke states
+  const [fetchingPan, setFetchingPan] = useState(false);
+  const [panSuggestions, setPanSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [taxpayerTypeFilter, setTaxpayerTypeFilter] = useState('ALL');
@@ -60,7 +65,7 @@ const GstReturns = () => {
   const isAdmin = user?.role === 'Admin';
 
   const initialForm = {
-    clientId: '', // 🔴 Naya Field
+    pan: '', 
     assesseeName: '', tradeName: '', 
     taxpayerType: 'Regular', aadhaarKycStatus: 'No', 
     portalUsername: '', portalPassword: '', 
@@ -130,25 +135,45 @@ const GstReturns = () => {
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line
   }, [user.token]);
 
-  // 🔴 LOGIC: Naya Client ID Auto-Generate Karne Ke Liye
-  const generateNewClientId = () => {
-    if (gstClients.length === 0) return 'GST-1001';
-    const sortedClients = [...gstClients].sort((a, b) => {
-      const numA = a.clientId ? parseInt(a.clientId.split('-')[1]) || 0 : 0;
-      const numB = b.clientId ? parseInt(b.clientId.split('-')[1]) || 0 : 0;
-      return numB - numA; 
-    });
-    const lastId = sortedClients[0].clientId;
-    if (lastId && lastId.includes('-')) {
-      const parts = lastId.split('-');
-      if (!isNaN(parts[1])) {
-        const nextNum = parseInt(parts[1]) + 1;
-        return `GST-${nextNum}`;
+  // Smart PAN Autocomplete Search
+  const handlePanChange = async (e) => {
+    const val = e.target.value.toUpperCase();
+    setFormData(prev => ({ ...prev, pan: val }));
+
+    if (val.length >= 2) {
+      setFetchingPan(true);
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
+        setPanSuggestions(res.data || []);
+        setShowSuggestions(true);
+      } catch (error) {
+        console.error("Error fetching PAN details", error);
+      } finally {
+        setFetchingPan(false);
       }
+    } else {
+      setPanSuggestions([]);
+      setShowSuggestions(false);
     }
-    return `GST-${gstClients.length + 1001}`; 
+  };
+
+  // Jab dropdown se PAN select karein tab baki fields auto-fill hongi
+  const handleSelectSuggestion = (client) => {
+    setFormData(prev => ({
+      ...prev,
+      pan: client.pan,
+      assesseeName: client.name || prev.assesseeName,
+      mobile: client.mobile || prev.mobile,
+      email: client.email || prev.email,
+      state: client.state || prev.state,
+      pinCode: client.pinCode || prev.pinCode
+    }));
+    setShowSuggestions(false); 
+    toast.success("✅ Client Data Auto-Filled!");
   };
 
   // Dynamic States for State Filter
@@ -160,12 +185,12 @@ const GstReturns = () => {
   const filteredClients = useMemo(() => {
     const filtered = gstClients.filter((client) => {
       const searchStr = searchQuery.toLowerCase();
-      // 🔴 Added clientId in search
       const matchesSearch = 
         (client.assesseeName?.toLowerCase() || '').includes(searchStr) || 
         (client.tradeName?.toLowerCase() || '').includes(searchStr) || 
         (client.gstin?.toLowerCase() || '').includes(searchStr) ||
-        (client.clientId?.toLowerCase() || '').includes(searchStr);
+        (client.pan?.toLowerCase() || '').includes(searchStr) ||
+        (client.clientMasterId?.clientId?.toLowerCase() || '').includes(searchStr);
 
       const matchesStatus = statusFilter === 'ALL' || (client.gstStatus || 'Documents Pending') === statusFilter;
       const matchesType = taxpayerTypeFilter === 'ALL' || (client.taxpayerType || 'Regular') === taxpayerTypeFilter;
@@ -207,7 +232,8 @@ const GstReturns = () => {
     const worksheet = workbook.addWorksheet('GST Workspace');
 
     worksheet.columns = [
-      { header: 'Client ID', key: 'clientId', width: 15 }, // 🔴 ADDED
+      { header: 'Master Client ID', key: 'clientId', width: 20 }, // 🔴 Added Client ID
+      { header: 'PAN', key: 'pan', width: 15 },
       { header: 'Client / Trade Name', key: 'assesseeName', width: 30 },
       { header: 'GSTIN', key: 'gstin', width: 20 },
       { header: 'Taxpayer Type', key: 'taxpayerType', width: 15 },
@@ -242,7 +268,8 @@ const GstReturns = () => {
 
     dataToExport.forEach(client => { 
       worksheet.addRow({
-        clientId: client.clientId || '',
+        clientId: client.clientMasterId?.clientId || 'Pending', // 🔴 Added Client ID Mapping
+        pan: client.pan || '',
         assesseeName: client.tradeName ? `${client.assesseeName} (${client.tradeName})` : client.assesseeName,
         gstin: client.gstin || '',
         taxpayerType: client.taxpayerType || '',
@@ -308,7 +335,7 @@ const GstReturns = () => {
         };
 
         const formattedRecords = data.map(row => ({
-          clientId: getVal(row, ['Client ID', 'clientId', 'ID']), // 🔴 Added
+          pan: String(getVal(row, ['PAN', 'pan', 'Pan', 'PAN Number', 'PAN No'])), 
           assesseeName: getVal(row, ['Client / Trade Name', 'Assessee Name', 'assesseeName']) || '',
           tradeName: row['Trade Name'] || row['tradeName'] || '',
           gstin: row['GSTIN'] || row['gstin'] || '',
@@ -332,7 +359,7 @@ const GstReturns = () => {
           feeAmount: Number(row['Total Fee'] || row['feeAmount'] || 0),
           amountReceived: Number(row['Received Amount'] || row['amountReceived'] || 0),
           paymentDate: parseDate(row['Payment Date'] || row['paymentDate'])
-        })).filter(item => item.assesseeName); 
+        })).filter(item => item.assesseeName || item.gstin); 
 
         if (formattedRecords.length === 0) return toast.error("No valid rows found.");
 
@@ -441,8 +468,8 @@ const GstReturns = () => {
     setEditMode(false);
     setCurrentGstId(null);
     setImportClientId('');
-    // 🔴 ADD ME AUTO GENERATE ID
-    setFormData({ ...initialForm, clientId: generateNewClientId() });
+    setFormData(initialForm);
+    setShowSuggestions(false);
     setNewRemark('');
     setIsModalOpen(true);
   };
@@ -460,7 +487,7 @@ const GstReturns = () => {
     };
 
     setFormData({
-      clientId: client.clientId || '',
+      pan: client.pan || client.clientMasterId?.pan || '',
       assesseeName: client.assesseeName || '',
       tradeName: client.tradeName || '',
       taxpayerType: client.taxpayerType || 'Regular',
@@ -543,6 +570,10 @@ const GstReturns = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.pan && !formData.gstin) {
+      return toast.error("PAN or GSTIN is required to link Master Profile.");
+    }
+
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       const dateStamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' });
@@ -743,7 +774,7 @@ const GstReturns = () => {
           <div className="flex flex-col xl:flex-row xl:items-center gap-4">
             <div className="relative w-full xl:w-72 shrink-0">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input type="text" placeholder="Search Client or GSTIN..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors shadow-sm" />
+              <input type="text" placeholder="Search Client, PAN or GSTIN..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors shadow-sm" />
             </div>
             
             <div className="flex flex-wrap items-center gap-2 w-full">
@@ -809,7 +840,7 @@ const GstReturns = () => {
           </div>
         </div>
 
-        {/* SMART TOOLBAR FOR SELECTED ROWS */}
+        {/* 🔴 SMART TOOLBAR FOR SELECTED ROWS */}
         {selectedIds.length > 0 && (
           <div className="bg-indigo-50 border-b border-indigo-100 p-3 px-6 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
             <span className="text-sm font-bold text-indigo-800 flex items-center gap-2">
@@ -828,11 +859,10 @@ const GstReturns = () => {
           </div>
         )}
 
-        {/* SAME TABLE DESIGN PRESERVED */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-[11px] font-black uppercase tracking-wider">
+              <tr className="bg-white border-b border-slate-200 text-slate-500 text-[11px] font-black uppercase tracking-wider">
                 <th className="py-4 px-4 w-12 text-center border-r border-slate-100">
                   <input 
                     type="checkbox" 
@@ -842,10 +872,9 @@ const GstReturns = () => {
                   />
                 </th>
                 <th className="py-4 px-5">Client / Trade Name</th>
-                <th className='py-4 px-5'>Client Id's</th>
+                <th className='py-4 px-5'>PAN Number</th>
                 <th className="py-4 px-5">GSTIN</th>
                 <th className="py-4 px-5">Taxpayer Type</th>
-                {/* <th className="py-4 px-5">Reg. Date</th> */}
                 <th className="py-4 px-5">Aadhaar KYC</th>
                 <th className="py-4 px-5">Added By</th>
                 <th className="py-4 px-5 text-right">Actions</th>
@@ -872,13 +901,15 @@ const GstReturns = () => {
                         />
                       </td>
 
-                      <td className="py-4 px-0">
+                      <td className="py-4 px-5">
                         <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
                            {client.tradeName || client.assesseeName}
                            {/* 🔴 CLIENT ID DISPLAY IN TABLE */}
-                           {/* <span className="text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
-                             {client.clientId || 'N/A'}
-                           </span> */}
+                           {client.clientMasterId?.clientId && (
+                             <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-slate-200/70 text-slate-600 tracking-wider">
+                               {client.clientMasterId.clientId}
+                             </span>
+                           )}
                         </div>
                         <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1.5 mt-1">
                           <User size={10} className="text-slate-400"/> {client.assesseeName}
@@ -887,7 +918,7 @@ const GstReturns = () => {
 
                       <td className="py-4 px-2">
                         <div className="font-mono text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-1 rounded-md inline-block uppercase shadow-sm">
-                           {client.clientId || 'N/A'}
+                           {client.pan || 'N/A'}
                         </div>
                       </td>
                       
@@ -902,13 +933,6 @@ const GstReturns = () => {
                           {client.taxpayerType || 'Regular'}
                         </span>
                       </td>
-
-                      {/* <td className="py-4 px-5">
-                        <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                          <CalendarClock size={13} className="text-blue-500" /> 
-                          {client.registrationDate ? new Date(client.registrationDate).toLocaleDateString('en-IN') : 'N/A'}
-                        </span>
-                      </td> */}
 
                       <td className="py-4 px-5">
                         <div className={`text-[10px] font-bold px-2 py-1 rounded border w-max flex items-center gap-1.5 shadow-sm ${client.aadhaarKycStatus === 'Yes' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
@@ -953,6 +977,7 @@ const GstReturns = () => {
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-slate-50 rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
             
+            {/* Sleek Gradient Header */}
             <div className="relative px-8 pt-6 pb-16 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex justify-between items-start overflow-hidden">
               <div className="absolute top-0 right-0 -mt-10 -mr-10 h-40 w-40 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
               
@@ -963,6 +988,12 @@ const GstReturns = () => {
                 <div>
                   <h2 className="text-2xl font-black tracking-tight">{clientToView.tradeName || clientToView.assesseeName}</h2>
                   <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-blue-100 font-medium">
+                    {/* 🔴 CLIENT ID DISPLAY IN MODAL HEADER */}
+                    {clientToView.clientMasterId?.clientId && (
+                      <span className="flex items-center gap-1.5 bg-white/20 px-2.5 py-1 rounded-md border border-white/30 font-mono tracking-wider text-white font-bold">
+                        ID: {clientToView.clientMasterId.clientId}
+                      </span>
+                    )}
                     <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
                       GST: {clientToView.gstin || 'N/A'}
                     </span>
@@ -988,6 +1019,7 @@ const GstReturns = () => {
             
             <div className="overflow-y-auto p-6 md:p-8 space-y-6 custom-scrollbar">
               
+              {/* Top Row: General Info & Filing Status */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
                 {/* Contact & Registration Card */}
@@ -1131,7 +1163,7 @@ const GstReturns = () => {
 
             </div>
             
-            <div className="flex justify-between items-center p-5 border-t border-slate-200 bg-white rounded-b-3xl">
+            <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
               {isAdmin ? (
                 <button 
                   onClick={() => { setIsViewModalOpen(false); confirmDelete(clientToView); }} 
@@ -1360,63 +1392,78 @@ const GstReturns = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="overflow-y-auto p-8 space-y-8 custom-scrollbar">
-              
-              {!editMode && (
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 p-5 rounded-2xl shadow-inner">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-blue-800 mb-2 flex items-center gap-2">
-                    <UserCheck size={16} /> Quick Import Existing CRM Client
-                  </label>
-                  <select value={importClientId} onChange={handleImportSelect} className="w-full text-sm border border-blue-200 bg-white rounded-xl p-3.5 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
-                    <option value="">-- Click here to select a client ({importList.length} pending imports) --</option>
-                    {importList.map(c => (
-                      <option key={c._id} value={c._id}>{c.tradeName ? `${c.assesseeName} (${c.tradeName})` : c.assesseeName} - {c.mobile}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* 🔴 NEW ID READ-ONLY INPUT */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Generated Client ID</label>
-                  <input type="text" name="clientId" value={formData.clientId} onChange={handleChange} disabled={!isAdmin} className="bg-transparent font-mono text-lg font-black text-slate-800 outline-none w-32 uppercase" />
-                </div>
-                {!editMode && <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">Auto-Generated</span>}
-              </div>
 
               {/* SECTION 1: CORE INFO */}
               <div>
                 <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 mb-4">1. Primary Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Client / Assessee Name *</label>
-                    <input type="text" name="assesseeName" required value={formData.assesseeName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20" />
+                  
+                  {/* PAN AUTOCOMPLETE DROPDOWN */}
+                  <div className="md:col-span-1 relative">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">PAN Number *</label>
+                    <input 
+                      type="text" 
+                      name="pan" 
+                      required 
+                      maxLength="10"
+                      value={formData.pan} 
+                      onChange={handlePanChange}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      autoComplete="off"
+                      disabled={editMode && !isAdmin} 
+                      className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 uppercase focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 outline-none relative z-10" 
+                    />
+                    {fetchingPan && !editMode && <Loader2 size={14} className="absolute right-3 top-10 animate-spin text-blue-500 z-20"/>}
+                    
+                    {/* Suggestion List Box */}
+                    {showSuggestions && !editMode && panSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto custom-scrollbar">
+                        {panSuggestions.map((client) => (
+                          <div 
+                            key={client._id} 
+                            onClick={() => handleSelectSuggestion(client)}
+                            className="p-3 border-b border-slate-50 hover:bg-blue-50 cursor-pointer transition-colors"
+                          >
+                            <p className="text-xs font-black text-slate-800 tracking-wider uppercase">{client.pan}</p>
+                            <p className="text-[10px] font-bold text-slate-500 truncate">{client.name}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
+
+                  <div className="md:col-span-1">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Client / Assessee Name *</label>
+                    <input type="text" name="assesseeName" required value={formData.assesseeName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
+                  </div>
+                  
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Trade / Business Name</label>
-                    <input type="text" name="tradeName" value={formData.tradeName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20" />
+                    <input type="text" name="tradeName" value={formData.tradeName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
+
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">GSTIN Number *</label>
-                    <input type="text" name="gstin" required value={formData.gstin} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 uppercase focus:ring-2 focus:ring-blue-500/20" />
+                    <input type="text" name="gstin" required value={formData.gstin} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 uppercase focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
+
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Mobile Number *</label>
-                    <input type="tel" name="mobile" required value={formData.mobile} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20" />
+                    <input type="tel" name="mobile" required value={formData.mobile} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Email ID</label>
-                    <input type="email" name="email" value={formData.email} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20" />
+                    <input type="email" name="email" value={formData.email} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Authorised Person</label>
-                    <input type="text" name="authorisedPersonName" value={formData.authorisedPersonName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20" />
+                    <input type="text" name="authorisedPersonName" value={formData.authorisedPersonName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Taxpayer Type</label>
-                      <select name="taxpayerType" value={formData.taxpayerType} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20">
+                      <select name="taxpayerType" value={formData.taxpayerType} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100">
                         <option value="Regular">Regular</option>
                         <option value="IFF">IFF</option>
                         <option value="Composition">Composition</option>
@@ -1424,7 +1471,7 @@ const GstReturns = () => {
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Aadhaar KYC</label>
-                      <select name="aadhaarKycStatus" value={formData.aadhaarKycStatus} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20">
+                      <select name="aadhaarKycStatus" value={formData.aadhaarKycStatus} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100">
                         <option value="No">No (Pending)</option>
                         <option value="Yes">Yes (Verified)</option>
                       </select>
@@ -1432,7 +1479,7 @@ const GstReturns = () => {
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">State</label>
-                    <input type="text" name="state" value={formData.state} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="e.g. Delhi" className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20" />
+                    <input type="text" name="state" value={formData.state} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="e.g. Delhi" className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
                 </div>
               </div>
@@ -1453,7 +1500,7 @@ const GstReturns = () => {
                   </div>
                   <div className="md:col-span-1">
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-600 mb-1.5">Bank Linked Status</label>
-                    <select name="bankLinkedStatus" value={formData.bankLinkedStatus} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-bold border border-emerald-200 bg-white rounded-xl p-3 focus:ring-2 focus:ring-emerald-500/20">
+                    <select name="bankLinkedStatus" value={formData.bankLinkedStatus} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-bold border border-emerald-200 bg-white rounded-xl p-3 focus:ring-2 focus:ring-emerald-500/20 disabled:bg-slate-100">
                       <option value="Not Updated">Not Updated</option>
                       <option value="Updated">Updated</option>
                     </select>
@@ -1470,7 +1517,6 @@ const GstReturns = () => {
                     </div>
                   </div>
 
-                  {/* 🔴 NEW: GSTR-1 & 3B Dates in ADD/EDIT FORM */}
                   <div className="md:col-span-2 mt-4">
                     <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3 border-b border-slate-200 pb-1">Monthly Return Tracking</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -1507,7 +1553,7 @@ const GstReturns = () => {
                 </div>
               </div>
 
-              {/* SECTION 3: FEES & PAYMENTS (ADVANCED LEDGER) */}
+              {/* SECTION 3: FEES & PAYMENTS */}
               <div>
                 <h3 className="text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 mb-4">3. Fees & Payment Ledger</h3>
                 

@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   CalendarDays, Search, Building2, UserCircle, Save, 
-  Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle
+  Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle, UserMinus
 } from 'lucide-react';
 
 const Attendance = () => {
@@ -26,7 +26,6 @@ const Attendance = () => {
   const [sheetData, setSheetData] = useState([]);
   const [todayTeamAtt, setTodayTeamAtt] = useState([]);
 
-  // 🔴 1. ADVANCED TIME CHECKER (Handles AM/PM & 24hr formats flawlessly)
   const checkIsLate = (inTimeStr, shiftStartStr) => {
     if (!inTimeStr || !shiftStartStr) return false;
     const parseTime = (timeStr) => {
@@ -40,40 +39,40 @@ const Attendance = () => {
     return parseTime(inTimeStr) > parseTime(shiftStartStr); 
   };
 
-  // 🔴 2. FULL MONTH SWEEP ALGORITHM (Forces 3-Day Rule across the entire month dynamically)
   const enforceLatePolicy = (sheet, shiftStartTime) => {
     let lateCounter = 0;
     
     return sheet.map(row => {
-      // Create a fresh copy of the row
       const newRow = { ...row };
 
       if (newRow.inTime && !['Absent', 'Leave', 'Holiday', 'Weekly Off'].includes(newRow.status)) {
+         
+         if (!newRow.status) {
+             newRow.status = 'Present';
+         }
+
          newRow.isLate = checkIsLate(newRow.inTime, shiftStartTime);
          
          if (newRow.isLate) {
-           lateCounter++; // Increment late counter chronologically
+           lateCounter++; 
            
            if (lateCounter > 3) {
-             // 4th late and beyond -> Force Auto Half Day
              if (!newRow.status || newRow.status === 'Present') {
                newRow.status = 'Half Day';
                newRow.remarks = `Auto-Half Day (Late mark #${lateCounter} > 3 allowed).`;
              }
            } else {
-             // 1st, 2nd, 3rd late -> Warning Only
              if (newRow.status === 'Half Day' && newRow.remarks?.includes('Auto-Half Day')) {
-               newRow.status = 'Present'; // Revert back if user deleted a previous late mark
+               newRow.status = 'Present'; 
              }
              if (!newRow.remarks || newRow.remarks.includes('Auto-Half Day') || newRow.remarks.includes('Warning: Late entry')) {
                newRow.remarks = `Warning: Late entry (${lateCounter}/3 allowed).`;
              }
            }
          } else {
-           // Not Late (On Time)
            newRow.isLate = false;
            if (newRow.remarks?.includes('Auto-Half Day') || newRow.remarks?.includes('Warning: Late entry')) {
-             newRow.remarks = ''; // Clear auto-remarks
+             newRow.remarks = ''; 
              if (newRow.status === 'Half Day') newRow.status = 'Present';
            }
          }
@@ -90,11 +89,11 @@ const Attendance = () => {
         const headers = { Authorization: `Bearer ${user.token}` };
         
         const empRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/employees?company=${companyFilter}`, { headers });
-        const activeEmps = empRes.data.filter(emp => emp.status === 'Active');
-        setEmployees(activeEmps);
+        setEmployees(empRes.data || []);
         
-        if (activeEmps.length > 0 && !selectedEmployee) {
-          setSelectedEmployee(activeEmps[0]._id);
+        if (empRes.data.length > 0 && !selectedEmployee) {
+          const firstActive = empRes.data.find(emp => emp.status === 'Active');
+          setSelectedEmployee(firstActive ? firstActive._id : empRes.data[0]._id);
         }
 
         const attRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance?company=${companyFilter}`, { headers });
@@ -152,7 +151,6 @@ const Attendance = () => {
           }
         }
         
-        // Ensure policies are completely applied on initial load
         const policyEnforcedSheet = enforceLatePolicy(generatedSheet, shiftStartTime);
         setSheetData(policyEnforcedSheet);
 
@@ -203,7 +201,6 @@ const Attendance = () => {
     const empDetails = employees.find(e => e._id === selectedEmployee);
     const shiftStartTime = empDetails?.shiftStartTime || '09:30';
 
-    // Total Hours Logic
     if (field === 'inTime' || field === 'outTime') {
       const inT = updatedSheet[index].inTime;
       const outT = updatedSheet[index].outTime;
@@ -220,7 +217,6 @@ const Attendance = () => {
       }
     }
 
-    // Status Reset Logic
     if (field === 'status') {
       if (['Absent', 'Leave', 'Holiday', 'Weekly Off'].includes(value)) {
         updatedSheet[index].inTime = '';
@@ -232,11 +228,9 @@ const Attendance = () => {
       }
     }
 
-    // 🔴 RECALCULATE MONTHLY LATE POLICY INSTANTLY
     updatedSheet = enforceLatePolicy(updatedSheet, shiftStartTime);
     setSheetData(updatedSheet);
 
-    // BACKGROUND LOCATION FETCH (Does not freeze UI typing)
     if (field === 'inTime' && value !== '') {
        setFetchingLocation(true);
        fetchCurrentLocation().then(loc => {
@@ -271,7 +265,7 @@ const Attendance = () => {
         return { 
           ...row, 
           status: 'Present', 
-          inTime: shiftStartTime, // Put exact shift time so they aren't late
+          inTime: shiftStartTime, 
           outTime: '18:30', 
           totalHours: '9h 0m',
           inLocation: 'System Generated',
@@ -341,7 +335,9 @@ const Attendance = () => {
     let absent = [];
     let notMarked = [];
 
-    employees.forEach(emp => {
+    const activeEmps = employees.filter(e => e.status === 'Active');
+
+    activeEmps.forEach(emp => {
       const record = todayTeamAtt.find(a => {
           const recordEmpId = a.employee._id ? a.employee._id : a.employee;
           return recordEmpId === emp._id;
@@ -381,11 +377,6 @@ const Attendance = () => {
         <span className="truncate" title={address}>
           <span className={prefix === 'IN' ? 'text-blue-500' : 'text-amber-500'}>{prefix}:</span> {address}
         </span>
-        {/* {link && (
-          <a href={link} target="_blank" rel="noreferrer" className="text-[9px] text-blue-600 hover:text-blue-800 underline mt-0.5 flex items-center gap-1">
-            <ExternalLink size={10} /> View Map
-          </a>
-        )} */}
       </div>
     );
   };
@@ -393,7 +384,7 @@ const Attendance = () => {
   const activeEmployeeData = employees.find(e => e._id === selectedEmployee);
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6 pb-12">
+    <div className="max-w-7xl mx-auto p-6 space-y-6 pb-0 relative">
       <Toaster position="top-right" />
 
       {fetchingLocation && (
@@ -406,6 +397,7 @@ const Attendance = () => {
           </div>
       )}
 
+      {/* 1. HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
@@ -415,36 +407,7 @@ const Attendance = () => {
         </div>
       </div>
 
-      {sheetData.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <div className="bg-slate-800 text-white p-3 rounded-2xl shadow-sm border border-slate-700">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Total Days</p>
-            <h3 className="text-xl font-black mt-1">{summary.totalDays}</h3>
-          </div>
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Present</p>
-            <h3 className="text-xl font-black text-blue-700 mt-1">{summary.present + summary.wfh}</h3>
-          </div>
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-rose-500">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Absent/Leave</p>
-            <h3 className="text-xl font-black text-rose-700 mt-1">{summary.absent + summary.leave}</h3>
-          </div>
-          
-          <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 shadow-sm">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-amber-600">Late Entries</p>
-            <h3 className="text-xl font-black text-amber-700 mt-1">{summary.totalLateMarks} <span className="text-[10px] text-amber-500 font-medium">/ 3 Allowed</span></h3>
-          </div>
-          <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-200 shadow-sm">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Paid Days</p>
-            <h3 className="text-xl font-black text-emerald-700 mt-1">{summary.paidDays}</h3>
-          </div>
-          <div className="bg-rose-50 p-3 rounded-2xl border border-rose-200 shadow-sm">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-rose-600">LOP Days</p>
-            <h3 className="text-xl font-black text-rose-700 mt-1">{summary.lopDays}</h3>
-          </div>
-        </div>
-      )}
-
+      {/* 2. TODAY'S TEAM STATUS */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
           <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
               <Users size={18} className="text-blue-600" /> Today's Team Status ({new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })})
@@ -491,39 +454,96 @@ const Attendance = () => {
           </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="w-full md:w-2/3 flex flex-col sm:flex-row gap-4">
-          <div className="flex-1">
-            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><UserCircle size={12}/> Select Employee</label>
-            <div className="flex items-center gap-2">
-              <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none">
-                {employees.length === 0 ? <option value="">No Active Employees</option> : null}
-                {employees.map(emp => (
-                  <option key={emp._id} value={emp._id}>{emp.name} ({emp.empId})</option>
-                ))}
-              </select>
-              {activeEmployeeData && (
-                <div className="bg-blue-50 border border-blue-100 text-blue-700 text-[10px] font-bold px-3 py-2 rounded-xl whitespace-nowrap" title="Shift Start Time">
-                  Shift: {activeEmployeeData.shiftStartTime || '09:30'}
-                </div>
-              )}
+      {/* 3. STICKY COMMAND CENTER (Sticks to top of screen on page scroll) */}
+      <div className="sticky -top-6 z-40 px-6 -mx-6 space-y-4">
+        
+        {/* Controls */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="w-full md:w-2/3 flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><UserCircle size={12}/> Select Employee</label>
+              <div className="flex items-center gap-2">
+                <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none">
+                  {employees.length === 0 ? <option value="">No Employees</option> : null}
+                  {employees.map(emp => (
+                    <option key={emp._id} value={emp._id}>
+                      {emp.name} ({emp.empId}) {emp.status !== 'Active' ? `- [${emp.status.toUpperCase()}]` : ''}
+                    </option>
+                  ))}
+                </select>
+                {activeEmployeeData && (
+                  <div className="bg-blue-50 border border-blue-100 text-blue-700 text-[10px] font-bold px-3 py-2 rounded-xl whitespace-nowrap" title="Shift Start Time">
+                    Shift: {activeEmployeeData.shiftStartTime || '09:30'}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1">
+              <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><Clock size={12}/> Select Month</label>
+              <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none" />
             </div>
           </div>
 
-          <div className="flex-1">
-            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><Clock size={12}/> Select Month</label>
-            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 focus:ring-2 focus:ring-blue-500/20 outline-none" />
-          </div>
+          <button onClick={handleSave} disabled={saving || sheetData.length === 0} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50 mt-4 md:mt-0">
+            {saving ? <RefreshCw size={18} className="animate-spin"/> : <Save size={18} strokeWidth={2.5} />} 
+            Save Attendance Sheet
+          </button>
         </div>
 
-        <button onClick={handleSave} disabled={saving || sheetData.length === 0} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50 mt-4 md:mt-0">
-          {saving ? <RefreshCw size={18} className="animate-spin"/> : <Save size={18} strokeWidth={2.5} />} 
-          Save Attendance Sheet
-        </button>
+        {/* Warning if Offboarded */}
+        {activeEmployeeData && activeEmployeeData.status !== 'Active' && (
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-4 animate-in slide-in-from-top-2">
+            <div className="bg-rose-100 p-2 rounded-full text-rose-600">
+              <UserMinus size={24}/>
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-rose-800 uppercase tracking-tight">Warning: Employee is {activeEmployeeData.status}</h4>
+              <div className="flex items-center gap-4 mt-1 text-[11px] font-bold text-rose-600">
+                {activeEmployeeData.lastWorkingDate && <span>• Last Day: {new Date(activeEmployeeData.lastWorkingDate).toLocaleDateString('en-GB')}</span>}
+                {activeEmployeeData.resignationDate && <span>• Resigned: {new Date(activeEmployeeData.resignationDate).toLocaleDateString('en-GB')}</span>}
+                {activeEmployeeData.noticePeriod && <span>• Notice Period: {activeEmployeeData.noticePeriod}</span>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Summary Cards */}
+        {sheetData.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="bg-slate-800 text-white p-3 rounded-2xl shadow-sm border border-slate-700">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Total Days</p>
+              <h3 className="text-xl font-black mt-1">{summary.totalDays}</h3>
+            </div>
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Present</p>
+              <h3 className="text-xl font-black text-blue-700 mt-1">{summary.present + summary.wfh}</h3>
+            </div>
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-rose-500">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Absent/Leave</p>
+              <h3 className="text-xl font-black text-rose-700 mt-1">{summary.absent + summary.leave}</h3>
+            </div>
+            <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 shadow-sm">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-amber-600">Late Entries</p>
+              <h3 className="text-xl font-black text-amber-700 mt-1">{summary.totalLateMarks} <span className="text-[10px] text-amber-500 font-medium">/ 3 Allowed</span></h3>
+            </div>
+            <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-200 shadow-sm">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Paid Days</p>
+              <h3 className="text-xl font-black text-emerald-700 mt-1">{summary.paidDays}</h3>
+            </div>
+            <div className="bg-rose-50 p-3 rounded-2xl border border-rose-200 shadow-sm">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-rose-600">LOP Days</p>
+              <h3 className="text-xl font-black text-rose-700 mt-1">{summary.lopDays}</h3>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+      {/* 4. TABLE SECTION */}
+      <div className="sticky z-40 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+        
+        {/* 🔴 LINE 1 (Title): Yeh bahar hai, isliye hamesha table ke upar fixed rahegi */}
+        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center z-20 shadow-sm ">
            <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
              Monthly Time & Location Sheet 
              <span className="bg-amber-100 text-amber-700 text-[9px] px-2 py-0.5 rounded font-bold uppercase ml-2 flex items-center gap-1">
@@ -535,19 +555,23 @@ const Attendance = () => {
            </button>
         </div>
 
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse min-w-[1000px]">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-wider">
-                <th className="py-3 px-4 w-28">Date</th>
-                <th className="py-3 px-4 w-36">Status</th>
-                <th className="py-3 px-4 w-28">In Time</th>
-                <th className="py-3 px-4 w-28">Out Time</th>
-                <th className="py-3 px-4 w-48">GPS Location Info</th>
-                <th className="py-3 px-4 w-24">Total Hrs</th>
-                <th className="py-3 px-4">Remarks / Auto-Notes</th>
+        {/* 🔴 INTERNAL SCROLL CONTAINER: Isme max-height hai, taaki dates scroll hon par heding nahi */}
+        <div className="overflow-auto custom-scrollbar max-h-[48vh]">
+          <table className="w-full text-left border-collapse min-w-[1000px] relative">
+            
+            {/* 🔴 LINE 2 (Headers): Sticky Top */}
+            <thead className="sticky top-0 z-10 shadow-sm">
+              <tr className="border-b border-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-wider">
+                <th className="py-3 px-4 w-28 bg-slate-100">Date</th>
+                <th className="py-3 px-4 w-36 bg-slate-100">Status</th>
+                <th className="py-3 px-4 w-28 bg-slate-100">In Time</th>
+                <th className="py-3 px-4 w-28 bg-slate-100">Out Time</th>
+                <th className="py-3 px-4 w-48 bg-slate-100">GPS Location Info</th>
+                <th className="py-3 px-4 w-24 bg-slate-100">Total Hrs</th>
+                <th className="py-3 px-4 bg-slate-100">Remarks / Auto-Notes</th>
               </tr>
             </thead>
+            
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
                 <tr><td colSpan="7" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Generating Sheet...</td></tr>
@@ -594,7 +618,7 @@ const Attendance = () => {
                           disabled={['Absent', 'Leave', 'Holiday', 'Weekly Off'].includes(row.status)}
                           className={`w-full p-1.5 border rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50 disabled:bg-slate-100 ${row.isLate ? 'border-rose-300 text-rose-700 bg-rose-50' : 'border-slate-200'}`}
                         />
-                        {row.isLate && <span className="absolute top-0 right-3 text-[8px] bg-rose-600 text-white px-1 rounded-sm">LATE</span>}
+                        {row.isLate && <span className="absolute top-0 right-3 text-[8px] bg-rose-600 text-white px-1 rounded-sm z-0">LATE</span>}
                       </td>
                       <td className="py-2 px-4">
                         <input 

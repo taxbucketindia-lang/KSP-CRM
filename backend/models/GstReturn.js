@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 
 const gstReturnSchema = new mongoose.Schema({
+
+  clientMasterId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientMaster' },
+  pan: { type: String, uppercase: true },
+
   clientId: { type: String, unique: true, sparse: true },
   crmClientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },
 

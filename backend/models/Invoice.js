@@ -3,6 +3,12 @@ import mongoose from 'mongoose';
 const invoiceSchema = new mongoose.Schema({
   invoiceNo: { type: String, required: true },
   invoiceDate: { type: String, required: true },
+
+  paymentStatus: { 
+    type: String, 
+    enum: ['Pending', 'Paid'], 
+    default: 'Pending' 
+  },
   
   companyDetails: {
     name: String,
@@ -43,6 +49,11 @@ const invoiceSchema = new mongoose.Schema({
   totalGstAmount: { type: Number, required: true },
   totalAmountAfterTax: { type: Number, required: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+  isGstEnabled: {
+    type: Boolean,
+    default: true 
+  },
   
   // 🔴 NEW: Logs history for sent invoices
   sendLogs: [{

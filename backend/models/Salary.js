@@ -25,7 +25,8 @@ const salarySchema = new mongoose.Schema({
     lopDeduction: { type: Number, default: 0 },
     otherDeduction: { type: Number, default: 0 },
     incentiveBonus: { type: Number, default: 0 },
-    reimbursement: { type: Number, default: 0 }
+    reimbursement: { type: Number, default: 0 },
+    latesForgiven: { type: Number, default: 0 }
   },
 
   // Final Auto Calculated

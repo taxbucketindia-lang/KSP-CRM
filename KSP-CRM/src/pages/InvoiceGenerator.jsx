@@ -1,10 +1,10 @@
-import React, { useState, useContext } from 'react';
-import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useContext } from 'react';
+import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee } from 'lucide-react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
-import { toJpeg } from 'html-to-image'; // 🔴 IMPORT
-import jsPDF from 'jspdf'; // 🔴 IMPORT
+import { toJpeg } from 'html-to-image';
+import jsPDF from 'jspdf';
 
 // HELPER FUNCTION: Number to Words (Indian Format)
 const numberToWords = (num) => {
@@ -46,6 +46,7 @@ const InvoiceGenerator = () => {
   
   const [isTaxbucket, setIsTaxbucket] = useState(true); 
   const [isProforma, setIsProforma] = useState(false); 
+  const [isGstEnabled, setIsGstEnabled] = useState(true); 
   
   const [companyDetails, setCompanyDetails] = useState(defaultCompany);
   const [showQr, setShowQr] = useState(true); 
@@ -68,9 +69,13 @@ const InvoiceGenerator = () => {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 🔴 SEND INVOICE MODAL STATE
+  // 🔴 Autocomplete States
+  const [fetchingPan, setFetchingPan] = useState(false);
+  const [panSuggestions, setPanSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   const [showSendModal, setShowSendModal] = useState(false);
-  const [sendMethod, setSendMethod] = useState('whatsapp'); // 'whatsapp' | 'email'
+  const [sendMethod, setSendMethod] = useState('whatsapp'); 
   const [sendContact, setSendContact] = useState('');
 
   const handleCompanyToggle = () => {
@@ -98,8 +103,48 @@ const InvoiceGenerator = () => {
     }
   };
 
+  // 🔴 PAN AUTOCOMPLETE LOGIC
+  const handlePanChange = async (e) => {
+    const val = e.target.value.toUpperCase();
+    setCustomer(prev => ({ ...prev, pan: val }));
+
+    if (val.length >= 2) {
+      setFetchingPan(true);
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
+        setPanSuggestions(res.data || []);
+        setShowSuggestions(true);
+      } catch (error) {
+        console.error("Error fetching PAN details", error);
+      } finally {
+        setFetchingPan(false);
+      }
+    } else {
+      setPanSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleSelectSuggestion = (client) => {
+    setCustomer(prev => ({
+      ...prev,
+      pan: client.pan,
+      name: client.name || prev.name,
+      phone: client.mobile || prev.phone,
+      email: client.email || prev.email,
+      address: [client.address, client.district, client.pinCode].filter(Boolean).join(', ') || prev.address,
+      gstin: client.gstin || prev.gstin,
+      placeOfSupply: client.state || prev.placeOfSupply
+    }));
+    setShowSuggestions(false);
+    toast.success("✅ Client Data Auto-Filled!");
+  };
+
   const taxableAmount = items.reduce((acc, item) => acc + (Number(item.qty || 0) * Number(item.rate || 0)), 0);
-  const totalGstAmount = items.reduce((acc, item) => acc + ((Number(item.qty || 0) * Number(item.rate || 0) * Number(item.gstRate || 0)) / 100), 0);
+  const totalGstAmount = isGstEnabled 
+    ? items.reduce((acc, item) => acc + ((Number(item.qty || 0) * Number(item.rate || 0) * Number(item.gstRate || 0)) / 100), 0)
+    : 0;
   const totalAmountAfterTax = taxableAmount + totalGstAmount;
 
   const addItem = () => setItems([...items, { description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
@@ -118,6 +163,19 @@ const InvoiceGenerator = () => {
     }
   };
 
+  // 🔴 TOGGLE PAYMENT STATUS (IN HISTORY)
+  const togglePaymentStatus = async (invId, currentStatus) => {
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
+      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${invId}`, { paymentStatus: newStatus }, { headers });
+      toast.success(`Payment marked as ${newStatus}`);
+      fetchHistory(); // Refresh list
+    } catch (error) {
+      toast.error("Failed to update payment status");
+    }
+  };
+
   const handleSaveInvoice = async (returnIdOnly = false) => {
     try {
       if (!invoiceNo || !customer.name || !companyDetails.name) {
@@ -129,7 +187,7 @@ const InvoiceGenerator = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
 
       const payload = {
-        invoiceNo, invoiceDate, companyDetails, isTaxbucket, isProforma, showQr, customer, items, bank,
+        invoiceNo, invoiceDate, companyDetails, isTaxbucket, isProforma, isGstEnabled, showQr, customer, items, bank,
         taxableAmount, totalGstAmount, totalAmountAfterTax,
         logoImage, stampImage, customQrImage 
       };
@@ -161,6 +219,7 @@ const InvoiceGenerator = () => {
     setCompanyDetails(inv.companyDetails || defaultCompany);
     setIsTaxbucket(inv.isTaxbucket !== undefined ? inv.isTaxbucket : true);
     setIsProforma(inv.isProforma || false); 
+    setIsGstEnabled(inv.isGstEnabled !== undefined ? inv.isGstEnabled : true);
     setShowQr(inv.showQr !== undefined ? inv.showQr : true); 
     setCustomer(inv.customer || {});
     setItems(inv.items && inv.items.length > 0 ? inv.items : [{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
@@ -177,6 +236,7 @@ const InvoiceGenerator = () => {
     setInvoiceDate("");
     setIsTaxbucket(true);
     setIsProforma(false);
+    setIsGstEnabled(true);
     setCompanyDetails(defaultCompany);
     setShowQr(true);
     setCustomer({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
@@ -194,28 +254,20 @@ const InvoiceGenerator = () => {
     setShowSendModal(true);
   };
 
-  // 🔴 NEW FUNCTION: Generate PDF and Send
-  // 🔴 UPDATED FUNCTION: Generate PDF using html-to-image
   const handleSendInvoice = async (e) => {
     e.preventDefault();
-    
-    // 1. Ensure invoice is saved to get ID
     const currentInvId = await handleSaveInvoice(true);
     if (!currentInvId) return;
 
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      
-      // 2. Generate PDF from DOM using html-to-image
       const element = document.getElementById('invoice-printable');
       
-      // html-to-image directly gives base64 JPEG and supports all modern CSS
       const imgData = await toJpeg(element, { quality: 0.95, pixelRatio: 2 });
       
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      // Calculate height based on element's aspect ratio
       const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
       
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
@@ -231,7 +283,6 @@ const InvoiceGenerator = () => {
       };
 
       if (sendMethod === 'email') {
-        // Get Base64 without the 'data:image/jpeg;base64,' prefix
         const pdfBase64 = pdf.output('datauristring').split(',')[1];
         payload.pdfBase64 = pdfBase64;
         
@@ -239,14 +290,11 @@ const InvoiceGenerator = () => {
         toast.success(`Invoice sent via Email to ${sendContact}`);
       
       } else if (sendMethod === 'whatsapp') {
-        // For WhatsApp, we trigger auto-download first
         const fileName = `${invoiceNo.replace(/\//g, '-')}.pdf`;
         pdf.save(fileName);
         
-        // Log in backend
         await axios.post(`${import.meta.env.VITE_API_URL}/invoices/${currentInvId}/send`, payload, { headers });
         
-        // Open WhatsApp Web with text
         const text = `Hello ${customer.name},\n\nPlease find attached your ${isProforma ? 'Proforma Invoice' : 'Tax Invoice'} (${invoiceNo}) for Rs. ${totalAmountAfterTax.toLocaleString('en-IN')}.\n\nThank you,\n${companyDetails.name}`;
         const encodedText = encodeURIComponent(text);
         const waLink = `https://wa.me/91${sendContact.replace(/\D/g, '')}?text=${encodedText}`;
@@ -254,7 +302,6 @@ const InvoiceGenerator = () => {
         
         toast.success(`PDF Downloaded! Please attach it in the WhatsApp chat.`);
       }
-
       setShowSendModal(false);
     } catch (error) {
       console.error("PDF Generation Error:", error);
@@ -272,7 +319,6 @@ const InvoiceGenerator = () => {
     <div className="max-w-6xl mx-auto p-6 space-y-8 pb-12">
       <Toaster position="top-right"/>
       
-      {/* PRINT STYLING */}
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
           body * { visibility: hidden; }
@@ -290,14 +336,14 @@ const InvoiceGenerator = () => {
       <div className="print:hidden bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
         <div className="flex flex-wrap justify-between items-center border-b pb-4 gap-3">
           <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
-            <FileText className="text-blue-600"/> Tax Invoice Generator {invoiceId ? "(Editing)" : ""}
+            <FileText className="text-blue-600"/> Invoice Generator {invoiceId ? "(Editing)" : ""}
           </h2>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={handleNewInvoice} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold transition-all">
               + New Invoice
             </button>
             <button onClick={fetchHistory} className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md transition-all">
-              <History size={16}/> History
+              <History size={16}/> History & Payments
             </button>
             <button onClick={handleSaveInvoice} disabled={loading} className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md transition-all">
               <Save size={16}/> {invoiceId ? "Update" : "Save"}
@@ -312,14 +358,14 @@ const InvoiceGenerator = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="flex justify-center items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
              <div className="flex items-center gap-3">
-               <span className={`text-sm font-bold ${isTaxbucket ? 'text-blue-600' : 'text-slate-400'}`}>TaxBucket Info</span>
+               <span className={`text-sm font-bold ${isTaxbucket ? 'text-blue-600' : 'text-slate-400'}`}>TaxBucket</span>
                <button type="button" onClick={handleCompanyToggle} className="focus:outline-none transition-transform hover:scale-105">
                  {isTaxbucket ? <ToggleLeft size={36} className="text-blue-600"/> : <ToggleRight size={36} className="text-emerald-600"/>}
                </button>
-               <span className={`text-sm font-bold ${!isTaxbucket ? 'text-emerald-600' : 'text-slate-400'}`}>Other Company</span>
+               <span className={`text-sm font-bold ${!isTaxbucket ? 'text-emerald-600' : 'text-slate-400'}`}>Other Co.</span>
              </div>
           </div>
           
@@ -329,7 +375,17 @@ const InvoiceGenerator = () => {
                <button type="button" onClick={() => setIsProforma(!isProforma)} className="focus:outline-none transition-transform hover:scale-105">
                  {!isProforma ? <ToggleLeft size={36} className="text-blue-600"/> : <ToggleRight size={36} className="text-purple-600"/>}
                </button>
-               <span className={`text-sm font-bold ${isProforma ? 'text-purple-600' : 'text-slate-400'}`}>Proforma Invoice</span>
+               <span className={`text-sm font-bold ${isProforma ? 'text-purple-600' : 'text-slate-400'}`}>Proforma</span>
+             </div>
+          </div>
+
+          <div className="flex justify-center items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
+             <div className="flex items-center gap-3">
+               <span className={`text-sm font-bold ${isGstEnabled ? 'text-blue-600' : 'text-slate-400'}`}>With GST</span>
+               <button type="button" onClick={() => setIsGstEnabled(!isGstEnabled)} className="focus:outline-none transition-transform hover:scale-105">
+                 {isGstEnabled ? <ToggleLeft size={36} className="text-blue-600"/> : <ToggleRight size={36} className="text-amber-600"/>}
+               </button>
+               <span className={`text-sm font-bold ${!isGstEnabled ? 'text-amber-600' : 'text-slate-400'}`}>Without GST</span>
              </div>
           </div>
         </div>
@@ -382,7 +438,32 @@ const InvoiceGenerator = () => {
           </div>
         )}
 
-        <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* 🔴 NAYA PAN AUTOCOMPLETE DROPDOWN */}
+          <div className="relative z-20">
+            <label className="block text-xs font-bold uppercase text-slate-500 mb-1 text-blue-600">Search by PAN *</label>
+            <input 
+              type="text" 
+              placeholder="Type PAN to auto-fill..." 
+              value={customer.pan} 
+              onChange={handlePanChange} 
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
+              className="w-full p-2.5 border border-blue-300 bg-blue-50 rounded-lg text-sm font-bold uppercase relative z-10 focus:ring-2 focus:ring-blue-500/50 outline-none" 
+              autoComplete="off"
+            />
+            {fetchingPan && <Loader2 size={14} className="absolute right-3 top-9 animate-spin text-blue-500 z-20"/>}
+            {showSuggestions && panSuggestions.length > 0 && (
+               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto">
+                 {panSuggestions.map((client) => (
+                   <div key={client._id} onClick={() => handleSelectSuggestion(client)} className="p-3 border-b border-slate-50 hover:bg-blue-50 cursor-pointer transition-colors">
+                     <p className="text-xs font-black text-slate-800 tracking-wider uppercase">{client.pan}</p>
+                     <p className="text-[10px] font-bold text-slate-500 truncate">{client.name}</p>
+                   </div>
+                 ))}
+               </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Invoice Number *</label>
             <input type="text" placeholder="e.g. INV-001" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/>
@@ -410,10 +491,6 @@ const InvoiceGenerator = () => {
           <div>
             <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer GSTIN</label>
             <input type="text" placeholder="GSTIN number" value={customer.gstin} onChange={(e) => setCustomer({...customer, gstin: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/>
-          </div>
-          <div>
-            <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer PAN</label>
-            <input type="text" placeholder="PAN number" value={customer.pan} onChange={(e) => setCustomer({...customer, pan: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/>
           </div>
           <div>
             <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Place of Supply</label>
@@ -468,16 +545,17 @@ const InvoiceGenerator = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-1 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider hidden md:grid">
-             <div className="md:col-span-5">Service / Product Description</div>
+             <div className={isGstEnabled ? "md:col-span-4" : "md:col-span-6"}>Service / Product Description</div>
              <div className="md:col-span-2">HSN / SAC Code</div>
              <div className="md:col-span-1">Quantity</div>
              <div className="md:col-span-2">Rate (₹)</div>
+             {isGstEnabled && <div className="md:col-span-2">GST %</div>}
              <div className="md:col-span-1 text-right">Action</div>
           </div>
 
           {items.map((item, index) => (
             <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-2 items-center bg-slate-50 p-3 rounded-xl">
-              <div className="md:col-span-5">
+              <div className={isGstEnabled ? "md:col-span-4" : "md:col-span-6"}>
                 <input type="text" placeholder="Enter service description..." value={item.description} onChange={(e) => {
                   const list = [...items]; list[index].description = e.target.value; setItems(list);
                 }} className="w-full p-2 border rounded text-xs"/>
@@ -497,6 +575,13 @@ const InvoiceGenerator = () => {
                   const list = [...items]; list[index].rate = Number(e.target.value); setItems(list);
                 }} className="w-full p-2 border rounded text-xs"/>
               </div>
+              {isGstEnabled && (
+                <div className="md:col-span-2">
+                  <input type="number" placeholder="GST %" value={item.gstRate} onChange={(e) => {
+                    const list = [...items]; list[index].gstRate = Number(e.target.value); setItems(list);
+                  }} className="w-full p-2 border rounded text-xs"/>
+                </div>
+              )}
               <div className="md:col-span-1 text-right">
                 {items.length > 1 && (
                   <button type="button" onClick={() => removeItem(index)} className="text-rose-500 hover:bg-rose-50 p-2 rounded">
@@ -509,7 +594,6 @@ const InvoiceGenerator = () => {
         </div>
       </div>
 
-      {/* 🔴 MODAL: SEND INVOICE AS PDF */}
       {showSendModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
@@ -564,12 +648,12 @@ const InvoiceGenerator = () => {
         </div>
       )}
 
-      {/* HISTORY MODAL */}
+      {/* 🔴 PAYMENT TRACKER & HISTORY MODAL */}
       {showHistoryModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-4 max-h-[80vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95">
+          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-purple-600"/> Saved Invoices History</h3>
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-purple-600"/> Saved Invoices & Payments</h3>
               <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-slate-800 bg-slate-100 p-1.5 rounded-lg"><X size={18}/></button>
             </div>
             {historyList.length === 0 ? (
@@ -577,34 +661,47 @@ const InvoiceGenerator = () => {
             ) : (
               <div className="space-y-3">
                 {historyList.map((inv) => (
-                  <div key={inv._id} className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div>
+                  <div key={inv._id} className="flex flex-col md:flex-row justify-between md:items-center bg-slate-50 p-4 rounded-xl border border-slate-200 gap-4">
+                    <div className="flex-1">
                       <p className="font-bold text-blue-900 text-sm">
                          {inv.invoiceNo} - {inv.customer?.name} 
                          {inv.isProforma && <span className="ml-2 bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded uppercase">Proforma</span>}
                       </p>
-                      <p className="text-xs font-semibold text-slate-500 mt-1">{inv.companyDetails?.name || 'Taxbucket'} | Total: ₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</p>
+                      <p className="text-xs font-semibold text-slate-500 mt-1">{inv.companyDetails?.name || 'Taxbucket'} | Total: <span className="text-slate-800 font-bold">₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</span></p>
                       
                       {inv.sendLogs && inv.sendLogs.length > 0 && (
-  <div className="mt-2 space-y-1">
-    {inv.sendLogs.map((log, idx) => (
-      <p key={idx} className="text-[10px] font-bold text-emerald-700 flex flex-wrap items-center gap-1.5 bg-emerald-50 w-fit px-2 py-1 rounded-md border border-emerald-100">
-        <CheckCircle2 size={12}/> 
-        Sent via <span className="uppercase text-emerald-900">{log.method}</span> 
-        to <span className="text-emerald-900">{log.contact}</span> 
-        by <span className="text-emerald-900">{log.sentBy?.name || 'Employee'}</span> 
-        on {new Date(log.sentAt).toLocaleString('en-IN', {
-          day: '2-digit', month: 'short', year: 'numeric', 
-          hour: '2-digit', minute: '2-digit'
-        })}
-      </p>
-    ))}
-  </div>
-)}
+                        <div className="mt-2 space-y-1">
+                          {inv.sendLogs.map((log, idx) => (
+                            <p key={idx} className="text-[10px] font-bold text-slate-600 flex flex-wrap items-center gap-1.5 w-fit">
+                              Sent via <span className="uppercase text-slate-900">{log.method}</span> 
+                              to <span className="text-slate-900">{log.contact}</span> 
+                              on {new Date(log.sentAt).toLocaleDateString('en-IN')}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <button onClick={() => loadInvoiceForEdit(inv)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm">
-                      Load Invoice
-                    </button>
+
+                    <div className="flex items-center gap-3">
+                      {/* PAYMENT STATUS TOGGLE */}
+                      <div className="flex flex-col items-center">
+                        <span className="text-[9px] font-bold uppercase text-slate-400 mb-1">Payment Status</span>
+                        {inv.paymentStatus === 'Paid' ? (
+                          <button onClick={() => togglePaymentStatus(inv._id, inv.paymentStatus)} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-200 flex items-center gap-1 transition-colors">
+                            <CheckCircle2 size={14}/> Paid
+                          </button>
+                        ) : (
+                          <button onClick={() => togglePaymentStatus(inv._id, inv.paymentStatus)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-200 flex items-center gap-1 transition-colors relative group">
+                            <AlertTriangle size={14}/> Pending Due
+                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-800 text-white text-[10px] px-2 py-1 rounded w-max">Click to Mark as Paid</div>
+                          </button>
+                        )}
+                      </div>
+
+                      <button onClick={() => loadInvoiceForEdit(inv)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm h-max">
+                        Load Details
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -614,7 +711,7 @@ const InvoiceGenerator = () => {
       )}
 
       {/* ========================================================= */}
-      {/* PRINTABLE INVOICE TEMPLATE (NO CHANGES HERE) */}
+      {/* PRINTABLE INVOICE TEMPLATE */}
       {/* ========================================================= */}
       <div id="invoice-printable" className="bg-white p-8 border-2 border-blue-900 rounded-none shadow-xl max-w-[800px] mx-auto text-slate-900 font-sans relative">
         <div className="flex justify-between items-start border-b-2 border-blue-900 pb-4 mb-4">
@@ -648,7 +745,7 @@ const InvoiceGenerator = () => {
             GSTIN : <span className="text-blue-900 font-mono ml-1">{companyDetails.gstin || '---'}</span>
           </div>
           <div className={`p-2 text-center font-black ${isProforma ? 'text-purple-900 bg-purple-50' : 'text-blue-900 bg-slate-100'} text-sm tracking-wide flex items-center justify-center`}>
-            {isProforma ? 'PROFORMA INVOICE' : 'TAX INVOICE'}
+            {isProforma ? 'PROFORMA INVOICE' : (isGstEnabled ? 'TAX INVOICE' : 'BILL OF SUPPLY / INVOICE')}
           </div>
           <div className="p-2 text-right font-bold text-slate-600 text-[11px] bg-slate-50 flex items-center justify-end">
             {isProforma ? 'ESTIMATE / QUOTATION' : 'ORIGINAL FOR RECIPIENT'}
@@ -687,22 +784,30 @@ const InvoiceGenerator = () => {
               <th className="border border-blue-900 p-2 w-20">HSN / SAC</th>
               <th className="border border-blue-900 p-2 w-12">Qty.</th>
               <th className="border border-blue-900 p-2 w-20">Rate</th>
-              <th className="border border-blue-900 p-2 w-24">Taxable Value</th>
-              <th className="border border-blue-900 p-2 w-28" colSpan="2">GST</th>
-              <th className="border border-blue-900 p-2 w-24">Total</th>
+              {isGstEnabled ? (
+                <>
+                  <th className="border border-blue-900 p-2 w-24">Taxable Value</th>
+                  <th className="border border-blue-900 p-2 w-28" colSpan="2">GST</th>
+                  <th className="border border-blue-900 p-2 w-24">Total</th>
+                </>
+              ) : (
+                <th className="border border-blue-900 p-2 w-32">Amount</th>
+              )}
             </tr>
-            <tr className="bg-slate-100 text-center text-[10px] font-bold text-slate-700">
-              <th colSpan="6"></th>
-              <th className="border border-blue-900 p-1">%</th>
-              <th className="border border-blue-900 p-1">Amount</th>
-              <th></th>
-            </tr>
+            {isGstEnabled && (
+              <tr className="bg-slate-100 text-center text-[10px] font-bold text-slate-700">
+                <th colSpan="6"></th>
+                <th className="border border-blue-900 p-1">%</th>
+                <th className="border border-blue-900 p-1">Amount</th>
+                <th></th>
+              </tr>
+            )}
           </thead>
           <tbody>
             {items.map((item, idx) => {
               const taxable = Number(item.qty || 0) * Number(item.rate || 0);
               const gstAmt = (taxable * Number(item.gstRate || 0)) / 100;
-              const total = taxable + gstAmt;
+              const total = taxable + (isGstEnabled ? gstAmt : 0);
               return (
                 <tr key={idx} className="text-center align-top">
                   <td className="border border-blue-900 p-2">{idx + 1}</td>
@@ -710,10 +815,16 @@ const InvoiceGenerator = () => {
                   <td className="border border-blue-900 p-2 font-mono">{item.hsn || '---'}</td>
                   <td className="border border-blue-900 p-2">{item.qty}</td>
                   <td className="border border-blue-900 p-2 text-right">{Number(item.rate || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                  <td className="border border-blue-900 p-2 text-right">{taxable.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                  <td className="border border-blue-900 p-2">{item.gstRate}.00</td>
-                  <td className="border border-blue-900 p-2 text-right">{gstAmt.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                  <td className="border border-blue-900 p-2 text-right font-bold">{total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                  {isGstEnabled ? (
+                    <>
+                      <td className="border border-blue-900 p-2 text-right">{taxable.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                      <td className="border border-blue-900 p-2">{item.gstRate}.00</td>
+                      <td className="border border-blue-900 p-2 text-right">{gstAmt.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                      <td className="border border-blue-900 p-2 text-right font-bold">{total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    </>
+                  ) : (
+                    <td className="border border-blue-900 p-2 text-right font-bold">{taxable.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                  )}
                 </tr>
               );
             })}
@@ -723,10 +834,16 @@ const InvoiceGenerator = () => {
               <td colSpan="3" className="border border-blue-900 p-2 text-right">Total</td>
               <td className="border border-blue-900 p-2 text-center">{items.reduce((acc, i) => acc + Number(i.qty || 0), 0)}</td>
               <td className="border border-blue-900 p-2"></td>
-              <td className="border border-blue-900 p-2 text-right">{taxableAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-              <td className="border border-blue-900 p-2"></td>
-              <td className="border border-blue-900 p-2 text-right">{totalGstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-              <td className="border border-blue-900 p-2 text-right">{totalAmountAfterTax.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+              {isGstEnabled ? (
+                <>
+                  <td className="border border-blue-900 p-2 text-right">{taxableAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                  <td className="border border-blue-900 p-2"></td>
+                  <td className="border border-blue-900 p-2 text-right">{totalGstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                  <td className="border border-blue-900 p-2 text-right">{totalAmountAfterTax.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                </>
+              ) : (
+                <td className="border border-blue-900 p-2 text-right">{totalAmountAfterTax.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+              )}
             </tr>
           </tfoot>
         </table>
@@ -742,9 +859,15 @@ const InvoiceGenerator = () => {
               {numberToWords(totalAmountAfterTax)}
             </div>
             <div className="col-span-5 space-y-1 text-slate-700 pl-2 p-2">
-              <div className="flex justify-between"><span>Add : IGST @ 18%</span> <span className="font-mono">{totalGstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
-              <div className="flex justify-between"><span>Add : CGST @ 9%</span> <span className="font-mono">0.00</span></div>
-              <div className="flex justify-between"><span>Add : SGST @ 9%</span> <span className="font-mono">0.00</span></div>
+              {isGstEnabled ? (
+                <>
+                  <div className="flex justify-between"><span>Add : IGST @ 18%</span> <span className="font-mono">{totalGstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
+                  <div className="flex justify-between"><span>Add : CGST @ 9%</span> <span className="font-mono">0.00</span></div>
+                  <div className="flex justify-between"><span>Add : SGST @ 9%</span> <span className="font-mono">0.00</span></div>
+                </>
+              ) : (
+                <div className="flex justify-between font-bold"><span>Total Amount</span> <span className="font-mono">{taxableAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
+              )}
             </div>
           </div>
 

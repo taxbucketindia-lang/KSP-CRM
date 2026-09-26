@@ -5,6 +5,7 @@ const itrReturnSchema = new mongoose.Schema({
   crmClientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },
 
   // 2. Primary Information
+  clientMasterId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientMaster' },
   clientId: { type: String, unique: true },
   assesseeName: { type: String, required: true },
   pan: { type: String, required: true, uppercase: true },

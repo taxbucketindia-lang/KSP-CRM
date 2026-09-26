@@ -279,6 +279,9 @@ const MyPortal = () => {
     );
   };
 
+  // 🔴 CALCULATE MONTHLY STATS
+  const totalPresent = attendanceHistory.filter(a => a.status === 'Present' || a.status === 'Half Day').length;
+  const totalAbsent = attendanceHistory.filter(a => a.status === 'Absent' || a.status === 'Leave').length;
 
   if (loading) {
     return (
@@ -376,9 +379,9 @@ const MyPortal = () => {
               <input 
                 type="time" 
                 value={todayRecord.inTime} 
-                onChange={(e) => handleRecordChange('inTime', e.target.value)} 
-                disabled={isInTimeLocked || ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+                readOnly // 🔴 MADE READ-ONLY
+                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 bg-slate-50 text-slate-700 cursor-not-allowed"
+                placeholder="--:--"
               />
               <button 
                 onClick={handlePunchIn}
@@ -402,9 +405,9 @@ const MyPortal = () => {
               <input 
                 type="time" 
                 value={todayRecord.outTime} 
-                onChange={(e) => handleRecordChange('outTime', e.target.value)} 
-                disabled={isOutTimeLocked || ['Absent', 'Leave', 'Weekly Off', 'Holiday'].includes(todayRecord.status)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+                readOnly // 🔴 MADE READ-ONLY
+                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 bg-slate-50 text-slate-700 cursor-not-allowed"
+                placeholder="--:--"
               />
               <button 
                 onClick={handlePunchOut}
@@ -451,8 +454,8 @@ const MyPortal = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* LEFT COLUMN: Profile Card */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden h-full">
+        <div className="lg:col-span-1 flex flex-col gap-6">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-center relative overflow-hidden">
               <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/5 rounded-full blur-xl"></div>
               <div className="absolute bottom-0 left-0 -mb-4 -ml-4 w-20 h-20 bg-blue-500/10 rounded-full blur-xl"></div>
@@ -493,6 +496,19 @@ const MyPortal = () => {
                   <p className="text-[11px] text-slate-500">{myProfile.joiningDate ? new Date(myProfile.joiningDate).toLocaleDateString('en-IN') : 'N/A'}</p>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* 🔴 NEW: MONTHLY STATS SUMMARY CARD */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 flex items-center justify-around">
+            <div className="text-center">
+               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Present</p>
+               <div className="text-2xl font-black text-emerald-600">{totalPresent}</div>
+            </div>
+            <div className="w-px h-10 bg-slate-200"></div>
+            <div className="text-center">
+               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Absent</p>
+               <div className="text-2xl font-black text-rose-600">{totalAbsent}</div>
             </div>
           </div>
         </div>

@@ -20,6 +20,8 @@ import SalaryCalculation from './pages/SalaryCalculation';
 import MyPortal from './pages/MyPortal';
 import CeoDashboard from './pages/CeoDashboard';
 import GstHealthScan from './pages/GstHealthScan';
+import ClientMaster from './pages/ClientMaster';
+import RocWorkspace from './pages/RocWorkspace';
 
 // Placeholder Pages (Inko next step mein banayenge)
 // const Dashboard = () => <div><h1 className="text-2xl font-bold">Dashboard</h1><p>KPIs will appear here.</p></div>;
@@ -57,6 +59,8 @@ function App() {
             <Route path="/my-portal" element={<MyPortal />} />
             <Route path="/ceo-panel" element={<CeoDashboard />} />
             <Route path="/gst-health" element={<GstHealthScan />} />
+            <Route path="/client-master" element={<ClientMaster />} />
+            <Route path="/roc-returns" element={<RocWorkspace />} />
           </Route>
         </Routes>
       </Router>

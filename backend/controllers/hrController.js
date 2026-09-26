@@ -6,29 +6,20 @@ import User from '../models/User.js';
 // ================= EMPLOYEES =================
 export const createEmployee = async (req, res) => {
   try {
-    const { email, password, role, ...hrData } = req.body;
+    // 🔴 NAYA: empId ab frontend se aayega
+    const { email, password, role, empId, ...hrData } = req.body;
 
-    // 1. Check if login email already exists in system
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: 'A user with this email already exists' });
+    if (!empId) return res.status(400).json({ message: 'Employee ID is required.' });
+
+    // 1. Check if EmpID already exists
+    const empExists = await Employee.findOne({ empId });
+    if (empExists) return res.status(400).json({ message: 'This Employee ID is already in use.' });
+
+    // 2. Check if login email already exists in system
+    if (email) {
+        const userExists = await User.findOne({ email });
+        if (userExists) return res.status(400).json({ message: 'A user with this email already exists.' });
     }
-
-    // 2. Generate EmpID: TB-EMP-XXX (Naya Bulletproof Logic)
-    // Sabse latest employee dhundho
-    const lastEmployee = await Employee.findOne({}, { empId: 1 }).sort({ createdAt: -1 });
-
-    let nextNumber = 1;
-    if (lastEmployee && lastEmployee.empId) {
-        // "TB-EMP-003" se "003" nikal kar number banayenge
-        const lastNumber = parseInt(lastEmployee.empId.split('-')[2], 10);
-        if (!isNaN(lastNumber)) {
-            nextNumber = lastNumber + 1; // Usme +1 add kar do
-        }
-    }
-    
-    // Nayi ID set karo (e.g., TB-EMP-004)
-    const empId = `TB-EMP-${String(nextNumber).padStart(3, '0')}`;
     
     // 3. Create Login Account for portal access
     const newUser = await User.create({
@@ -57,12 +48,48 @@ export const createEmployee = async (req, res) => {
 
 export const updateEmployee = async (req, res) => {
   try {
+    // 🔴 NAYA: resetPassword variable ko nikal liya gaya hai
+    const { role, email, resetPassword, ...employeeData } = req.body; 
+
+    // 1. Employee table update
     const updatedEmp = await Employee.findByIdAndUpdate(
       req.params.id, 
-      req.body, 
+      { email, ...employeeData }, 
       { new: true }
     );
-    res.json(updatedEmp);
+
+    if (!updatedEmp) return res.status(404).json({ message: 'Employee not found' });
+
+    // 2. User (Portal Login) table mein role, email, aur PASSWORD update karo
+    const targetEmail = email || updatedEmp.email;
+    
+    // Bulletproof search (Agar userId missing hai toh email/empId se dhundh lega)
+    let userDoc = await User.findOne({
+       $or: [{ _id: updatedEmp.userId }, { email: targetEmail }, { empId: updatedEmp.empId }]
+    });
+
+    if (userDoc) {
+      if (role) userDoc.role = role;
+      if (email) userDoc.email = email;
+      
+      // 🔴 Password Reset Logic
+      if (resetPassword) {
+          userDoc.password = resetPassword; // Mongoose auto-hash kar dega
+      }
+
+      await userDoc.save();
+
+      // Agar userId link tuta hua tha toh wapas jod do
+      if (!updatedEmp.userId) {
+          updatedEmp.userId = userDoc._id;
+          await updatedEmp.save();
+      }
+    } else if (resetPassword) {
+      // Agar user login nahi mila
+      return res.status(404).json({ message: "Portal login account not found to reset password." });
+    }
+
+    res.json({ message: "Employee updated successfully", data: updatedEmp });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -70,19 +97,15 @@ export const updateEmployee = async (req, res) => {
 
 export const deleteEmployee = async (req, res) => {
   try {
-    // 1. Pehle employee dhundho
     const emp = await Employee.findById(req.params.id);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
     
-    // 2. Employee se juda hua Login Account (User) bhi delete karo
     if (emp.userId) {
       await User.findByIdAndDelete(emp.userId);
     } else if (emp.email) {
-       // Agar userId map nahi hua toh email se delete kardo
       await User.findOneAndDelete({ email: emp.email });
     }
 
-    // 3. Main HR Employee record delete karo
     await Employee.findByIdAndDelete(req.params.id);
     
     res.json({ message: 'Employee and associated portal access deleted successfully' });
@@ -91,14 +114,22 @@ export const deleteEmployee = async (req, res) => {
   }
 };
 
-
 export const getEmployees = async (req, res) => {
   try {
     const { company } = req.query;
     const filter = company ? { companyName: company } : {};
-    const employees = await Employee.find(filter).sort({ createdAt: -1 });
+    
+    const employees = await Employee.find(filter)
+      .sort({ createdAt: -1 })
+      .populate({ 
+          path: 'userId', 
+          select: 'role', 
+          strictPopulate: false 
+      }); 
+      
     res.json(employees);
   } catch (error) {
+    console.error("GET EMPLOYEES ERROR:", error.message);
     res.status(500).json({ message: error.message });
   }
 };
@@ -142,7 +173,6 @@ export const generateSalary = async (req, res) => {
   try {
     const records = req.body.records; 
     
-    // BulkWrite taaki ek employee ki ek mahine ki 2 slip na bane (Upsert)
     const ops = records.map(r => ({
       updateOne: {
         filter: { employee: r.employee, monthYear: r.monthYear },

@@ -12,12 +12,13 @@ const userSchema = new mongoose.Schema({
     default: "09:30" // Har employee ka alag time set kiya ja sakta hai (HH:mm format)
   },
   
-  // 🔴 NAYA FIX: Isko Array banaya gaya hai taaki multiple module access store ho sakein
+  // 🔴 Isko Array banaya gaya hai taaki multiple module access store ho sakein
   permissions: [{ type: String }], 
   
   role: {
     type: String,
-    enum: ['Admin', 'Manager', 'Sales/Executive', 'Accounts', 'Developer'],
+    // 🔴 NAYA FIX: 'HR' aur 'Accountant' ko is list mein add kar diya gaya hai
+    enum: ['Admin', 'Manager', 'Sales/Executive', 'Accounts', 'Accountant', 'HR', 'Developer'],
     default: 'Sales/Executive'
   },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' } 
