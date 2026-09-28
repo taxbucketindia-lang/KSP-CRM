@@ -1,4 +1,4 @@
-import { useContext, useState, useEffect } from 'react';
+import { useContext, useState, useEffect, useRef } from 'react'; // 🔴 useRef add kiya hai
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -6,7 +6,8 @@ import {
   LayoutDashboard, Users, UserCircle, Briefcase, LogOut, Menu,
   X, Bell, ChevronRight, ChevronDown, ShieldCheck, PhoneCall, CheckCircle2,
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
-  Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee
+  Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee,
+  AlertCircle, BarChart3, TrendingUp, Code, Globe, Zap
 } from 'lucide-react';
 
 const Layout = () => {
@@ -24,6 +25,9 @@ const Layout = () => {
   const [notifications, setNotifications] = useState([]);
 
   const [activePermissions, setActivePermissions] = useState(user?.permissions || []);
+  
+  // 🔴 NAYA: Yeh track karega ki aakhiri auto-open kis notification par hua tha
+  const latestNotifIdRef = useRef(null);
 
   useEffect(() => {
     const syncPermissions = async () => {
@@ -49,55 +53,48 @@ const Layout = () => {
     syncPermissions();
   }, [location.pathname, user?.token]); 
 
-  useEffect(() => {
-    setShowNotifications(true);
-    const timer = setTimeout(() => {
-      setShowNotifications(false);
-    }, 10000); 
-    return () => clearTimeout(timer);
-  }, []);
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
+  // 🔴 NAYA NOTIFICATION SYSTEM FETCH LOGIC (AUTO REFRESH & AUTO OPEN)
   useEffect(() => {
     const fetchNotifications = async () => {
       try {
         if (!user?.token) return;
         const headers = { Authorization: `Bearer ${user.token}` };
         
-        const [leadsRes, clientsRes] = await Promise.all([
-          axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }),
-          axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers })
-        ]);
-        
-        const todayObj = new Date();
-        const offset = todayObj.getTimezoneOffset() * 60000;
-        const todayStr = new Date(todayObj - offset).toISOString().split('T')[0];
+        const notifRes = await axios.get(`${import.meta.env.VITE_API_URL}/notifications`, { headers });
+        const newNotifs = notifRes.data || [];
+        setNotifications(newNotifs);
 
-        const isDue = (dateStr) => {
-          if (!dateStr) return false;
-          const dStr = dateStr.split('T')[0];
-          return dStr <= todayStr;
-        };
-        
-        const todaysFollowUps = (leadsRes.data || []).filter(
-          l => l.status === 'Follow-up' && isDue(l.nextFollowUpDate)
-        ).map(l => ({ ...l, notifType: 'lead' }));
-
-        const clientReminders = (clientsRes.data || []).filter(
-          c => isDue(c.nextReminderDate)
-        ).map(c => ({ ...c, notifType: 'client' }));
-        
-        setNotifications([...todaysFollowUps, ...clientReminders]);
+        // 🔴 AUTO-OPEN LOGIC
+        if (newNotifs.length > 0) {
+          const latestNotif = newNotifs[0]; // Sabse pehla (latest) notification
+          
+          // Agar yeh notification 'Unread' hai aur humne isko pehle auto-open nahi kiya hai:
+          if (!latestNotif.isRead && latestNotif._id !== latestNotifIdRef.current) {
+            setShowNotifications(true); // Dropdown khol do
+            latestNotifIdRef.current = latestNotif._id; // Yaad rakho ki iske liye khol diya hai
+          }
+        }
       } catch (error) {
-        console.error("Failed to load notifications", error);
+        console.error("Failed to load DB notifications", error);
       }
     };
+
+    // 1. Pehle turant ek baar fetch karo
     fetchNotifications();
+
+    // 2. Har 15 seconds (15000 milliseconds) mein auto-refresh karo
+    const intervalId = setInterval(() => {
+      fetchNotifications();
+    }, 15000);
+
+    // 3. Cleanup function
+    return () => clearInterval(intervalId);
   }, [user?.token, location.pathname]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const toggleMenu = (name, e) => {
     if(e) e.stopPropagation();
@@ -117,15 +114,18 @@ const Layout = () => {
       items: [
         { path: '/', name: 'Dashboard', icon: LayoutDashboard },
         ...(user?.role !== 'Admin' ? [{ path: '/my-portal', name: 'My Portal', icon: CalendarClock }] : []),
+        { path: '/custom-dashboards', name: 'Role Dashboards P', icon: BarChart3 }
       ]
     },
-    // 🔴 NAYA UPDATE: Hide/Show Marketing & Sales category based on LEADS/GST_SCAN permissions
     ...(user?.role === 'Admin' || activePermissions.includes('LEADS') || activePermissions.includes('GST_SCAN') ? [{
       category: 'Marketing & Sales',
       icon: Megaphone,
       items: [
         ...(user?.role === 'Admin' || activePermissions.includes('LEADS') ? [{ path: '/leads', name: 'Leads & Prospects', icon: UserCircle }] : []),
         ...(user?.role === 'Admin' || activePermissions.includes('GST_SCAN') ? [{ path: '/gst-health', name: 'GST Health Reports', icon: Activity }] : []),
+        { path: '/follow-ups', name: 'Follow-ups P', icon: PhoneCall },
+        { path: '/sales-pipeline', name: 'Sales Pipeline P', icon: TrendingUp },
+        { path: '/campaigns', name: 'Campaigns P', icon: Megaphone }
       ]
     }] : []),
     {
@@ -143,7 +143,6 @@ const Layout = () => {
             { path: '/clients?service=Company Reg', name: 'Company Reg' },
             { path: '/clients?service=Trademark Reg', name: 'Trademark Reg' },
             { path: '/clients?service=Accounting & Audit', name: 'Accounting & Audit' },
-            // 🔴 NAYA OPTION ADD KIYA
             { path: '/clients?service=Other Services', name: 'Other Services' }
           ]
         },
@@ -164,6 +163,10 @@ const Layout = () => {
         ...(user?.role === 'Admin' || activePermissions.includes('WORK') ? [{ 
           path: '/work-management', name: 'Work Management', icon: ClipboardList 
         }] : []),
+
+        ...(user?.role === 'Admin' || activePermissions.includes('BAS') ? [{ 
+          path: '/bas', name: 'Business Associates', icon: Briefcase 
+        }] : []),
       ]
     },
     {
@@ -173,11 +176,11 @@ const Layout = () => {
         ...(user?.role === 'Admin' || activePermissions.includes('HR') ? [
           { path: '/hr/employees', name: 'Employee Master', icon: Users },
           { path: '/hr/attendance', name: 'Attendance Control', icon: CalendarClock },
-          { path: '/hr/salary', name: 'Salary Calculation', icon: IndianRupee }
+          { path: '/hr/salary', name: 'Salary Calculation', icon: IndianRupee },
+          { path: '/hr/leave', name: 'Leave P', icon: FileText },
+          { path: '/hr/performance', name: 'Performance P', icon: Activity }
         ] : []),
-        ...(user?.role === 'Admin' || activePermissions.includes('BAS') ? [{ 
-          path: '/bas', name: 'Business Associates', icon: Briefcase 
-        }] : []),
+        
       ]
     },
     {
@@ -186,14 +189,20 @@ const Layout = () => {
       items: [
         ...(user?.role === 'Admin' || activePermissions.includes('INVOICE') ? [{ 
           path: '/invoice-generator', name: 'Invoices', icon: FileText 
-        }] : [])
+        }] : []),
+        { path: '/finance/collections', name: 'Collections P', icon: IndianRupee },
+        { path: '/finance/outstanding', name: 'Outstanding P', icon: AlertCircle },
+        { path: '/finance/ba-commission', name: 'BA Commission P', icon: Landmark }
       ]
     },
     {
       category: 'IT Department',
       icon: Laptop,
       items: [
-        // Dummy or future IT routes can go here
+        { path: '/it/development', name: 'Development Tasks P', icon: Code },
+        { path: '/it/crm-issues', name: 'CRM Issues P', icon: Wrench },
+        { path: '/it/website', name: 'Website P', icon: Globe },
+        { path: '/it/automation', name: 'Automation P', icon: Zap }
       ]
     },
     ...(user?.role === 'Admin' ? [{
@@ -204,24 +213,23 @@ const Layout = () => {
     }] : [])
   ];
 
-  // Helper component to draw the "L" shape connector
   const ConnectorL = () => (
     <div className="absolute left-[20px] top-0 bottom-1/2 w-[16px] border-l border-b border-slate-700 rounded-bl-md z-0 opacity-50"></div>
   );
 
-  // Helper component to draw the continuing straight line for items in a list
   const ConnectorStraight = () => (
     <div className="absolute left-[20px] top-0 bottom-0 border-l border-slate-700 z-0 opacity-50"></div>
   );
 
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
       
-      {/* Scrollbar Custom CSS */}
       <style dangerouslySetInnerHTML={{__html: `
-        .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+        .sidebar-scroll::-webkit-scrollbar { width: 10px; }
         .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
-        .sidebar-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: #7285a0; border-radius: 10px; }
         .sidebar-scroll:hover::-webkit-scrollbar-thumb { background: #475569; }
       `}} />
 
@@ -254,7 +262,6 @@ const Layout = () => {
 
             return (
               <div key={sIdx} className="mb-4">
-                {/* SECTION HEADING */}
                 {section.category !== 'Main' && (
                   <div className="px-5 py-2 mt-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 select-none">
                     {section.icon && <section.icon size={12} />}
@@ -262,12 +269,10 @@ const Layout = () => {
                   </div>
                 )}
 
-                {/* SECTION ITEMS */}
                 <div className="px-3">
                   {section.items.map((item, iIdx) => {
                     const isLastItem = iIdx === section.items.length - 1;
 
-                    // IF IT IS A NESTED GROUP
                     if (item.isGroup) {
                       const isExpanded = expandedMenu[item.name];
                       const Icon = item.icon;
@@ -321,7 +326,6 @@ const Layout = () => {
                       );
                     }
 
-                    // NORMAL ITEM (Direct link under a category)
                     const Icon = item.icon;
                     return (
                       <div key={item.name} className="relative pt-0.5 pb-0.5">
@@ -353,7 +357,6 @@ const Layout = () => {
           })}
         </nav>
 
-        {/* BOTTOM USER PROFILE SECTION */}
         <div className="p-4 border-t border-slate-800/80 bg-slate-900/50 shrink-0">
           <div className="flex items-center justify-between p-2 rounded-xl bg-slate-800/50 border border-slate-700/50 mb-3">
             <div className="flex items-center gap-3 min-w-0">
@@ -386,7 +389,6 @@ const Layout = () => {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* HEADER BAR */}
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between gap-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)] shrink-0">
           <div className="flex items-center gap-4">
             <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 md:hidden">
@@ -402,7 +404,7 @@ const Layout = () => {
                 className={`relative p-2 rounded-full transition-colors ${showNotifications ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}
               >
                 <Bell size={18} />
-                {notifications.length > 0 && (
+                {unreadCount > 0 && (
                   <span className="absolute top-1 right-1.5 h-2 w-2 bg-rose-500 rounded-full ring-2 ring-white animate-pulse"></span>
                 )}
               </button>
@@ -417,47 +419,47 @@ const Layout = () => {
                         <h3 className="text-sm font-bold text-slate-800">Tasks & Alerts</h3>
                       </div>
                       <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        {notifications.length} New
+                        {unreadCount} New
                       </span>
                     </div>
                     
-                    <div className="max-h-72 overflow-y-auto custom-scrollbar">
+                    <div className="max-h-80 overflow-y-auto custom-scrollbar">
                       {notifications.length === 0 ? (
                         <div className="p-6 text-center text-slate-500 flex flex-col items-center gap-2">
                           <CheckCircle2 size={28} className="text-slate-300" />
-                          <p className="text-xs font-medium">All caught up!</p>
+                          <p className="text-xs font-medium">No history found!</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-100">
-                          {notifications.map(n => {
-                            const dateToDisplay = n.notifType === 'lead' ? n.nextFollowUpDate : n.nextReminderDate;
-                            return (
-                              <div 
-                                key={n._id} 
-                                onClick={() => {
-                                  setShowNotifications(false);
-                                  if (n.notifType === 'lead') {
-                                    navigate('/leads', { state: { openLeadId: n._id } });
-                                  } else {
-                                    navigate('/clients', { state: { openClientId: n._id } });
-                                  }
-                                }}
-                                className="p-3 flex items-start gap-3 hover:bg-slate-50 transition-colors cursor-pointer text-left"
-                              >
-                                <div className={`mt-0.5 h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${n.notifType === 'lead' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
-                                  {n.notifType === 'lead' ? <PhoneCall size={12} /> : <FileText size={12} />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-bold text-slate-800 truncate">
-                                    {n.notifType === 'lead' ? n.name : n.assesseeName}
-                                  </p>
-                                  <p className="text-[10px] text-slate-500 mt-0.5 truncate">
-                                    {n.notifType === 'lead' ? 'Call Follow-up Due' : `${n.service || 'Service'} Reminder`}
-                                  </p>
-                                </div>
+                          {notifications.map(n => (
+                            <div 
+                              key={n._id} 
+                              onClick={async () => {
+                                setShowNotifications(false);
+                                if (!n.isRead) {
+                                  try {
+                                    const headers = { Authorization: `Bearer ${user.token}` };
+                                    await axios.put(`${import.meta.env.VITE_API_URL}/notifications/${n._id}/read`, {}, { headers });
+                                    setNotifications(prev => prev.map(notif => notif._id === n._id ? { ...notif, isRead: true } : notif));
+                                  } catch(e) { console.error(e) }
+                                }
+                                if (n.link) navigate(n.link);
+                              }}
+                              className={`p-3 flex items-start gap-3 transition-colors cursor-pointer text-left ${n.isRead ? 'bg-white hover:bg-slate-50 opacity-60' : 'bg-blue-50/40 hover:bg-blue-100 border-l-2 border-blue-500'}`}
+                            >
+                              <div className={`mt-0.5 h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${n.isRead ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-600'}`}>
+                                <Bell size={12} />
                               </div>
-                            );
-                          })}
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm truncate ${n.isRead ? 'font-semibold text-slate-600' : 'font-black text-slate-800'}`}>
+                                  {n.title}
+                                </p>
+                                <p className="text-[10px] text-slate-500 mt-0.5 leading-tight whitespace-normal">
+                                  {n.message}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>

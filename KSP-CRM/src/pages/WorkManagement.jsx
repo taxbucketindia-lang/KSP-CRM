@@ -6,7 +6,7 @@ import {
   ClipboardList, Search, Clock, CheckCircle2, AlertCircle, Plus, 
   X, User, Briefcase, Calendar, Flag, FileText, UploadCloud, 
   MessageSquare, UserCircle, Activity, Play, Pause, ChevronRight, RefreshCw, ChevronDown, Phone,
-  LayoutGrid, List, BarChart3, Eye, HelpCircle, Pencil
+  LayoutGrid, List, BarChart3, Eye, HelpCircle, Pencil, Trash2
 } from 'lucide-react';
 
 const WorkManagement = () => {
@@ -44,6 +44,7 @@ const WorkManagement = () => {
   const isAdmin = user?.role === 'Admin';
 
   const initialForm = {
+    taskTitle: '',
     taskDate: new Date().toISOString().split('T')[0],
     clientId: '', serviceCategory: 'GST', subService: '',
     taskDescription: '', assignedTo: '', priority: 'Medium',
@@ -63,6 +64,7 @@ const WorkManagement = () => {
   });
 
   const [editForm, setEditForm] = useState({
+    taskTitle: '', 
     assignedTo: '', priority: '', dueDate: '', taskDescription: '', reviewer: ''
   });
 
@@ -71,30 +73,27 @@ const WorkManagement = () => {
     const headers = { Authorization: `Bearer ${user.token}` };
     
     try {
-      const [tasksRes, clientsRes, leadsRes, usersRes, gstRes, itrRes, eodRes] = await Promise.all([
+      const [tasksRes, usersRes, eodRes, leadsRes, crmRes, masterRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/tasks`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/tasks/employees`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/gst`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/itr`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/tasks/eod`, { headers }).catch(() => ({ data: [] })) 
+        axios.get(`${import.meta.env.VITE_API_URL}/tasks/eod`, { headers }).catch(() => ({ data: [] })), 
+        axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })), 
+        axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: [] })) 
       ]);
 
       setTasks(tasksRes.data || []);
       setEodReports(eodRes.data || []); 
       
-      const rawClients = Array.isArray(clientsRes.data) ? clientsRes.data : (clientsRes.data?.clients || []);
       const rawLeads = Array.isArray(leadsRes.data) ? leadsRes.data : (leadsRes.data?.leads || []);
-      const rawGst = Array.isArray(gstRes.data) ? gstRes.data : [];
-      const rawItr = Array.isArray(itrRes.data) ? itrRes.data : [];
+      const rawCrm = Array.isArray(crmRes.data) ? crmRes.data : (crmRes.data?.clients || []);
+      const rawMaster = Array.isArray(masterRes.data) ? masterRes.data : (masterRes.data?.data || []);
 
-      const formattedClients = rawClients.map(c => ({ _id: c._id, clientId: c.clientId || '', name: c.assesseeName || c.tradeName || c.name || 'Unnamed', pan: c.pan || '', mobile: c.mobile || '', type: 'CRM Client' }));
       const formattedLeads = rawLeads.map(l => ({ _id: l._id, clientId: l.clientId || '', name: l.name || 'Unnamed', pan: '', mobile: l.mobile || '', type: 'Lead' }));
-      const formattedGst = rawGst.map(g => ({ _id: g._id, clientId: g.clientId || '', name: g.tradeName ? `${g.assesseeName} (${g.tradeName})` : g.assesseeName || 'Unnamed GST Client', pan: g.gstin || '', mobile: g.mobile || '', type: 'GST Client' }));
-      const formattedItr = rawItr.map(i => ({ _id: i._id, clientId: i.clientId || '', name: i.assesseeName || 'Unnamed ITR Client', pan: i.pan || '', mobile: i.mobile || '', type: 'ITR Client' }));
+      const formattedCrm = rawCrm.map(c => ({ _id: c._id, clientId: c.clientId || '', name: c.assesseeName || c.tradeName || c.name || 'Unnamed', pan: c.pan || '', mobile: c.mobile || '', type: 'Registration CRM' }));
+      const formattedMaster = rawMaster.map(m => ({ _id: m._id, clientId: m.clientId || '', name: m.name || m.assesseeName || 'Unnamed', pan: m.pan || '', mobile: m.mobile || '', type: 'Client Master' }));
 
-      const combinedData = [...formattedClients, ...formattedLeads, ...formattedGst, ...formattedItr].map(item => ({
+      const combinedData = [...formattedLeads, ...formattedCrm, ...formattedMaster].map(item => ({
          ...item, clientId: String(item.clientId || ''), name: item.name || '', mobile: String(item.mobile || ''), pan: String(item.pan || '')
       }));
 
@@ -122,8 +121,8 @@ const WorkManagement = () => {
       filtered = filtered.filter(c => 
         c.name.toLowerCase().includes(lowerSearch) || 
         c.clientId.toLowerCase().includes(lowerSearch) || 
-        c.mobile.includes(lowerSearch) || 
-        c.pan.toLowerCase().includes(lowerSearch)
+        c.pan.toLowerCase().includes(lowerSearch) ||
+        c.mobile.includes(lowerSearch)
       );
     }
     return filtered;
@@ -137,13 +136,14 @@ const WorkManagement = () => {
 
       const matchesSearch = 
         (task.taskId?.toLowerCase().includes(searchStr)) || 
+        (task.taskTitle?.toLowerCase().includes(searchStr)) || 
         ((task.clientName || '').toLowerCase().includes(searchStr)) ||
         (customClientId.toLowerCase().includes(searchStr));
 
       const matchesStatus = statusFilter === 'ALL' 
         ? true 
         : statusFilter === 'OVERDUE' 
-          ? task.isOverdue // Backend virtual field check
+          ? task.isOverdue 
           : task.currentStatus === statusFilter;      
       const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
       const matchesEmployee = employeeFilter === 'ALL' || (task.assignedTo && task.assignedTo._id === employeeFilter);
@@ -165,6 +165,7 @@ const WorkManagement = () => {
   const getStatusStyle = (status) => {
     switch (status) {
       case 'Not Started': return 'bg-slate-100 text-slate-700 border-slate-200';
+      case 'Started': return 'bg-sky-50 text-sky-700 border-sky-200';
       case 'In Progress': return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'Pending Client': return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'Pending Internal': return 'bg-orange-50 text-orange-700 border-orange-200';
@@ -188,18 +189,23 @@ const WorkManagement = () => {
 
   const handleCreateTask = async (e) => {
     e.preventDefault();
-    if (!formData.clientId) return toast.error("Please select a client from the dropdown!");
-
-    const selectedClientObj = clients.find(c => c._id === formData.clientId);
-    if (!selectedClientObj) return toast.error("Invalid client selected!");
     
+    if (!formData.taskTitle && !formData.clientId) {
+      return toast.error("Please enter a Task Title or select a Client!");
+    }
+
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const payload = { ...formData, clientName: selectedClientObj.name }; 
+      const payload = { ...formData }; 
       
-      if (!payload.reviewer) {
-        delete payload.reviewer;
+      if (payload.clientId) {
+        const selectedClientObj = clients.find(c => c._id === formData.clientId);
+        if (selectedClientObj) payload.clientName = selectedClientObj.name;
+      } else {
+        delete payload.clientId;
       }
+      
+      if (!payload.reviewer) delete payload.reviewer;
 
       await axios.post(`${import.meta.env.VITE_API_URL}/tasks`, payload, { headers });
       
@@ -215,7 +221,6 @@ const WorkManagement = () => {
   const handleUpdateStatus = async (e) => {
     e.preventDefault();
     try {
-      // 🔴 FIX: Removed 'multipart/form-data', back to standard JSON
       const headers = { 
         Authorization: `Bearer ${user.token}`,
         'Content-Type': 'application/json' 
@@ -228,10 +233,6 @@ const WorkManagement = () => {
         nextFollowUpDate: updateForm.followUpDate,
         followUpMode: updateForm.followUpMode
       };
-
-      // Handle output file ONLY if you have an S3/Cloudinary URL flow 
-      // otherwise, omit it until multer is perfectly configured on backend.
-      // We are dropping `outputFile` from payload to prevent server crash.
 
       await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToUpdate._id}/status`, payload, { headers });
       
@@ -255,6 +256,19 @@ const WorkManagement = () => {
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to update task details");
+    }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    if (window.confirm("Are you sure you want to permanently delete this task?")) {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.delete(`${import.meta.env.VITE_API_URL}/tasks/${taskId}`, { headers });
+        toast.success("Task deleted successfully!");
+        fetchData();
+      } catch (error) {
+        toast.error("Failed to delete task");
+      }
     }
   };
 
@@ -313,6 +327,7 @@ const WorkManagement = () => {
   const handleOpenEdit = (task) => {
     setTaskToEdit(task);
     setEditForm({
+      taskTitle: task.taskTitle || '',
       assignedTo: task.assignedTo?._id || '',
       priority: task.priority || 'Medium',
       dueDate: task.dueDate ? new Date(task.dueDate).toISOString().slice(0,16) : '',
@@ -470,7 +485,7 @@ const WorkManagement = () => {
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col xl:flex-row xl:items-center gap-4">
               <div className="relative w-full xl:w-72 shrink-0">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input type="text" placeholder="Search Task ID or Client..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
+                <input type="text" placeholder="Search Task ID or Title/Client..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
               </div>
               
               <div className="flex flex-wrap items-center gap-3 w-full">
@@ -486,6 +501,7 @@ const WorkManagement = () => {
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
                   <option value="ALL">Status: All</option>
                   <option value="Not Started">Not Started</option>
+                  <option value="Started">🟢 Started</option>
                   <option value="In Progress">In Progress</option>
                   <option value="Pending Client">Pending Client</option>
                   <option value="Under Review">Under Review</option>
@@ -510,7 +526,7 @@ const WorkManagement = () => {
                   <thead>
                     <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-[11px] font-black uppercase tracking-wider">
                       <th className="py-4 px-5">Task Details</th>
-                      <th className="py-4 px-5">Client Name</th>
+                      <th className="py-4 px-5">Title / Client Name</th>
                       <th className="py-4 px-5">Assignment</th>
                       <th className="py-4 px-5">Priority & Due</th>
                       <th className="py-4 px-5">Live Status</th>
@@ -535,8 +551,12 @@ const WorkManagement = () => {
 
                           <td className="py-4 px-5">
                             <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                              <Briefcase size={14} className="text-slate-400"/> {task.clientName || 'N/A'}
+                              <Briefcase size={14} className="text-slate-400"/> 
+                              {task.taskTitle ? task.taskTitle : (task.clientName || 'Internal Task')}
                             </div>
+                            {task.taskTitle && task.clientName && (
+                               <div className="text-[10px] text-slate-500 mt-0.5 font-medium">Client: {task.clientName}</div>
+                            )}
                           </td>
                           
                           <td className="py-4 px-5">
@@ -568,9 +588,14 @@ const WorkManagement = () => {
                           <td className="py-4 px-5 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {isAdmin && (
-                                <button onClick={() => handleOpenEdit(task)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-200" title="Edit / Re-assign Task">
-                                  <Pencil size={15} strokeWidth={2.5}/>
-                                </button>
+                                <>
+                                  <button onClick={() => handleOpenEdit(task)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-200" title="Edit / Re-assign Task">
+                                    <Pencil size={15} strokeWidth={2.5}/>
+                                  </button>
+                                  <button onClick={() => handleDeleteTask(task._id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200" title="Delete Task">
+                                    <Trash2 size={15} strokeWidth={2.5}/>
+                                  </button>
+                                </>
                               )}
                               <button onClick={() => handleOpenView(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg transition-all border border-slate-200 shadow-sm" title="View Details">
                                 <Eye size={13} strokeWidth={2.5}/> View
@@ -592,7 +617,7 @@ const WorkManagement = () => {
           {/* 🔴 BOARD VIEW (KANBAN) */}
           {viewMode === 'board' && (
             <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar items-start">
-              {['Not Started', 'In Progress', 'Pending Client', 'Under Review', 'Completed'].map(colStatus => {
+              {['Not Started', 'Started', 'In Progress', 'Pending Client', 'Under Review', 'Completed'].map(colStatus => {
                 const colTasks = filteredTasks.filter(t => t.currentStatus === colStatus);
                 return (
                   <div key={colStatus} className="bg-slate-100/50 min-w-[300px] w-[300px] rounded-2xl border border-slate-200 p-4 flex flex-col shrink-0">
@@ -612,14 +637,23 @@ const WorkManagement = () => {
                               <span className="font-bold text-blue-600 font-mono text-[10px] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded cursor-pointer">{task.taskId}</span>
                               <div className="flex gap-1.5">
                                 {isAdmin && (
-                                  <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(task); }} className="text-slate-400 hover:text-blue-600 hidden group-hover:block" title="Edit">
-                                    <Pencil size={12}/>
-                                  </button>
+                                  <>
+                                    <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(task); }} className="text-slate-400 hover:text-blue-600 hidden group-hover:block" title="Edit">
+                                      <Pencil size={12}/>
+                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(task._id); }} className="text-slate-400 hover:text-rose-600 hidden group-hover:block" title="Delete">
+                                      <Trash2 size={12}/>
+                                    </button>
+                                  </>
                                 )}
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase cursor-pointer ${getPriorityStyle(task.priority)}`}>{task.priority}</span>
                               </div>
                             </div>
-                            <h4 className="text-sm font-bold text-slate-800 leading-tight mb-1 cursor-pointer" onClick={() => handleOpenView(task)}>{task.clientName || 'N/A'}</h4>
+                            
+                            <h4 className="text-sm font-bold text-slate-800 leading-tight mb-1 cursor-pointer" onClick={() => handleOpenView(task)}>
+                              {task.taskTitle ? task.taskTitle : (task.clientName || 'Internal Task')}
+                            </h4>
+                            
                             <p className="text-[11px] text-slate-500 font-medium mb-3 cursor-pointer" onClick={() => handleOpenView(task)}>{task.serviceCategory} • {task.subService}</p>
                             
                             <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100" onClick={() => handleOpenView(task)}>
@@ -665,8 +699,14 @@ const WorkManagement = () => {
 
             <form onSubmit={handleCreateTask} className="overflow-y-auto p-8 space-y-6 custom-scrollbar relative">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="md:col-span-2 relative">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Select Client / Lead *</label>
+                
+                <div className="md:col-span-1 relative">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Task Title / Name</label>
+                  <input type="text" name="taskTitle" placeholder="e.g. Audit Review, Client Meeting" value={formData.taskTitle} onChange={(e) => setFormData({...formData, taskTitle: e.target.value})} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
+                </div>
+
+                <div className="md:col-span-1 relative">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Select Client (Optional)</label>
                   <div 
                     className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 focus-within:ring-2 focus-within:ring-blue-500/20 shadow-sm bg-white cursor-text flex justify-between items-center transition-all"
                     onClick={() => setIsClientDropdownOpen(true)}
@@ -677,7 +717,7 @@ const WorkManagement = () => {
                         <span className="text-slate-800">{clients.find(c => c._id === formData.clientId)?.name || 'Selected'}</span>
                       </div>
                     ) : (
-                      <span className="text-slate-400">-- Click to Search Clients, GST, ITR or Leads --</span>
+                      <span className="text-slate-400 text-xs">-- Search Client (Leave empty if internal) --</span>
                     )}
                     <ChevronDown size={16} className="text-slate-400"/>
                   </div>
@@ -686,11 +726,11 @@ const WorkManagement = () => {
                       <div className="fixed inset-0 z-[65]" onClick={() => setIsClientDropdownOpen(false)}></div>
                       <div className="absolute top-[70px] left-0 z-[70] w-full bg-white border border-slate-200 rounded-xl shadow-2xl max-h-72 overflow-hidden flex flex-col animate-in fade-in zoom-in-95">
                         <div className="flex flex-wrap gap-2 px-3 pt-3 pb-2 bg-slate-50 border-b border-slate-100">
-                          {['All', 'CRM Client', 'GST Client', 'ITR Client', 'Lead'].map((type) => (
+                          {['All', 'Lead', 'Registration CRM', 'Client Master'].map((type) => (
                              <button
                                 key={type} type="button" onClick={(e) => { e.stopPropagation(); setClientTypeFilter(type); }}
                                 className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${clientTypeFilter === type ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
-                             >{type.replace(' Client', '')}</button>
+                             >{type}</button>
                           ))}
                         </div>
                         <div className="p-3 border-b border-slate-100 bg-slate-50/80 sticky top-0">
@@ -714,7 +754,7 @@ const WorkManagement = () => {
                                   <div>
                                       <p className="text-sm font-bold text-slate-800">{c.name}</p>
                                       <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1.5">
-                                        <span className={`px-1.5 py-0.5 rounded uppercase tracking-wider ${c.type === 'Lead' ? 'bg-purple-100 text-purple-700' : c.type === 'GST Client' ? 'bg-indigo-100 text-indigo-700' : c.type === 'ITR Client' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{c.type}</span>
+                                        <span className={`px-1.5 py-0.5 rounded uppercase tracking-wider ${c.type === 'Lead' ? 'bg-purple-100 text-purple-700' : c.type === 'Registration CRM' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'}`}>{c.type}</span>
                                         {c.clientId && <span className="font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-100">{c.clientId}</span>}
                                         {c.mobile && <span><Phone size={10} className="inline mr-0.5"/>{c.mobile}</span>} 
                                         {c.pan && <span>| PAN/GST: {c.pan}</span>}
@@ -726,7 +766,7 @@ const WorkManagement = () => {
                           ) : (
                               <div className="p-6 text-center text-xs font-semibold text-slate-400 flex flex-col items-center">
                                 <AlertCircle size={24} className="mb-2 opacity-50"/>
-                                No matching {clientTypeFilter === 'All' ? 'clients/leads' : clientTypeFilter} found
+                                No matching {clientTypeFilter === 'All' ? 'clients' : clientTypeFilter.toLowerCase()} found
                               </div>
                           )}
                         </div>
@@ -742,12 +782,13 @@ const WorkManagement = () => {
                     <option value="ITR">Income Tax (ITR)</option>
                     <option value="ROC">ROC Compliance</option>
                     <option value="Accounting">Accounting & Audit</option>
+                    <option value="Internal">Internal Task</option>
                     <option value="Other">Other Service</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Sub-Service / Form *</label>
-                  <input type="text" name="subService" required placeholder="e.g. GSTR-3B, ITR-4" value={formData.subService} onChange={(e) => setFormData({...formData, subService: e.target.value})} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
+                  <input type="text" name="subService" required placeholder="e.g. GSTR-3B, Documentation" value={formData.subService} onChange={(e) => setFormData({...formData, subService: e.target.value})} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
                 </div>
 
                 <div className="md:col-span-2">
@@ -886,7 +927,7 @@ const WorkManagement = () => {
                 <h2 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
                   <Activity className="text-indigo-600" size={20}/> {isAdmin ? 'Review & Comment' : 'Update Task Progress'}
                 </h2>
-                <p className="text-xs text-slate-500 font-mono mt-1">{taskToUpdate.taskId} • {taskToUpdate.clientName}</p>
+                <p className="text-xs text-slate-500 font-mono mt-1">{taskToUpdate.taskId} • {taskToUpdate.taskTitle || taskToUpdate.clientName}</p>
               </div>
               <button onClick={() => setIsUpdateModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
             </div>
@@ -918,7 +959,9 @@ const WorkManagement = () => {
                     </>
                   ) : (
                     <>
+                      {/* 🔴 NEW OPTION "Started" FOR EMPLOYEES */}
                       <option value="Not Started">Not Started</option>
+                      <option value="Started">🟢 Started</option>
                       <option value="In Progress">▶️ In Progress</option>
                       <option value="Pending Client">⏳ Pending Client (Waiting for Docs)</option>
                       <option value="Pending Internal">⏳ Pending Internal</option>
@@ -1017,13 +1060,18 @@ const WorkManagement = () => {
                 <h2 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
                   <Pencil className="text-blue-600" size={20}/> Edit Task & Re-assign
                 </h2>
-                <p className="text-xs text-slate-500 font-mono mt-1">{taskToEdit.taskId} • {taskToEdit.clientName}</p>
+                <p className="text-xs text-slate-500 font-mono mt-1">{taskToEdit.taskId} • {taskToEdit.taskTitle || taskToEdit.clientName}</p>
               </div>
               <button onClick={() => setIsEditModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
             </div>
             
             <form onSubmit={handleEditSubmit} className="overflow-y-auto p-6 space-y-5 custom-scrollbar">
               
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Task Title / Name</label>
+                <input type="text" required name="taskTitle" value={editForm.taskTitle} onChange={(e) => setEditForm({...editForm, taskTitle: e.target.value})} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
+              </div>
+
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-600 mb-1.5 flex items-center gap-1"><User size={12}/> Re-Assign To</label>
                 <select name="assignedTo" required value={editForm.assignedTo} onChange={(e) => setEditForm({...editForm, assignedTo: e.target.value})} className="w-full text-sm font-bold border border-indigo-200 bg-indigo-50/50 rounded-xl p-3 focus:ring-2 focus:ring-indigo-500/20 text-indigo-800 shadow-sm">
@@ -1094,9 +1142,15 @@ const WorkManagement = () => {
             <div className="overflow-y-auto p-6 space-y-6 custom-scrollbar text-sm">
               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Client Name</p>
-                    <p className="font-bold text-slate-800">{taskToView.clientName || 'N/A'}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Task Title / Name</p>
+                    <p className="font-bold text-slate-800">{taskToView.taskTitle || taskToView.clientName || 'Internal Task'}</p>
                  </div>
+                 {taskToView.clientName && (
+                   <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Associated Client</p>
+                      <p className="font-bold text-slate-700">{taskToView.clientName}</p>
+                   </div>
+                 )}
                  <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Live Status</p>
                     <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border shadow-sm ${getStatusStyle(taskToView.currentStatus)}`}>{taskToView.currentStatus}</span>

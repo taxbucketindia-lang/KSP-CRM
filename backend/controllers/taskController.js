@@ -1,6 +1,7 @@
 import Task from '../models/Task.js';
 import TaskActivity from '../models/TaskActivity.js';
 import DailyWorkReport from '../models/DailyWorkReport.js';
+import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 
 // @desc    Get all Employees for Dropdown
@@ -28,7 +29,6 @@ export const getTasks = async (req, res) => {
     }
 
     const tasks = await Task.find(query)
-      // 🔴 FIX: client populate hata diya kyunki ab clientName use ho raha hai direct
       .populate('assignedTo', 'name empId role')
       .populate('assignedBy', 'name')
       .populate('reviewer', 'name')
@@ -56,11 +56,17 @@ export const createTask = async (req, res) => {
     }
     const generatedTaskId = `TSK-${nextIdCounter}`;
 
+    // 🔴 Clean payload: Agar clientId nahi hai toh use empty/undefined kar dein taaki Mongoose validation fail na ho
+    const taskData = { ...req.body };
+    if (!taskData.clientId) {
+      delete taskData.clientId;
+      delete taskData.clientName;
+    }
+
     const newTask = new Task({
-      ...req.body,
+      ...taskData,
       taskId: generatedTaskId,
       assignedBy: req.user._id,
-      // Default initial status
       currentStatus: 'Not Started'
     });
 
@@ -74,6 +80,16 @@ export const createTask = async (req, res) => {
       newStatus: 'Not Started',
       remark: 'Task officially assigned to employee.'
     });
+
+    // 🔴 NAYA CODE: EMPLOYEE KO NOTIFICATION BHEJO JAB NAYA TASK MILE
+    if (savedTask.assignedTo) {
+      await Notification.create({
+        recipient: savedTask.assignedTo,
+        title: 'New Task Assigned',
+        message: `Admin has assigned you a new task: ${savedTask.taskTitle || savedTask.clientName || 'Internal Task'}`,
+        link: '/work-management'
+      });
+    }
 
     res.status(201).json(savedTask);
   } catch (error) {
@@ -111,7 +127,6 @@ export const updateTaskStatus = async (req, res) => {
       task.outputFileUrl = req.body.outputFileUrl;
       task.outputRequired = 'Yes';
     } else if (req.file) { 
-      // Agar multer use kar rahe hain
       task.outputFileUrl = req.file.path;
       task.outputRequired = 'Yes';
     }
@@ -151,6 +166,7 @@ export const updateTaskDetails = async (req, res) => {
     const oldAssignee = task.assignedTo;
     
     // Update core fields
+    task.taskTitle = req.body.taskTitle !== undefined ? req.body.taskTitle : task.taskTitle;
     task.assignedTo = req.body.assignedTo || task.assignedTo;
     task.priority = req.body.priority || task.priority;
     task.dueDate = req.body.dueDate || task.dueDate;
@@ -160,13 +176,21 @@ export const updateTaskDetails = async (req, res) => {
     const updatedTask = await task.save();
 
     // Log if assignee changed
-    if (oldAssignee.toString() !== task.assignedTo.toString()) {
+    if (oldAssignee && oldAssignee.toString() !== task.assignedTo.toString()) {
        await TaskActivity.create({
         task: updatedTask._id,
         user: req.user._id,
         oldStatus: task.currentStatus,
         newStatus: task.currentStatus,
         remark: `Task re-assigned to new employee.`
+      });
+
+      // 🔴 NAYA CODE: NAYE EMPLOYEE KO BHI NOTIFICATION BHEJO
+      await Notification.create({
+        recipient: task.assignedTo,
+        title: 'Task Re-Assigned To You',
+        message: `A task has been re-assigned to you: ${task.taskTitle || task.clientName || 'Internal Task'}`,
+        link: '/work-management'
       });
     }
 
@@ -197,13 +221,30 @@ export const getEods = async (req, res) => {
   try {
     let query = {};
     if (req.user.role !== 'Admin') {
-      query = { employee: req.user._id }; // Employee sirf apna EOD dekhega
+      query = { employee: req.user._id };
     }
     const eods = await DailyWorkReport.find(query)
       .populate('employee', 'name role empId')
-      .sort({ createdAt: -1 }); // Sabse naya pehle
+      .sort({ createdAt: -1 });
       
     res.json(eods);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+// @desc    Delete a Task
+// @route   DELETE /api/tasks/:id
+export const deleteTask = async (req, res) => {
+  try {
+    if (req.user.role !== 'Admin') {
+      return res.status(403).json({ message: "Only Admin can delete tasks" });
+    }
+    const task = await Task.findByIdAndDelete(req.params.id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    
+    res.status(200).json({ message: "Task deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

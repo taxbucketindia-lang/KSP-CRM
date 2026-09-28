@@ -22,6 +22,7 @@ import CeoDashboard from './pages/CeoDashboard';
 import GstHealthScan from './pages/GstHealthScan';
 import ClientMaster from './pages/ClientMaster';
 import RocWorkspace from './pages/RocWorkspace';
+import TdsWorkspace from './pages/TdsWorkspace';
 
 // Placeholder Pages (Inko next step mein banayenge)
 // const Dashboard = () => <div><h1 className="text-2xl font-bold">Dashboard</h1><p>KPIs will appear here.</p></div>;
@@ -61,6 +62,7 @@ function App() {
             <Route path="/gst-health" element={<GstHealthScan />} />
             <Route path="/client-master" element={<ClientMaster />} />
             <Route path="/roc-returns" element={<RocWorkspace />} />
+            <Route path="/tds-returns" element={<TdsWorkspace />} />
           </Route>
         </Routes>
       </Router>
