@@ -1,15 +1,21 @@
-import React, { useState, useEffect, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
+import * as XLSX from 'xlsx'; 
+import ExcelJS from 'exceljs'; 
+import { saveAs } from 'file-saver';
 import { 
   Building2, Search, Plus, X, Briefcase, FileText, CheckCircle2, AlertTriangle,
   AlertCircle, RefreshCw, Trash2, Eye, Edit, Award, ShieldCheck, 
-  CalendarDays, IndianRupee, Hash, Loader2, Pencil, Users, Trash, Percent, FileDigit, UserCheck, Key
+  CalendarDays, IndianRupee, Hash, Loader2, Pencil, Users, Trash, Percent, FileDigit, UserCheck, Key,
+  Download, Upload, CheckSquare
 } from 'lucide-react';
 
 const RocWorkspace = () => {
   const { user } = useContext(AuthContext);
+
+  const isAdmin = user?.role === 'Admin';
   
   const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,19 +25,19 @@ const RocWorkspace = () => {
   const [panSuggestions, setPanSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   
-  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('ALL');
 
-  // Modals
+  const [selectedIds, setSelectedIds] = useState([]);
+  const fileInputRef = useRef(null);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewingData, setViewingData] = useState(null);
   const [deleteModal, setDeleteModal] = useState({ open: false, client: null });
   
-  // 🔴 UPDATED INITIAL FORM (Directors & Shareholders both)
   const initialForm = {
     pan: '', name: '', clientType: 'Private Limited',
     cinOrLlpIn: '', dateOfIncorporation: '',
@@ -40,7 +46,7 @@ const RocWorkspace = () => {
     auditorName: '', auditorMembershipNo: '', auditorFrn: '', auditorPlace: '', auditorAppointmentDate: '', auditorTenureEndDate: '', 
     startupIndia: { isRegistered: false, dpiitNumber: '', recognitionDate: '', certificateNo: '', status: 'N/A' },
     shareholders: [], 
-    directors: [], // 🔴 NEW: Directors Array
+    directors: [], 
     status: 'Active'
   };
   
@@ -52,6 +58,7 @@ const RocWorkspace = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/roc/workspaces`, { headers });
       setWorkspaces(res.data || []);
+      setSelectedIds([]);
     } catch (error) {
       toast.error("Failed to load ROC workspaces");
     } finally {
@@ -98,82 +105,51 @@ const RocWorkspace = () => {
     toast.success("✅ Existing Client Selected! Data Auto-Filled.");
   };
 
-  // ==========================================
-  // SHAREHOLDER DYNAMIC HANDLERS
-  // ==========================================
   const handleAddShareholder = () => {
-    setFormData(prev => ({
-      ...prev,
-      shareholders: [
-        ...prev.shareholders, 
-        { name: '', address: '', state: '', pinCode: '', sharePercentage: '', faceValue: '', noOfShares: '', totalValue: '', remarks: '' }
-      ]
-    }));
+    setFormData(prev => ({ ...prev, shareholders: [...prev.shareholders, { name: '', address: '', state: '', pinCode: '', sharePercentage: '', faceValue: '', noOfShares: '', totalValue: '', remarks: '' }] }));
   };
-
   const handleRemoveShareholder = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      shareholders: prev.shareholders.filter((_, i) => i !== index)
-    }));
+    setFormData(prev => ({ ...prev, shareholders: prev.shareholders.filter((_, i) => i !== index) }));
   };
-
   const handleShareholderChange = (index, field, value) => {
     setFormData(prev => {
-      const updatedShareholders = [...prev.shareholders];
-      updatedShareholders[index][field] = value;
-      
+      const updated = [...prev.shareholders];
+      updated[index][field] = value;
       if (field === 'faceValue' || field === 'noOfShares') {
-        const faceVal = Number(updatedShareholders[index].faceValue) || 0;
-        const shares = Number(updatedShareholders[index].noOfShares) || 0;
-        updatedShareholders[index].totalValue = faceVal * shares;
+        updated[index].totalValue = (Number(updated[index].faceValue) || 0) * (Number(updated[index].noOfShares) || 0);
       }
-      
-      return { ...prev, shareholders: updatedShareholders };
+      return { ...prev, shareholders: updated };
     });
   };
 
-  // ==========================================
-  // 🔴 DIRECTOR DYNAMIC HANDLERS (NEW)
-  // ==========================================
   const handleAddDirector = () => {
-    setFormData(prev => ({
-      ...prev,
-      directors: [
-        ...prev.directors, 
-        { name: '', dinOrDpin: '', pan: '', dob: '', mobile: '', email: '', appointmentDate: '', resigningDate: '', dscStatus: 'Not Available', dscValidUpto: '' }
-      ]
-    }));
+    setFormData(prev => ({ ...prev, directors: [...prev.directors, { name: '', dinOrDpin: '', pan: '', dob: '', mobile: '', email: '', appointmentDate: '', resigningDate: '', dscStatus: 'Not Available', dscValidUpto: '' }] }));
   };
-
   const handleRemoveDirector = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      directors: prev.directors.filter((_, i) => i !== index)
-    }));
+    setFormData(prev => ({ ...prev, directors: prev.directors.filter((_, i) => i !== index) }));
   };
-
   const handleDirectorChange = (index, field, value) => {
     setFormData(prev => {
-      const updatedDirectors = [...prev.directors];
-      updatedDirectors[index][field] = value;
-      return { ...prev, directors: updatedDirectors };
+      const updated = [...prev.directors];
+      updated[index][field] = value;
+      return { ...prev, directors: updated };
     });
   };
-
 
   const filteredWorkspaces = useMemo(() => {
     return workspaces.filter(ws => {
       const client = ws.clientMasterId || {};
       const searchStr = searchQuery.toLowerCase();
+      // 🔴 SEARCH BY SNAPSHOT FIELDS FIRST
       const matchesSearch = 
-        (client.name?.toLowerCase() || '').includes(searchStr) || 
-        (client.pan?.toLowerCase() || '').includes(searchStr) || 
+        (ws.companyName?.toLowerCase() || client.name?.toLowerCase() || '').includes(searchStr) || 
+        (ws.pan?.toLowerCase() || client.pan?.toLowerCase() || '').includes(searchStr) || 
         (ws.cinOrLlpIn?.toLowerCase() || '').includes(searchStr) ||
         (client.clientId?.toLowerCase() || '').includes(searchStr);
 
       const matchesStatus = statusFilter === 'ALL' || ws.status === statusFilter;
-      const matchesType = typeFilter === 'ALL' || client.clientType === typeFilter;
+      const cType = ws.clientType || client.clientType;
+      const matchesType = typeFilter === 'ALL' || cType === typeFilter;
       
       return matchesSearch && matchesStatus && matchesType;
     });
@@ -187,6 +163,277 @@ const RocWorkspace = () => {
       strikeOff: workspaces.filter(w => w.status === 'Strike Off').length
     };
   }, [workspaces]);
+
+  const handleExportExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('ROC Workspace');
+
+    let excelColumns = [
+      { header: 'Master Client ID', key: 'clientId', width: 20 },
+      { header: 'Company PAN', key: 'pan', width: 15 },
+      { header: 'Entity Name', key: 'name', width: 30 },
+      { header: 'Entity Type', key: 'clientType', width: 20 },
+      { header: 'CIN / LLPIN', key: 'cinOrLlpIn', width: 25 },
+      { header: 'Date of Inc.', key: 'dateOfIncorporation', width: 15 },
+      { header: 'TAN Number', key: 'tan', width: 15 },
+      { header: 'UDYAM Number', key: 'udyamNumber', width: 20 },
+      { header: 'IEC Code', key: 'importExportCode', width: 15 },
+      { header: 'Auth Capital', key: 'authorizedCapital', width: 15 },
+      { header: 'Paid Capital', key: 'paidUpCapital', width: 15 },
+      { header: 'Auditor Name', key: 'auditorName', width: 20 },
+      { header: 'Auditor Mem No', key: 'auditorMembershipNo', width: 15 },
+      { header: 'Auditor FRN', key: 'auditorFrn', width: 15 },
+      { header: 'Auditor Place', key: 'auditorPlace', width: 15 },
+      { header: 'Auditor Appt Date', key: 'auditorAppointmentDate', width: 15 },
+      { header: 'Auditor Valid Till', key: 'auditorTenureEndDate', width: 15 },
+      { header: 'Startup Registered', key: 'startupReg', width: 15 },
+      { header: 'DPIIT Number', key: 'dpiitNumber', width: 20 },
+      { header: 'Startup Cert No', key: 'certificateNo', width: 15 },
+      { header: 'Startup Rec. Date', key: 'recognitionDate', width: 15 },
+      { header: 'Startup Status', key: 'startupStatus', width: 15 }
+    ];
+
+    for(let i = 1; i <= 5; i++) {
+      excelColumns.push(
+        { header: `Dir ${i} Name`, key: `d${i}_name`, width: 20 },
+        { header: `Dir ${i} DIN`, key: `d${i}_din`, width: 15 },
+        { header: `Dir ${i} PAN`, key: `d${i}_pan`, width: 15 },
+        { header: `Dir ${i} DOB`, key: `d${i}_dob`, width: 15 },
+        { header: `Dir ${i} Phone`, key: `d${i}_phone`, width: 15 },
+        { header: `Dir ${i} Email`, key: `d${i}_email`, width: 20 },
+        { header: `Dir ${i} Appt Date`, key: `d${i}_appt`, width: 15 },
+        { header: `Dir ${i} Resign Date`, key: `d${i}_resign`, width: 15 },
+        { header: `Dir ${i} DSC Status`, key: `d${i}_dsc`, width: 15 },
+        { header: `Dir ${i} DSC Expiry`, key: `d${i}_dscExp`, width: 15 }
+      );
+    }
+
+    for(let i = 1; i <= 5; i++) {
+      excelColumns.push(
+        { header: `SH ${i} Name`, key: `s${i}_name`, width: 20 },
+        { header: `SH ${i} Address`, key: `s${i}_address`, width: 25 },
+        { header: `SH ${i} %`, key: `s${i}_perc`, width: 10 },
+        { header: `SH ${i} Face Value`, key: `s${i}_fv`, width: 15 },
+        { header: `SH ${i} Shares`, key: `s${i}_shares`, width: 15 },
+        { header: `SH ${i} Total`, key: `s${i}_total`, width: 15 },
+        { header: `SH ${i} Remarks`, key: `s${i}_rem`, width: 20 }
+      );
+    }
+
+    excelColumns.push({ header: 'Current Status', key: 'status', width: 15 });
+    worksheet.columns = excelColumns;
+
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+
+    const dataToExport = selectedIds.length > 0 ? filteredWorkspaces.filter(ws => selectedIds.includes(ws._id)) : filteredWorkspaces;
+
+    dataToExport.forEach(ws => { 
+      const client = ws.clientMasterId || {};
+      
+      let rowObj = {
+        clientId: client.clientId || '',
+        pan: ws.pan || client.pan || '',
+        name: ws.companyName || client.name || '',
+        clientType: ws.clientType || client.clientType || '',
+        cinOrLlpIn: ws.cinOrLlpIn || '',
+        dateOfIncorporation: ws.dateOfIncorporation ? new Date(ws.dateOfIncorporation).toLocaleDateString('en-IN') : '',
+        tan: ws.tan || '',
+        udyamNumber: ws.udyamNumber || '',
+        importExportCode: ws.importExportCode || '',
+        authorizedCapital: ws.authorizedCapital || 0,
+        paidUpCapital: ws.paidUpCapital || 0,
+        auditorName: ws.auditorName || '',
+        auditorMembershipNo: ws.auditorMembershipNo || '',
+        auditorFrn: ws.auditorFrn || '',
+        auditorPlace: ws.auditorPlace || '',
+        auditorAppointmentDate: ws.auditorAppointmentDate ? new Date(ws.auditorAppointmentDate).toLocaleDateString('en-IN') : '',
+        auditorTenureEndDate: ws.auditorTenureEndDate ? new Date(ws.auditorTenureEndDate).toLocaleDateString('en-IN') : '',
+        startupReg: ws.startupIndia?.isRegistered ? 'Yes' : 'No',
+        dpiitNumber: ws.startupIndia?.dpiitNumber || '',
+        certificateNo: ws.startupIndia?.certificateNo || '',
+        recognitionDate: ws.startupIndia?.recognitionDate ? new Date(ws.startupIndia.recognitionDate).toLocaleDateString('en-IN') : '',
+        startupStatus: ws.startupIndia?.status || '',
+        status: ws.status || 'Active'
+      };
+
+      (ws.directors || []).forEach((d, idx) => {
+        if(idx >= 5) return;
+        const i = idx + 1;
+        rowObj[`d${i}_name`] = d.name || '';
+        rowObj[`d${i}_din`] = d.dinOrDpin || '';
+        rowObj[`d${i}_pan`] = d.pan || '';
+        rowObj[`d${i}_dob`] = d.dob ? new Date(d.dob).toLocaleDateString('en-IN') : '';
+        rowObj[`d${i}_phone`] = d.mobile || '';
+        rowObj[`d${i}_email`] = d.email || '';
+        rowObj[`d${i}_appt`] = d.appointmentDate ? new Date(d.appointmentDate).toLocaleDateString('en-IN') : '';
+        rowObj[`d${i}_resign`] = d.resigningDate ? new Date(d.resigningDate).toLocaleDateString('en-IN') : '';
+        rowObj[`d${i}_dsc`] = d.dscStatus || '';
+        rowObj[`d${i}_dscExp`] = d.dscValidUpto ? new Date(d.dscValidUpto).toLocaleDateString('en-IN') : '';
+      });
+
+      (ws.shareholders || []).forEach((s, idx) => {
+        if(idx >= 5) return;
+        const i = idx + 1;
+        rowObj[`s${i}_name`] = s.name || '';
+        rowObj[`s${i}_address`] = s.address || '';
+        rowObj[`s${i}_perc`] = s.sharePercentage || '';
+        rowObj[`s${i}_fv`] = s.faceValue || '';
+        rowObj[`s${i}_shares`] = s.noOfShares || '';
+        rowObj[`s${i}_total`] = s.totalValue || '';
+        rowObj[`s${i}_rem`] = s.remarks || '';
+      });
+
+      worksheet.addRow(rowObj);
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `ROC_Workspace_${selectedIds.length > 0 ? 'Selected_' : ''}${new Date().toISOString().split('T')[0]}.xlsx`);
+    
+    if(selectedIds.length > 0) setSelectedIds([]);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true }); 
+        const wsname = wb.SheetNames[0];
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
+
+        if (data.length === 0) return toast.error("Uploaded Excel file is empty!");
+
+        const parseDate = (raw) => {
+          if (!raw) return null;
+          if (raw instanceof Date && !isNaN(raw.getTime())) return `${raw.getFullYear()}-${String(raw.getMonth() + 1).padStart(2, '0')}-${String(raw.getDate()).padStart(2, '0')}`;
+          if (typeof raw === 'string') {
+            const parts = raw.split(/[\/\-]/); 
+            if (parts.length === 3) {
+               if(parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+               return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            }
+          }
+          return null;
+        };
+
+        const getVal = (row, keys) => {
+          for (let key of keys) {
+            if (row[key] !== undefined && row[key] !== null) return row[key];
+          }
+          return '';
+        };
+
+        const formattedRecords = data.map(row => {
+          
+          let parsedDirs = [];
+          for(let i=1; i<=5; i++) {
+            let dName = getVal(row, [`Dir ${i} Name`]);
+            if(dName) {
+               parsedDirs.push({
+                  name: dName,
+                  dinOrDpin: getVal(row, [`Dir ${i} DIN`]),
+                  pan: getVal(row, [`Dir ${i} PAN`]),
+                  dob: parseDate(getVal(row, [`Dir ${i} DOB`])),
+                  mobile: getVal(row, [`Dir ${i} Phone`]),
+                  email: getVal(row, [`Dir ${i} Email`]),
+                  appointmentDate: parseDate(getVal(row, [`Dir ${i} Appt Date`])),
+                  resigningDate: parseDate(getVal(row, [`Dir ${i} Resign Date`])),
+                  dscStatus: getVal(row, [`Dir ${i} DSC Status`]) || 'Not Available',
+                  dscValidUpto: parseDate(getVal(row, [`Dir ${i} DSC Expiry`]))
+               });
+            }
+          }
+
+          let parsedShs = [];
+          for(let i=1; i<=5; i++) {
+            let sName = getVal(row, [`SH ${i} Name`]);
+            if(sName) {
+               let fv = Number(getVal(row, [`SH ${i} Face Value`])) || 0;
+               let shares = Number(getVal(row, [`SH ${i} Shares`])) || 0;
+               parsedShs.push({
+                  name: sName,
+                  address: getVal(row, [`SH ${i} Address`]),
+                  sharePercentage: Number(getVal(row, [`SH ${i} %`])) || 0,
+                  faceValue: fv,
+                  noOfShares: shares,
+                  totalValue: fv * shares,
+                  remarks: getVal(row, [`SH ${i} Remarks`])
+               });
+            }
+          }
+
+          return {
+            pan: String(getVal(row, ['Company PAN', 'PAN', 'pan'])).toUpperCase(),
+            name: getVal(row, ['Entity Name', 'Name', 'Company Name']),
+            clientType: getVal(row, ['Entity Type', 'clientType']) || 'Private Limited',
+            cinOrLlpIn: getVal(row, ['CIN / LLPIN', 'CIN', 'cinOrLlpIn']),
+            dateOfIncorporation: parseDate(getVal(row, ['Date of Inc.', 'DOI'])),
+            tan: getVal(row, ['TAN Number', 'TAN']),
+            udyamNumber: getVal(row, ['UDYAM Number', 'UDYAM']),
+            importExportCode: getVal(row, ['IEC Code', 'IEC']),
+            authorizedCapital: Number(getVal(row, ['Auth Capital', 'authorizedCapital'])) || 0,
+            paidUpCapital: Number(getVal(row, ['Paid Capital', 'paidUpCapital'])) || 0,
+            auditorName: getVal(row, ['Auditor Name']),
+            auditorMembershipNo: getVal(row, ['Auditor Mem No', 'Auditor Membership No']),
+            auditorFrn: getVal(row, ['Auditor FRN', 'FRN']),
+            auditorPlace: getVal(row, ['Auditor Place']),
+            auditorAppointmentDate: parseDate(getVal(row, ['Auditor Appt Date'])),
+            auditorTenureEndDate: parseDate(getVal(row, ['Auditor Valid Till'])),
+            startupIndia: {
+              isRegistered: String(getVal(row, ['Startup Registered'])).toLowerCase() === 'yes',
+              dpiitNumber: getVal(row, ['DPIIT Number']),
+              certificateNo: getVal(row, ['Startup Cert No', 'Certificate No']),
+              recognitionDate: parseDate(getVal(row, ['Startup Rec. Date'])),
+              status: getVal(row, ['Startup Status']) || 'N/A'
+            },
+            directors: parsedDirs,
+            shareholders: parsedShs,
+            status: getVal(row, ['Current Status', 'Status', 'status']) || 'Active'
+          };
+        }).filter(item => item.name && item.pan); 
+
+        if (formattedRecords.length === 0) return toast.error("No valid records found. Ensure PAN and Name exist.");
+
+        const headers = { Authorization: `Bearer ${user.token}` };
+        await axios.post(`${import.meta.env.VITE_API_URL}/roc/workspaces/import`, { records: formattedRecords }, { headers });
+        
+        toast.success(`Successfully imported ROC records!`);
+        fetchWorkspaces();
+      } catch (error) {
+        toast.error("Error importing records");
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = ""; 
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) setSelectedIds(filteredWorkspaces.map(w => w._id));
+    else setSelectedIds([]);
+  };
+
+  const handleSelectOne = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Are you sure you want to permanently delete ${selectedIds.length} selected workspaces?`)) return;
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.post(`${import.meta.env.VITE_API_URL}/roc/workspaces/bulk-delete`, { ids: selectedIds }, { headers });
+      toast.success(`${selectedIds.length} Workspaces deleted successfully!`);
+      setSelectedIds([]);
+      fetchWorkspaces();
+    } catch (error) {
+      toast.error("Error deleting records");
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -218,7 +465,6 @@ const RocWorkspace = () => {
     setEditingId(ws._id);
     const parseDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
     
-    // Convert dates inside directors array before setting state
     const formattedDirectors = (ws.directors || []).map(dir => ({
       ...dir,
       dob: parseDate(dir.dob),
@@ -228,9 +474,9 @@ const RocWorkspace = () => {
     }));
 
     setFormData({
-      pan: ws.clientMasterId?.pan || '',
-      name: ws.clientMasterId?.name || '',
-      clientType: ws.clientMasterId?.clientType || 'Private Limited',
+      pan: ws.pan || ws.clientMasterId?.pan || '',
+      name: ws.companyName || ws.clientMasterId?.name || '',
+      clientType: ws.clientType || ws.clientMasterId?.clientType || 'Private Limited',
       cinOrLlpIn: ws.cinOrLlpIn || '',
       dateOfIncorporation: parseDate(ws.dateOfIncorporation),
       tan: ws.tan || '',
@@ -252,7 +498,7 @@ const RocWorkspace = () => {
         status: ws.startupIndia?.status || 'N/A'
       },
       shareholders: ws.shareholders || [],
-      directors: formattedDirectors, // 🔴 Set Formatted Directors
+      directors: formattedDirectors,
       status: ws.status || 'Active'
     });
     setIsModalOpen(true);
@@ -304,9 +550,19 @@ const RocWorkspace = () => {
             </h1>
             <p className="text-sm text-slate-500 mt-1 font-medium">Manage Corporate Entities, CIN, Capital, Shareholders, Directors, and Startup India profiles.</p>
           </div>
-          <button onClick={openNewModal} className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-indigo-500/20 transition-all">
-            <Plus size={18} strokeWidth={2.5} /> Add Corporate Client
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={handleExportExcel} className="inline-flex items-center gap-2 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 text-sm font-bold px-4 py-2.5 rounded-xl transition-colors shadow-sm">
+              <Download size={16} strokeWidth={2.5} /> Export All
+            </button>
+            <button onClick={() => fileInputRef.current.click()} className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-sm font-bold px-4 py-2.5 rounded-xl transition-colors shadow-sm">
+              <Upload size={16} strokeWidth={2.5} /> Import Excel
+            </button>
+            <input type="file" accept=".xlsx, .xls, .csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+            
+            <button onClick={openNewModal} className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-indigo-500/20 transition-all">
+              <Plus size={18} strokeWidth={2.5} /> Add Corporate Client
+            </button>
+          </div>
         </div>
 
         {/* METRICS */}
@@ -376,12 +632,31 @@ const RocWorkspace = () => {
               </select>
             </div>
           </div>
+
+          {/* 🔴 SMART TOOLBAR FOR SELECTED ROWS */}
+          {selectedIds.length > 0 && (
+            <div className="bg-indigo-50 border-b border-indigo-100 p-3 px-6 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+              <span className="text-sm font-bold text-indigo-800 flex items-center gap-2">
+                <CheckSquare size={16} /> {selectedIds.length} Entities Selected
+              </span>
+              <div className="flex items-center gap-3">
+                <button onClick={handleExportExcel} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors shadow-sm">
+                  <Download size={14} strokeWidth={2.5}/> Export Selected
+                </button>
+                {isAdmin && (
+                  <button onClick={handleBulkDelete} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-lg transition-colors shadow-sm">
+                    <Trash2 size={14} strokeWidth={2.5}/> Delete Selected
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           
           <div className="w-full text-left bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-wider flex pr-4">
-             <div className="py-3 px-5 w-[30%]">Entity Details</div>
+             <div className="py-3 px-12 w-[35%]">Entity Details</div>
              <div className="py-3 px-5 w-[20%]">Registration Info</div>
              <div className="py-3 px-5 w-[20%]">Management Structure</div>
-             <div className="py-3 px-5 w-[15%]">Status</div>
+             <div className="py-3 px-5 w-[10%]">Status</div>
              <div className="py-3 px-5 flex-1 text-right">Actions</div>
           </div>
         </div>
@@ -391,7 +666,7 @@ const RocWorkspace = () => {
           <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead className="hidden">
               <tr>
-                <th className="w-[30%]"></th><th className="w-[20%]"></th><th className="w-[20%]"></th><th className="w-[15%]"></th><th className="flex-1"></th>
+                <th className="w-[35%]"></th><th className="w-[20%]"></th><th className="w-[20%]"></th><th className="w-[10%]"></th><th className="flex-1"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
@@ -402,23 +677,39 @@ const RocWorkspace = () => {
               ) : (
                 filteredWorkspaces.map((ws) => {
                   const client = ws.clientMasterId || {};
+                  const isSelected = selectedIds.includes(ws._id);
+                  // 🔴 SECURE SNAPSHOT DISPLAY
+                  const displayName = ws.companyName || client.name || 'Unknown Entity';
+                  const displayPan = ws.pan || client.pan || 'NO PAN';
+                  const displayType = ws.clientType || client.clientType || 'Private Limited';
+                  const displayId = client.clientId || '';
+
                   return (
-                    <tr key={ws._id} className="hover:bg-indigo-50/30 transition-colors group">
-                      <td className="py-4 px-5 w-[30%]">
+                    <tr key={ws._id} className={`hover:bg-indigo-50/30 transition-colors group ${isSelected ? 'bg-indigo-50/30' : ''}`}>
+                      <td className="py-4 px-4 w-[35%]">
                         <div className="flex items-center gap-3">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected} 
+                            onChange={() => handleSelectOne(ws._id)} 
+                            className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                          />
                           <div className="h-10 w-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-sm shrink-0 border border-indigo-200">
-                            {client.name ? client.name.charAt(0).toUpperCase() : 'C'}
+                            {displayName ? displayName.charAt(0).toUpperCase() : 'C'}
                           </div>
                           <div className="flex flex-col">
-                            <span className="font-bold text-slate-800 text-base">{client.name || 'Unknown Entity'}</span>
+                            {/* 🔴 Fixed Name Display */}
+                            <span className="font-bold text-slate-800 text-base">{displayName}</span>
                             <div className="flex flex-wrap items-center gap-2 mt-1">
-                              {client.clientId && (
+                              {/* 🔴 Fixed Client ID Display */}
+                              {displayId && (
                                 <span className="text-[10px] font-black uppercase bg-slate-200/70 text-slate-600 px-1.5 py-0.5 rounded border border-slate-300 tracking-wider">
-                                  ID: {client.clientId}
+                                  ID: {displayId}
                                 </span>
                               )}
+                              {/* 🔴 Fixed PAN Display */}
                               <span className="text-[10px] font-black uppercase bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 tracking-wider">
-                                {client.pan || 'NO PAN'}
+                                {displayPan}
                               </span>
                               {ws.startupIndia?.isRegistered && (
                                 <span className="text-[9px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 flex items-center gap-1">
@@ -445,7 +736,7 @@ const RocWorkspace = () => {
                            <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-1"><UserCheck size={10}/> Directors: {ws.directors?.length || 0}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-5 w-[15%]">
+                      <td className="py-4 px-5 w-[10%]">
                         <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${getStatusStyle(ws.status)}`}>
                           {ws.status}
                         </span>
@@ -543,7 +834,7 @@ const RocWorkspace = () => {
                 </div>
               </div>
 
-              {/* 🔴 SECTION 2: ADDITIONAL IDENTIFIERS */}
+              {/* SECTION 2: ADDITIONAL IDENTIFIERS */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 pb-2 mb-4 flex items-center gap-2">
                   <FileDigit size={14}/> Additional Identifiers
@@ -615,7 +906,7 @@ const RocWorkspace = () => {
                 </div>
               </div>
 
-              {/* 🔴 SECTION 4: DIRECTORS (NEW) */}
+              {/* SECTION 4: DIRECTORS */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -698,7 +989,7 @@ const RocWorkspace = () => {
                 )}
               </div>
 
-              {/* 🔴 SECTION 5: SHAREHOLDERS */}
+              {/* SECTION 5: SHAREHOLDERS */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -819,7 +1110,8 @@ const RocWorkspace = () => {
                   <Building2 size={32} className="text-white" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-black tracking-tight">{viewingData.clientMasterId?.name || 'Unknown Entity'}</h2>
+                  {/* 🔴 FIXED VIEW MODAL HEADER */}
+                  <h2 className="text-2xl font-black tracking-tight">{viewingData.companyName || viewingData.clientMasterId?.name || 'Unknown Entity'}</h2>
                   <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-indigo-100 font-medium">
                     {viewingData.clientMasterId?.clientId && (
                       <span className="flex items-center gap-1.5 bg-white/20 px-2.5 py-1 rounded-md border border-white/30 font-mono tracking-wider text-white font-bold">
@@ -830,7 +1122,7 @@ const RocWorkspace = () => {
                       <Hash size={12} className="opacity-70"/> {viewingData.cinOrLlpIn || 'N/A'}
                     </span>
                     <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
-                      PAN: {viewingData.clientMasterId?.pan || 'N/A'}
+                      PAN: {viewingData.pan || viewingData.clientMasterId?.pan || 'N/A'}
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${viewingData.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
                       {viewingData.status}
@@ -923,7 +1215,7 @@ const RocWorkspace = () => {
 
               </div>
 
-              {/* 🔴 VIEW DIRECTORS (NEW) */}
+              {/* 🔴 VIEW DIRECTORS */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 mb-4 flex items-center gap-2">
                   <UserCheck size={16} className="text-indigo-600"/> Register of Directors
@@ -1080,7 +1372,7 @@ const RocWorkspace = () => {
             <div>
               <h3 className="text-xl font-bold text-slate-800 tracking-tight">Delete Workspace?</h3>
               <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-                Are you sure you want to permanently delete <span className="font-bold text-slate-700">{deleteModal.client?.clientMasterId?.name || 'this workspace'}</span>? 
+                Are you sure you want to permanently delete <span className="font-bold text-slate-700">{deleteModal.client?.companyName || deleteModal.client?.clientMasterId?.name || 'this workspace'}</span>? 
                 <br/><span className="text-[10px] text-rose-500 font-bold">*Note: Client Master data will remain safe.</span>
               </p>
             </div>

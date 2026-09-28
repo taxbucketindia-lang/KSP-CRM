@@ -9,6 +9,7 @@ import {
   getComplianceTasks,
   updateRocWorkspace,
   deleteRocWorkspace,
+  importRocWorkspaces, bulkDeleteRocWorkspaces,
 } from '../controllers/rocController.js';
 
 const router = express.Router();
@@ -29,5 +30,7 @@ router.get('/directors/:workspaceId', protect, getCompanyDirectors);
 // Compliance & Filing Routes
 router.post('/compliance', protect, addComplianceTask);
 router.get('/compliance/:workspaceId', protect, getComplianceTasks);
+router.post('/workspaces/import', protect, importRocWorkspaces);
+router.post('/workspaces/bulk-delete', protect, bulkDeleteRocWorkspaces);
 
 export default router;

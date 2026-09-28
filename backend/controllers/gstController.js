@@ -302,16 +302,191 @@
 
 
 
+// import GstReturn from '../models/GstReturn.js';
+// import ClientMaster from '../models/ClientMaster.js'; // 🔴 IMPORT CLIENT MASTER
+
+// // @desc    Get all GST records
+// // @route   GET /api/gst
+// export const getGstReturns = async (req, res) => {
+//   try {
+//     const gstRecords = await GstReturn.find({})
+//       .populate('createdBy', 'name empId')
+//       .populate('clientMasterId', 'clientId pan clientType gstin') // Populate linked client data
+//       .sort({ createdAt: -1 });
+//     res.json(gstRecords);
+//   } catch (error) { 
+//     res.status(500).json({ message: error.message }); 
+//   }
+// };
+
+// // @desc    Create new GST Record (Manual)
+// // @route   POST /api/gst
+// export const createGstReturn = async (req, res) => {
+//   try {
+//     // Check for duplicate GSTIN
+//     const existing = await GstReturn.findOne({ gstin: req.body.gstin?.toUpperCase() });
+//     if (existing) return res.status(400).json({ message: 'GSTIN already exists in workspace.' });
+
+//     // PAN se check karenge, agar PAN nahi aaya toh GSTIN ke beech ke 10 characters utha lenge (as fallback)
+//     const rawPan = req.body.pan || (req.body.gstin ? req.body.gstin.substring(2, 12) : null);
+//     if (!rawPan) return res.status(400).json({ message: 'PAN Number is required to create a Master Record.' });
+    
+//     const uppercasePan = rawPan.toUpperCase();
+
+//     // 🔴 DYNAMIC SMART UPDATE FOR CLIENT MASTER
+//     let masterUpdates = {};
+//     if (req.body.assesseeName) masterUpdates.name = req.body.assesseeName;
+//     if (req.body.mobile) masterUpdates.mobile = req.body.mobile;
+//     if (req.body.email) masterUpdates.email = req.body.email;
+//     if (req.body.state) masterUpdates.state = req.body.state;
+//     if (req.body.pinCode) masterUpdates.pinCode = req.body.pinCode;
+//     if (req.body.gstin) masterUpdates.gstin = req.body.gstin.toUpperCase();
+    
+//     if (req.body.taxpayerType && req.body.taxpayerType === 'Regular') {
+//         masterUpdates.clientType = 'Private Limited';
+//     } else if (req.body.taxpayerType) {
+//         masterUpdates.clientType = 'Individual';
+//     }
+
+//     const clientDoc = await ClientMaster.findOneAndUpdate(
+//       { pan: uppercasePan },
+//       { 
+//           $set: masterUpdates,$setOnInsert: { pan: uppercasePan } 
+//       },
+//       { new: true, upsert: true }
+//     );
+
+//     // Save GST Return & Link ClientMaster ID
+//     const newGst = new GstReturn({ 
+//       ...req.body, 
+//       pan: uppercasePan,
+//       gstin: req.body.gstin?.toUpperCase(),
+//       clientMasterId: clientDoc._id, // LINKED!
+//       createdBy: req.user._id 
+//     });
+    
+//     const savedGst = await newGst.save();
+//     res.status(201).json(savedGst);
+//   } catch (error) { 
+//     res.status(400).json({ message: error.message }); 
+//   }
+// };
+
+// // @desc    Update GST Record
+// // @route   PUT /api/gst/:id
+// export const updateGstReturn = async (req, res) => {
+//   try {
+//     if (req.body.gstin) req.body.gstin = req.body.gstin.toUpperCase();
+//     if (req.body.pan) req.body.pan = req.body.pan.toUpperCase();
+
+//     const updatedGst = await GstReturn.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+//     if (!updatedGst) return res.status(404).json({ message: 'Record not found' });
+//     res.json(updatedGst);
+//   } catch (error) { res.status(400).json({ message: error.message }); }
+// };
+
+// // @desc    Delete GST Record
+// // @route   DELETE /api/gst/:id
+// export const deleteGstReturn = async (req, res) => {
+//   try {
+//     const deletedGst = await GstReturn.findByIdAndDelete(req.params.id);
+//     if (!deletedGst) return res.status(404).json({ message: 'Record not found' });
+//     res.json({ message: 'GST Record removed from workspace.' });
+//   } catch (error) { res.status(500).json({ message: error.message }); }
+// };
+
+// // @desc    Import GST Records from Excel (Add New & Update Existing)
+// // @route   POST /api/gst/import
+// export const importGstReturns = async (req, res) => {
+//   try {
+//     const records = req.body.records;
+//     if (!records || records.length === 0) return res.status(400).json({ message: "No data found" });
+
+//     let importedCount = 0;
+//     let updatedCount = 0;
+
+//     for (let record of records) {
+//       if (!record.gstin) continue; // Skip without GSTIN
+      
+//       const uppercaseGstin = record.gstin.toUpperCase();
+//       const extractedPan = record.pan ? record.pan.toUpperCase() : uppercaseGstin.substring(2, 12);
+
+//       // 🔴 DYNAMIC SMART UPDATE FOR EXCEL IMPORT
+//       let masterUpdates = {};
+//       if (record.assesseeName) masterUpdates.name = record.assesseeName;
+//       if (record.mobile) masterUpdates.mobile = record.mobile;
+//       if (record.email) masterUpdates.email = record.email;
+//       if (record.state) masterUpdates.state = record.state;
+//       if (record.pinCode) masterUpdates.pinCode = record.pinCode;
+//       if (uppercaseGstin) masterUpdates.gstin = uppercaseGstin;
+
+//       const clientDoc = await ClientMaster.findOneAndUpdate(
+//         { pan: extractedPan },
+//         { 
+//             $set: masterUpdates,$setOnInsert: { 
+//                 pan: extractedPan,
+//                 clientType: 'Private Limited'
+//             } 
+//         },
+//         { new: true, upsert: true }
+//       );
+
+//       const gstPayload = {
+//         ...record,
+//         pan: extractedPan,
+//         gstin: uppercaseGstin,
+//         clientMasterId: clientDoc._id // LINKED!
+//       };
+
+//       let existing = await GstReturn.findOne({ gstin: uppercaseGstin });
+      
+//       if (existing) {
+//         await GstReturn.findByIdAndUpdate(existing._id, gstPayload);
+//         updatedCount++;
+//       } else {
+//         await GstReturn.create({ ...gstPayload, createdBy: req.user._id });
+//         importedCount++;
+//       }
+//     }
+    
+//     res.status(201).json({ message: `Success! Added: ${importedCount}, Updated: ${updatedCount}`, count: importedCount + updatedCount });
+//   } catch (error) { 
+//     console.error("Import Error:", error);
+//     res.status(500).json({ message: error.message }); 
+//   }
+// };
+
+// // @desc    Bulk Delete GST Records
+// // @route   POST /api/gst/bulk-delete
+// export const bulkDeleteGstReturns = async (req, res) => {
+//   try {
+//     const { ids } = req.body;
+//     if (!ids || !Array.isArray(ids) || ids.length === 0) {
+//       return res.status(400).json({ message: 'No IDs provided for deletion.' });
+//     }
+//     await GstReturn.deleteMany({ _id: { $in: ids } });
+//     res.json({ message: `${ids.length} records deleted successfully.` });
+//   } catch (error) {
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
+
+
+
+
+
+
+
 import GstReturn from '../models/GstReturn.js';
-import ClientMaster from '../models/ClientMaster.js'; // 🔴 IMPORT CLIENT MASTER
+import ClientMaster from '../models/ClientMaster.js'; 
 
 // @desc    Get all GST records
-// @route   GET /api/gst
 export const getGstReturns = async (req, res) => {
   try {
     const gstRecords = await GstReturn.find({})
       .populate('createdBy', 'name empId')
-      .populate('clientMasterId', 'clientId pan clientType gstin') // Populate linked client data
+      .populate('clientMasterId', 'clientId pan clientType gstin') 
       .sort({ createdAt: -1 });
     res.json(gstRecords);
   } catch (error) { 
@@ -320,48 +495,70 @@ export const getGstReturns = async (req, res) => {
 };
 
 // @desc    Create new GST Record (Manual)
-// @route   POST /api/gst
 export const createGstReturn = async (req, res) => {
   try {
-    // Check for duplicate GSTIN
     const existing = await GstReturn.findOne({ gstin: req.body.gstin?.toUpperCase() });
     if (existing) return res.status(400).json({ message: 'GSTIN already exists in workspace.' });
 
-    // PAN se check karenge, agar PAN nahi aaya toh GSTIN ke beech ke 10 characters utha lenge (as fallback)
     const rawPan = req.body.pan || (req.body.gstin ? req.body.gstin.substring(2, 12) : null);
     if (!rawPan) return res.status(400).json({ message: 'PAN Number is required to create a Master Record.' });
     
     const uppercasePan = rawPan.toUpperCase();
 
-    // 🔴 DYNAMIC SMART UPDATE FOR CLIENT MASTER
-    let masterUpdates = {};
-    if (req.body.assesseeName) masterUpdates.name = req.body.assesseeName;
-    if (req.body.mobile) masterUpdates.mobile = req.body.mobile;
-    if (req.body.email) masterUpdates.email = req.body.email;
-    if (req.body.state) masterUpdates.state = req.body.state;
-    if (req.body.pinCode) masterUpdates.pinCode = req.body.pinCode;
-    if (req.body.gstin) masterUpdates.gstin = req.body.gstin.toUpperCase();
-    
-    if (req.body.taxpayerType && req.body.taxpayerType === 'Regular') {
-        masterUpdates.clientType = 'Private Limited';
-    } else if (req.body.taxpayerType) {
-        masterUpdates.clientType = 'Individual';
+    // 🔴 1. CHECK IF CLIENT EXISTS
+    let clientDoc = await ClientMaster.findOne({ pan: uppercasePan });
+
+    if (clientDoc) {
+      // Client exist karta hai, sirf nayi field update karein
+      let masterUpdates = {};
+      if (req.body.assesseeName) masterUpdates.name = req.body.assesseeName;
+      if (req.body.mobile) masterUpdates.mobile = req.body.mobile;
+      if (req.body.email) masterUpdates.email = req.body.email;
+      if (req.body.state) masterUpdates.state = req.body.state;
+      if (req.body.pinCode) masterUpdates.pinCode = req.body.pinCode;
+      if (req.body.gstin) masterUpdates.gstin = req.body.gstin.toUpperCase();
+      
+      clientDoc = await ClientMaster.findByIdAndUpdate(clientDoc._id, { $set: masterUpdates }, { new: true });
+    } else {
+      // 🔴 2. NAYA CLIENT: AUTO-GENERATE CUSTOM ID (TB-XXXXX-0001)
+      const panSuffix = uppercasePan.slice(-5); 
+      const lastClient = await ClientMaster.findOne({ clientId: { $exists: true,$ne: null } }).sort({ createdAt: -1 });
+      let nextSequenceNum = 1;
+
+      if (lastClient && lastClient.clientId) {
+        const lastSeqStr = lastClient.clientId.split('-').pop();
+        const lastSeqNum = parseInt(lastSeqStr, 10);
+        if (!isNaN(lastSeqNum)) {
+          nextSequenceNum = lastSeqNum + 1;
+        } else {
+          nextSequenceNum = await ClientMaster.countDocuments() + 1;
+        }
+      } else {
+        nextSequenceNum = await ClientMaster.countDocuments() + 1;
+      }
+
+      const sequenceNum = String(nextSequenceNum).padStart(4, '0');
+      const customClientId = `TB-${panSuffix}-${sequenceNum}`;
+
+      clientDoc = await ClientMaster.create({
+        clientId: customClientId,
+        pan: uppercasePan,
+        name: req.body.assesseeName,
+        mobile: req.body.mobile,
+        email: req.body.email,
+        state: req.body.state,
+        pinCode: req.body.pinCode,
+        gstin: req.body.gstin?.toUpperCase(),
+        clientType: req.body.taxpayerType === 'Regular' ? 'Private Limited' : 'Individual'
+      });
     }
 
-    const clientDoc = await ClientMaster.findOneAndUpdate(
-      { pan: uppercasePan },
-      { 
-          $set: masterUpdates,$setOnInsert: { pan: uppercasePan } 
-      },
-      { new: true, upsert: true }
-    );
-
-    // Save GST Return & Link ClientMaster ID
+    // 3. Save GST Return & Link ClientMaster ID
     const newGst = new GstReturn({ 
       ...req.body, 
       pan: uppercasePan,
       gstin: req.body.gstin?.toUpperCase(),
-      clientMasterId: clientDoc._id, // LINKED!
+      clientMasterId: clientDoc._id, 
       createdBy: req.user._id 
     });
     
@@ -373,7 +570,6 @@ export const createGstReturn = async (req, res) => {
 };
 
 // @desc    Update GST Record
-// @route   PUT /api/gst/:id
 export const updateGstReturn = async (req, res) => {
   try {
     if (req.body.gstin) req.body.gstin = req.body.gstin.toUpperCase();
@@ -386,7 +582,6 @@ export const updateGstReturn = async (req, res) => {
 };
 
 // @desc    Delete GST Record
-// @route   DELETE /api/gst/:id
 export const deleteGstReturn = async (req, res) => {
   try {
     const deletedGst = await GstReturn.findByIdAndDelete(req.params.id);
@@ -395,8 +590,7 @@ export const deleteGstReturn = async (req, res) => {
   } catch (error) { res.status(500).json({ message: error.message }); }
 };
 
-// @desc    Import GST Records from Excel (Add New & Update Existing)
-// @route   POST /api/gst/import
+// @desc    Import GST Records from Excel
 export const importGstReturns = async (req, res) => {
   try {
     const records = req.body.records;
@@ -405,37 +599,61 @@ export const importGstReturns = async (req, res) => {
     let importedCount = 0;
     let updatedCount = 0;
 
+    // Excel import ke liye sequence number pehle hi nikal lo
+    const lastClient = await ClientMaster.findOne({ clientId: { $exists: true,$ne: null } }).sort({ createdAt: -1 });
+    let currentSequence = 1;
+    if (lastClient && lastClient.clientId) {
+      const lastSeqStr = lastClient.clientId.split('-').pop();
+      const lastSeqNum = parseInt(lastSeqStr, 10);
+      if (!isNaN(lastSeqNum)) currentSequence = lastSeqNum + 1;
+    } else {
+      currentSequence = await ClientMaster.countDocuments() + 1;
+    }
+
     for (let record of records) {
-      if (!record.gstin) continue; // Skip without GSTIN
+      if (!record.gstin) continue; 
       
       const uppercaseGstin = record.gstin.toUpperCase();
       const extractedPan = record.pan ? record.pan.toUpperCase() : uppercaseGstin.substring(2, 12);
 
-      // 🔴 DYNAMIC SMART UPDATE FOR EXCEL IMPORT
-      let masterUpdates = {};
-      if (record.assesseeName) masterUpdates.name = record.assesseeName;
-      if (record.mobile) masterUpdates.mobile = record.mobile;
-      if (record.email) masterUpdates.email = record.email;
-      if (record.state) masterUpdates.state = record.state;
-      if (record.pinCode) masterUpdates.pinCode = record.pinCode;
-      if (uppercaseGstin) masterUpdates.gstin = uppercaseGstin;
+      // 🔴 1. CHECK IF CLIENT EXISTS
+      let clientDoc = await ClientMaster.findOne({ pan: extractedPan });
 
-      const clientDoc = await ClientMaster.findOneAndUpdate(
-        { pan: extractedPan },
-        { 
-            $set: masterUpdates,$setOnInsert: { 
-                pan: extractedPan,
-                clientType: 'Private Limited'
-            } 
-        },
-        { new: true, upsert: true }
-      );
+      if (clientDoc) {
+        let masterUpdates = {};
+        if (record.assesseeName) masterUpdates.name = record.assesseeName;
+        if (record.mobile) masterUpdates.mobile = record.mobile;
+        if (record.email) masterUpdates.email = record.email;
+        if (record.state) masterUpdates.state = record.state;
+        if (record.pinCode) masterUpdates.pinCode = record.pinCode;
+        if (uppercaseGstin) masterUpdates.gstin = uppercaseGstin;
+
+        await ClientMaster.findByIdAndUpdate(clientDoc._id, { $set: masterUpdates });
+      } else {
+        // 🔴 2. NAYA CLIENT (EXCEL SE): AUTO-GENERATE ID
+        const panSuffix = extractedPan.slice(-5); 
+        const sequenceNumStr = String(currentSequence).padStart(4, '0');
+        const customClientId = `TB-${panSuffix}-${sequenceNumStr}`;
+        currentSequence++; // Next loop ke liye ID increment karo
+
+        clientDoc = await ClientMaster.create({
+          clientId: customClientId,
+          pan: extractedPan,
+          name: record.assesseeName,
+          mobile: record.mobile,
+          email: record.email,
+          state: record.state,
+          pinCode: record.pinCode,
+          gstin: uppercaseGstin,
+          clientType: 'Private Limited'
+        });
+      }
 
       const gstPayload = {
         ...record,
         pan: extractedPan,
         gstin: uppercaseGstin,
-        clientMasterId: clientDoc._id // LINKED!
+        clientMasterId: clientDoc._id 
       };
 
       let existing = await GstReturn.findOne({ gstin: uppercaseGstin });
@@ -456,8 +674,6 @@ export const importGstReturns = async (req, res) => {
   }
 };
 
-// @desc    Bulk Delete GST Records
-// @route   POST /api/gst/bulk-delete
 export const bulkDeleteGstReturns = async (req, res) => {
   try {
     const { ids } = req.body;

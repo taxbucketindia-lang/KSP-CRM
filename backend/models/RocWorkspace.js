@@ -29,6 +29,10 @@ const directorSubSchema = new mongoose.Schema({
 
 const rocWorkspaceSchema = new mongoose.Schema({
   clientMasterId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientMaster', required: true, unique: true },
+
+  companyName: { type: String },
+  pan: { type: String, uppercase: true },
+  clientType: { type: String },
   
   // Basic Details
   cinOrLlpIn: { type: String, unique: true, sparse: true, uppercase: true },

@@ -407,6 +407,8 @@ const findOrCreateClient = async (clientData) => {
 // @route   GET /api/itr
 export const getItrReturns = async (req, res) => {
   try {
+    await ItrReturn.collection.dropIndex("clientId_1").catch(e => console.log("Index already dropped"));
+    
     const itrRecords = await ItrReturn.find({})
       .populate('createdBy', 'name empId')
       .populate('clientMasterId', 'pan clientType clientId') // Populate linked client data if needed
