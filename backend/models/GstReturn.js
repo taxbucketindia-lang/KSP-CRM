@@ -13,6 +13,11 @@ const gstReturnSchema = new mongoose.Schema({
   gstin: { type: String, required: true, uppercase: true },
   taxpayerType: { type: String, enum: ['Regular', 'IFF', 'Composition'], default: 'Regular' },
   aadhaarKycStatus: { type: String, enum: ['Yes', 'No'], default: 'No' },
+
+  // Purani fields ke paas ise add karein
+  bankName: { type: String, default: '' },
+  accountNo: { type: String, default: '' },
+  ifscCode: { type: String, uppercase: true, default: '' },
   
   gstr1FilingDate: { type: Date },
   gstr1NextDueDate: { type: Date },

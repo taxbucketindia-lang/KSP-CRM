@@ -108,15 +108,17 @@
 
 
 
-
-
-
 import ClientMaster from '../models/ClientMaster.js';
 import ItrReturn from '../models/ItrReturn.js'; 
 import GstReturn from '../models/GstReturn.js'; 
 import RocWorkspace from '../models/RocWorkspace.js';
+import TdsWorkspace from '../models/TdsWorkspace.js';
+import AuditEngagement from '../models/AuditEngagement.js'; // 🔴 NAYA: Audit Model
+// import TdsReturn from '../models/TdsReturn.js'; // 🔴 TDS Model (Aapka jo bhi TDS model ka naam ho wo yahan likh lena)
 
-// 1. Get All Clients (with Robust Dual-Fallback Linkage Tracking)
+// ==========================================
+// 1. Get All Clients (with dynamic service checks)
+// ==========================================
 export const getClients = async (req, res) => {
   try {
     const { search, type, status } = req.query;
@@ -125,34 +127,40 @@ export const getClients = async (req, res) => {
     if (search) {
       filter.$or = [
         { name: { $regex: search,$options: 'i' } },
+        { tradeName: { $regex: search,$options: 'i' } },
         { pan: { $regex: search,$options: 'i' } },
         { gstin: { $regex: search,$options: 'i' } },
-        { clientId: { $regex: search,$options: 'i' } }
+        { clientId: { $regex: search,$options: 'i' } } // 🔴 ID se search
       ];
     }
     if (type && type !== 'All') filter.clientType = type;
     if (status && status !== 'All') filter.status = status;
 
+    // lean() makes the query faster and returns a plain JS object
     const clients = await ClientMaster.find(filter).lean().sort({ createdAt: -1 });
 
-    // 🔴 DUAL FALLBACK CHECK: clientMasterId ya PAN match hone par bhi active dikhayega
+    // 🔴 THE MAGIC: Fetch Live Workspace Links dynamically for each client
     const enrichedClients = await Promise.all(clients.map(async (client) => {
-      const hasItr = await ItrReturn.exists({ 
-        $or: [{ clientMasterId: client._id }, { pan: client.pan }] 
-      });
-      const hasGst = await GstReturn.exists({ 
-        $or: [{ clientMasterId: client._id }, { pan: client.pan }] 
-      });
-      const hasRoc = await RocWorkspace.exists({ 
-        $or: [{ clientMasterId: client._id }] 
-      });
+      // Alag-alag tables me check karo ki client ka data hai ya nahi
+      const hasItr = await ItrReturn.exists({ clientMasterId: client._id });
+      const hasGst = await GstReturn.exists({ clientMasterId: client._id });
+      const hasRoc = await RocWorkspace.exists({ clientMasterId: client._id });
       
+      // 🔴 NAYA: Audit ka check (Audit model me foreign key 'client_id' hoti hai)
+      const hasAudit = await AuditEngagement.exists({ client_id: client._id, is_active: true });
+      
+      // 🔴 NAYA: TDS ka check (Maan lijiye aapke TDS model me foreign key clientMasterId hai)
+      // const hasTds = await TdsReturn.exists({ clientMasterId: client._id });
+     const hasTds = await TdsWorkspace.exists({ pan: client.pan }); // Jab TDS import kar lein tab upar wali line uncomment kar dena
+
       return {
         ...client,
         services: {
           itr: !!hasItr,
           gst: !!hasGst,
-          roc: !!hasRoc
+          roc: !!hasRoc,
+          audit: !!hasAudit, // 🔴 Ab Audit automatically ACTIVE ho jayega!
+          tds: !!hasTds      // 🔴 TDS bhi automatically active ho jayega!
         }
       };
     }));
@@ -163,8 +171,9 @@ export const getClients = async (req, res) => {
   }
 };
 
-// 2. Create a New Client Manually with Auto-Generated Custom ID
-// 2. Create a New Client Manually with Auto-Generated Custom ID
+// ==========================================
+// 2. Create a New Client Manually (With TB- ID Auto Gen)
+// ==========================================
 export const createClient = async (req, res) => {
   try {
     const { pan, ...otherData } = req.body;
@@ -178,32 +187,28 @@ export const createClient = async (req, res) => {
       return res.status(400).json({ message: `Client already exists with this PAN: ${existingClient.name}` });
     }
 
-    // 🔴 AUTO-GENERATE CUSTOM ID (Safely handling deletions)
-    const panSuffix = uppercasePan.slice(-5); 
+    // 🔴 THE MAGIC: Auto-Generate Client ID (TB-Last5-0001)
+    const panSuffix = uppercasePan.slice(-5); // Last 5 digits/chars
+    let nextSeq = 1;
+    const lastClient = await ClientMaster.findOne({ clientId: { $regex: /^TB-/ } }).sort({ createdAt: -1 });
     
-    // Find the latest client created to get the highest sequence number
-    const lastClient = await ClientMaster.findOne().sort({ createdAt: -1 });
-    let nextSequenceNum = 1;
-
     if (lastClient && lastClient.clientId) {
-      // Extract the last part of the ID (e.g., "0005" from "TB-1234F-0005")
-      const lastSeqStr = lastClient.clientId.split('-').pop();
-      const lastSeqNum = parseInt(lastSeqStr, 10);
-      
-      if (!isNaN(lastSeqNum)) {
-        nextSequenceNum = lastSeqNum + 1;
+      const parts = lastClient.clientId.split('-');
+      const lastSeqStr = parts[parts.length - 1];
+      if (!isNaN(lastSeqStr)) {
+         nextSeq = parseInt(lastSeqStr, 10) + 1;
       } else {
-        // Fallback just in case older data doesn't match the format
-        const count = await ClientMaster.countDocuments();
-        nextSequenceNum = count + 1;
+         nextSeq = (await ClientMaster.countDocuments()) + 1;
       }
+    } else {
+       nextSeq = (await ClientMaster.countDocuments()) + 1;
     }
 
-    const sequenceNum = String(nextSequenceNum).padStart(4, '0');
-    const customClientId = `TB-${panSuffix}-${sequenceNum}`;
+    const sequenceNum = String(nextSeq).padStart(4, '0');
+    const generatedClientId = `TB-${panSuffix}-${sequenceNum}`;
 
     const newClient = new ClientMaster({
-      clientId: customClientId,
+      clientId: generatedClientId, // 🔴 ID assign kar di
       pan: uppercasePan,
       ...otherData
     });
@@ -215,10 +220,13 @@ export const createClient = async (req, res) => {
   }
 };
 
+// ==========================================
 // 3. Update Client Details
+// ==========================================
 export const updateClient = async (req, res) => {
   try {
     const { pan, ...updateData } = req.body;
+    
     if (pan) updateData.pan = pan.toUpperCase();
 
     const updatedClient = await ClientMaster.findByIdAndUpdate(
@@ -235,7 +243,9 @@ export const updateClient = async (req, res) => {
   }
 };
 
+// ==========================================
 // 4. Delete Client
+// ==========================================
 export const deleteClient = async (req, res) => {
   try {
     const client = await ClientMaster.findByIdAndDelete(req.params.id);
@@ -246,3 +256,4 @@ export const deleteClient = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+

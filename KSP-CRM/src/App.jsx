@@ -23,6 +23,8 @@ import GstHealthScan from './pages/GstHealthScan';
 import ClientMaster from './pages/ClientMaster';
 import RocWorkspace from './pages/RocWorkspace';
 import TdsWorkspace from './pages/TdsWorkspace';
+import AuditWorkspace from './pages/AuditWorkspace';
+import Holidays from './pages/Holidays';
 
 // Placeholder Pages (Inko next step mein banayenge)
 // const Dashboard = () => <div><h1 className="text-2xl font-bold">Dashboard</h1><p>KPIs will appear here.</p></div>;
@@ -57,12 +59,14 @@ function App() {
             <Route path="/hr/employees" element={<EmployeeMaster />} />
             <Route path="/hr/attendance" element={<Attendance />} />
             <Route path="/hr/salary" element={<SalaryCalculation />} />
+            <Route path="/hr/holiday" element={<Holidays />} />
             <Route path="/my-portal" element={<MyPortal />} />
             <Route path="/ceo-panel" element={<CeoDashboard />} />
             <Route path="/gst-health" element={<GstHealthScan />} />
             <Route path="/client-master" element={<ClientMaster />} />
             <Route path="/roc-returns" element={<RocWorkspace />} />
             <Route path="/tds-returns" element={<TdsWorkspace />} />
+            <Route path="/audit" element={<AuditWorkspace />} />
           </Route>
         </Routes>
       </Router>

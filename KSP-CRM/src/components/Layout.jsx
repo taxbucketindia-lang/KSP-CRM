@@ -177,6 +177,7 @@ const Layout = () => {
           { path: '/hr/employees', name: 'Employee Master', icon: Users },
           { path: '/hr/attendance', name: 'Attendance Control', icon: CalendarClock },
           { path: '/hr/salary', name: 'Salary Calculation', icon: IndianRupee },
+          { path: '/hr/holiday', name: 'Holiday', icon: ClipboardList },
           { path: '/hr/leave', name: 'Leave P', icon: FileText },
           { path: '/hr/performance', name: 'Performance P', icon: Activity }
         ] : []),

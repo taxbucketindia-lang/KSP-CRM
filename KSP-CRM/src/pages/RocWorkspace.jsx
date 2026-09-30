@@ -6,10 +6,10 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs'; 
 import { saveAs } from 'file-saver';
 import { 
-  Building2, Search, Plus, X, Briefcase, FileText, CheckCircle2, AlertTriangle,
+  Building2, Search, Plus, X, FileText, CheckCircle2, AlertTriangle,
   AlertCircle, RefreshCw, Trash2, Eye, Edit, Award, ShieldCheck, 
   CalendarDays, IndianRupee, Hash, Loader2, Pencil, Users, Trash, Percent, FileDigit, UserCheck, Key,
-  Download, Upload, CheckSquare
+  Download, Upload, CheckSquare,Briefcase,
 } from 'lucide-react';
 
 const RocWorkspace = () => {
@@ -140,7 +140,6 @@ const RocWorkspace = () => {
     return workspaces.filter(ws => {
       const client = ws.clientMasterId || {};
       const searchStr = searchQuery.toLowerCase();
-      // 🔴 SEARCH BY SNAPSHOT FIELDS FIRST
       const matchesSearch = 
         (ws.companyName?.toLowerCase() || client.name?.toLowerCase() || '').includes(searchStr) || 
         (ws.pan?.toLowerCase() || client.pan?.toLowerCase() || '').includes(searchStr) || 
@@ -749,9 +748,12 @@ const RocWorkspace = () => {
                           <button onClick={() => handleOpenView(ws)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent" title="View Workspace">
                             <Eye size={16}/>
                           </button>
-                          <button onClick={() => setDeleteModal({ open: true, client: ws })} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Workspace">
-                            <Trash2 size={16}/>
-                          </button>
+                          {/* 🔴 ONLY ADMIN CAN DELETE WORKSPACE */}
+                          {isAdmin && (
+                            <button onClick={() => setDeleteModal({ open: true, client: ws })} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Workspace">
+                              <Trash2 size={16}/>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -792,7 +794,8 @@ const RocWorkspace = () => {
                     <input 
                       type="text" required maxLength="10" value={formData.pan} 
                       onChange={handlePanChange} onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                      autoComplete="off" disabled={editingId} 
+                      autoComplete="off" 
+                      disabled={editingId && !isAdmin} // 🔴 ONLY ADMIN CAN EDIT IF EXISTING
                       placeholder="ABCDE1234F" 
                       className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-black text-slate-800 uppercase tracking-widest bg-white focus:ring-2 focus:ring-indigo-500/20 outline-none disabled:bg-slate-100 disabled:text-slate-400 relative z-10"
                     />
@@ -811,11 +814,22 @@ const RocWorkspace = () => {
 
                   <div className="md:col-span-2">
                     <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Entity Name *</label>
-                    <input type="text" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} disabled={editingId} placeholder="e.g. Taxbucket Tech Pvt Ltd" className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-indigo-500/20"/>
+                    <input 
+                      type="text" required value={formData.name} 
+                      onChange={(e) => setFormData({...formData, name: e.target.value})} 
+                      disabled={editingId && !isAdmin} // 🔴 ONLY ADMIN CAN EDIT IF EXISTING
+                      placeholder="e.g. Taxbucket Tech Pvt Ltd" 
+                      className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-indigo-500/20"
+                    />
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Entity Type</label>
-                    <select value={formData.clientType} onChange={(e) => setFormData({...formData, clientType: e.target.value})} disabled={editingId} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-white disabled:bg-slate-100 disabled:text-slate-400">
+                    <select 
+                      value={formData.clientType} 
+                      onChange={(e) => setFormData({...formData, clientType: e.target.value})} 
+                      // 🔴 ANYONE CAN EDIT ENTITY TYPE
+                      className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20"
+                    >
                       <option value="Private Limited">Private Limited</option>
                       <option value="Public Limited">Public Limited</option>
                       <option value="OPC">One Person Company (OPC)</option>
@@ -1130,7 +1144,7 @@ const RocWorkspace = () => {
                   </div>
                 </div>
               </div>
-              <button onClick={() => setIsViewModalOpen(false)} className="z-10 p-2 rounded-full bg-black/10 hover:bg-black/20 text-white transition-colors"><X size={20} strokeWidth={2.5} /></button>
+              <button onClick={() => setIsViewModalOpen(false)} className="z-10 p-2 rounded-full bg-black/10 hover:bg-black/30 text-white transition-colors"><X size={20} strokeWidth={2.5} /></button>
             </div>
             
             <div className="overflow-y-auto p-6 md:p-8 space-y-6 custom-scrollbar">
@@ -1338,12 +1352,15 @@ const RocWorkspace = () => {
             
             <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
               <div>
-                <button 
-                  onClick={() => { setIsViewModalOpen(false); setDeleteModal({ open: true, client: viewingData }); }} 
-                  className="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-transparent hover:border-rose-200 flex items-center gap-1.5"
-                >
-                  <Trash2 size={15} /> Remove Workspace
-                </button>
+                {/* 🔴 ONLY ADMIN CAN DELETE WORKSPACE */}
+                {isAdmin && (
+                  <button 
+                    onClick={() => { setIsViewModalOpen(false); setDeleteModal({ open: true, client: viewingData }); }} 
+                    className="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-transparent hover:border-rose-200 flex items-center gap-1.5"
+                  >
+                    <Trash2 size={15} /> Remove Workspace
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => setIsViewModalOpen(false)} className="px-5 py-2.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors">
@@ -1363,7 +1380,7 @@ const RocWorkspace = () => {
       )}
 
       {/* DELETE CONFIRMATION MODAL */}
-      {deleteModal.open && (
+      {deleteModal.open && isAdmin && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 p-8 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
             <div className="mx-auto h-16 w-16 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100 mb-2">
@@ -1389,3 +1406,5 @@ const RocWorkspace = () => {
 };
 
 export default RocWorkspace;
+
+

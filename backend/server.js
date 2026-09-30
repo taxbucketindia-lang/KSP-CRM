@@ -21,6 +21,7 @@ import clientMasterRoutes from './routes/clientMasterRoutes.js';
 import rocRoutes from './routes/rocRoutes.js';
 import tdsRoutes from './routes/tdsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -52,6 +53,7 @@ app.use('/api/client-master', clientMasterRoutes);
 app.use('/api/roc', rocRoutes);
 app.use('/api/tds', tdsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/audit', auditRoutes);
 
 
 // ==========================================
