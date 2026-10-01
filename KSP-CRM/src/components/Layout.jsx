@@ -1,4 +1,4 @@
-import { useContext, useState, useEffect, useRef } from 'react'; // 🔴 useRef add kiya hai
+import { useContext, useState, useEffect, useRef } from 'react'; 
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, UserCircle, Briefcase, LogOut, Menu,
   X, Bell, ChevronRight, ChevronDown, ShieldCheck, PhoneCall, CheckCircle2,
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
-  Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee,
+  Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo, // 🔴 Icons added
   AlertCircle, BarChart3, TrendingUp, Code, Globe, Zap
 } from 'lucide-react';
 
@@ -26,7 +26,6 @@ const Layout = () => {
 
   const [activePermissions, setActivePermissions] = useState(user?.permissions || []);
   
-  // 🔴 NAYA: Yeh track karega ki aakhiri auto-open kis notification par hua tha
   const latestNotifIdRef = useRef(null);
 
   useEffect(() => {
@@ -53,7 +52,7 @@ const Layout = () => {
     syncPermissions();
   }, [location.pathname, user?.token]); 
 
-  // 🔴 NAYA NOTIFICATION SYSTEM FETCH LOGIC (AUTO REFRESH & AUTO OPEN)
+  // NOTIFICATION SYSTEM FETCH LOGIC (AUTO REFRESH & AUTO OPEN)
   useEffect(() => {
     const fetchNotifications = async () => {
       try {
@@ -64,14 +63,12 @@ const Layout = () => {
         const newNotifs = notifRes.data || [];
         setNotifications(newNotifs);
 
-        // 🔴 AUTO-OPEN LOGIC
         if (newNotifs.length > 0) {
-          const latestNotif = newNotifs[0]; // Sabse pehla (latest) notification
+          const latestNotif = newNotifs[0]; 
           
-          // Agar yeh notification 'Unread' hai aur humne isko pehle auto-open nahi kiya hai:
           if (!latestNotif.isRead && latestNotif._id !== latestNotifIdRef.current) {
-            setShowNotifications(true); // Dropdown khol do
-            latestNotifIdRef.current = latestNotif._id; // Yaad rakho ki iske liye khol diya hai
+            setShowNotifications(true); 
+            latestNotifIdRef.current = latestNotif._id; 
           }
         }
       } catch (error) {
@@ -79,15 +76,12 @@ const Layout = () => {
       }
     };
 
-    // 1. Pehle turant ek baar fetch karo
     fetchNotifications();
 
-    // 2. Har 15 seconds (15000 milliseconds) mein auto-refresh karo
     const intervalId = setInterval(() => {
       fetchNotifications();
     }, 15000);
 
-    // 3. Cleanup function
     return () => clearInterval(intervalId);
   }, [user?.token, location.pathname]);
 
@@ -114,6 +108,10 @@ const Layout = () => {
       items: [
         { path: '/', name: 'Dashboard', icon: LayoutDashboard },
         ...(user?.role !== 'Admin' ? [{ path: '/my-portal', name: 'My Portal', icon: CalendarClock }] : []),
+        
+        // 🔴 NAYA: To-Do Reminder added in Main section
+        { path: '/todo', name: 'My To-Do Tasks', icon: ListTodo },
+        
         { path: '/custom-dashboards', name: 'Role Dashboards P', icon: BarChart3 }
       ]
     },
@@ -123,6 +121,7 @@ const Layout = () => {
       items: [
         ...(user?.role === 'Admin' || activePermissions.includes('LEADS') ? [{ path: '/leads', name: 'Leads & Prospects', icon: UserCircle }] : []),
         ...(user?.role === 'Admin' || activePermissions.includes('GST_SCAN') ? [{ path: '/gst-health', name: 'GST Health Reports', icon: Activity }] : []),
+        { path: '/feeanddocuments', name: 'Fee & Documents', icon: Megaphone },
         { path: '/follow-ups', name: 'Follow-ups P', icon: PhoneCall },
         { path: '/sales-pipeline', name: 'Sales Pipeline P', icon: TrendingUp },
         { path: '/campaigns', name: 'Campaigns P', icon: Megaphone }
@@ -143,6 +142,7 @@ const Layout = () => {
             { path: '/clients?service=Company Reg', name: 'Company Reg' },
             { path: '/clients?service=Trademark Reg', name: 'Trademark Reg' },
             { path: '/clients?service=Accounting & Audit', name: 'Accounting & Audit' },
+            { path: '/clients?service=FSSAI Registration', name: 'FSSAI Registration' },
             { path: '/clients?service=Other Services', name: 'Other Services' }
           ]
         },
@@ -157,6 +157,7 @@ const Layout = () => {
             { path: '/roc-returns', name: 'ROC Return' },
             { path: '/tds-returns', name: 'TDS Return' },
             { path: '/audit', name: 'Audit' },
+            { path: '/fssai-returns', name: 'Fssai Return' },
             { path: '/oth-returns', name: 'Other Return' }
           ]
         },
@@ -179,7 +180,10 @@ const Layout = () => {
           { path: '/hr/salary', name: 'Salary Calculation', icon: IndianRupee },
           { path: '/hr/holiday', name: 'Holiday', icon: ClipboardList },
           { path: '/hr/leave', name: 'Leave P', icon: FileText },
-          { path: '/hr/performance', name: 'Performance P', icon: Activity }
+          { path: '/hr/performance', name: 'Performance P', icon: Activity },
+          
+          // 🔴 NAYA: Office Expense ka Icon 'Activity' se 'Receipt' kiya hai
+          { path: '/officexpense', name: 'Office Expense', icon: Receipt }
         ] : []),
         
       ]

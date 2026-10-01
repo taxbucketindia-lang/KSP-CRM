@@ -1,4 +1,3 @@
-// models/Client.js
 import mongoose from 'mongoose';
 
 const clientSchema = new mongoose.Schema({
@@ -91,6 +90,7 @@ clientSchema.pre('save', async function() {
   this.balanceDue = (this.feeAmount || 0) - (this.amountReceived || 0);
   this.refund = (this.incomeTax || 0) - (this.tds || 0) - (this.tcs || 0) - (this.selfAdvTax || 0);
   
+  // 🔴 CLIENT ID LOGIC: Untouched
   if (!this.clientId) {
     const lastClient = await mongoose.model('Client').findOne().sort({ createdAt: -1 });
     
@@ -102,9 +102,10 @@ clientSchema.pre('save', async function() {
     }
   }
 
+  // 🔴 UPDATED: Added FSSAI Registration Next Reminder Logic
   if (this.filingDate && !this.nextReminderDate) {
     const dateObj = new Date(this.filingDate);
-    if (this.service === 'ITR Filing') {
+    if (this.service === 'ITR Filing' || this.service === 'FSSAI Registration') {
       dateObj.setFullYear(dateObj.getFullYear() + 1); 
     } else {
       dateObj.setMonth(dateObj.getMonth() + 1); 

@@ -40,6 +40,15 @@ const InvoiceGenerator = () => {
 
   const emptyCompany = { name: "", phone: "", email: "", website: "", cin: "", udyam: "", gstin: "" };
 
+  // 🔴 BANK PRESETS
+  const axisBankPreset = {
+    bankName: "Axis Bank Ltd", branch: "Gopi Nath Bazar, Delhi Cantt", accNo: "924020007339476", ifsc: "UTIB0004552", upiId: "taxbucket@axis"
+  };
+  const kotakBankPreset = {
+    bankName: "Kotak Mahindra Bank", branch: "Kotak Mahindra Bank, Palam", accNo: "2413788124", ifsc: "KKBK0000177", upiId: "keshavksp@kotak"
+  };
+  const emptyBankPreset = { bankName: "", branch: "", accNo: "", ifsc: "", upiId: "" };
+
   const [invoiceId, setInvoiceId] = useState(null); 
   const [invoiceNo, setInvoiceNo] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
@@ -61,15 +70,12 @@ const InvoiceGenerator = () => {
 
   const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
 
-  const [bank, setBank] = useState({
-    bankName: "Axis Bank Ltd", branch: "Gopi Nath Bazar, Delhi Cantt", accNo: "924020007339476", ifsc: "UTIB0004552", upiId: "taxbucket@axis"
-  });
+  const [bank, setBank] = useState(axisBankPreset);
 
   const [historyList, setHistoryList] = useState([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 🔴 Autocomplete States
   const [fetchingPan, setFetchingPan] = useState(false);
   const [panSuggestions, setPanSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -103,7 +109,6 @@ const InvoiceGenerator = () => {
     }
   };
 
-  // 🔴 PAN AUTOCOMPLETE LOGIC
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setCustomer(prev => ({ ...prev, pan: val }));
@@ -147,6 +152,11 @@ const InvoiceGenerator = () => {
     : 0;
   const totalAmountAfterTax = taxableAmount + totalGstAmount;
 
+  // 🔴 DYNAMIC QR URL GENERATOR
+  // This will auto-update whenever UPI ID or Amount changes
+  const upiLink = `upi://pay?pa=${bank.upiId}&pn=${companyDetails.name || 'Business'}&am=${totalAmountAfterTax}&cu=INR`;
+  const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(upiLink)}`;
+
   const addItem = () => setItems([...items, { description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
   const removeItem = (index) => { const list = [...items]; list.splice(index, 1); setItems(list); };
 
@@ -163,14 +173,13 @@ const InvoiceGenerator = () => {
     }
   };
 
-  // 🔴 TOGGLE PAYMENT STATUS (IN HISTORY)
   const togglePaymentStatus = async (invId, currentStatus) => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
       await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${invId}`, { paymentStatus: newStatus }, { headers });
       toast.success(`Payment marked as ${newStatus}`);
-      fetchHistory(); // Refresh list
+      fetchHistory();
     } catch (error) {
       toast.error("Failed to update payment status");
     }
@@ -241,6 +250,7 @@ const InvoiceGenerator = () => {
     setShowQr(true);
     setCustomer({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
     setItems([{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
+    setBank(axisBankPreset); 
     setLogoImage(null);
     setStampImage(null);
     setCustomQrImage(null);
@@ -311,9 +321,15 @@ const InvoiceGenerator = () => {
     }
   };
 
+  const handleBankSelect = (e) => {
+    const val = e.target.value;
+    if (val === 'axis') setBank(axisBankPreset);
+    else if (val === 'kotak') setBank(kotakBankPreset);
+    else if (val === 'custom') setBank(emptyBankPreset);
+  };
+
   const defaultLogo = "/taxbucket-logo.webp";
   const defaultStamp = "/taxbucket-stamp.png";
-  const defaultQr = "/taxbucket-qr.png";
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8 pb-12">
@@ -439,7 +455,6 @@ const InvoiceGenerator = () => {
         )}
 
         <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* 🔴 NAYA PAN AUTOCOMPLETE DROPDOWN */}
           <div className="relative z-20">
             <label className="block text-xs font-bold uppercase text-slate-500 mb-1 text-blue-600">Search by PAN *</label>
             <input 
@@ -499,13 +514,22 @@ const InvoiceGenerator = () => {
         </div>
 
         <div className="border-t pt-4">
-          <div className="flex justify-between items-center mb-3">
-             <h3 className="text-sm font-bold text-slate-700 uppercase">Bank Details Configuration</h3>
+          <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 gap-3">
+             <div className="flex items-center gap-4">
+               <h3 className="text-sm font-bold text-slate-700 uppercase">Bank Details Configuration</h3>
+               {/* 🔴 NEW BANK SELECTION DROPDOWN */}
+               <select onChange={handleBankSelect} className="text-xs font-bold bg-white border border-slate-300 rounded-lg p-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-indigo-700 shadow-sm cursor-pointer">
+                 <option value="axis">Axis Bank (Default)</option>
+                 <option value="kotak">Kotak Mahindra Bank</option>
+                 <option value="custom">Manual / Custom Entry</option>
+               </select>
+             </div>
              <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100 cursor-pointer">
                <input type="checkbox" id="showQr" checked={showQr} onChange={(e) => setShowQr(e.target.checked)} className="cursor-pointer w-4 h-4 text-indigo-600 rounded"/>
                <label htmlFor="showQr" className="text-xs font-bold text-indigo-900 cursor-pointer">Show UPI QR Code</label>
              </div>
           </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div>
               <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Bank Name</label>
@@ -534,6 +558,21 @@ const InvoiceGenerator = () => {
                </div>
             )}
           </div>
+
+          {/* 🔴 DYNAMIC QR PREVIEW IN FORM */}
+          {showQr && bank.upiId && (
+            <div className="mt-4 flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-max">
+              {customQrImage ? (
+                <img src={customQrImage} alt="QR" className="w-16 h-16 object-contain" />
+              ) : (
+                <img src={dynamicQrUrl} alt="UPI QR" className="w-16 h-16 object-contain"/>
+              )}
+              <div className="flex flex-col">
+                 <p className="text-xs font-bold text-slate-800">Scan to Pay via UPI</p>
+                 <p className="text-[10px] font-medium text-slate-500">{bank.upiId}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="border-t pt-4">
@@ -893,17 +932,13 @@ const InvoiceGenerator = () => {
               </div>
             </div>
             
-            {showQr && (
+            {/* 🔴 DYNAMIC QR RENDER IN PRINT TEMPLATE */}
+            {showQr && bank.upiId && (
               <div className="mt-4 flex items-center gap-3 bg-slate-50 p-2 rounded border">
                 {customQrImage ? (
                   <img src={customQrImage} alt="QR" className="w-16 h-16 object-contain" />
-                ) : isTaxbucket ? (
-                  <img src={defaultQr} alt="UPI QR" className="w-16 h-16 object-contain" onError={(e) => {
-                     e.target.onerror = null;
-                     e.target.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=upi://pay?pa=${bank.upiId}&am=${totalAmountAfterTax}&cu=INR`;
-                  }}/>
                 ) : (
-                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=upi://pay?pa=${bank.upiId}&am=${totalAmountAfterTax}&cu=INR`} alt="UPI QR" className="w-16 h-16 object-contain"/>
+                  <img src={dynamicQrUrl} alt="UPI QR" className="w-16 h-16 object-contain"/>
                 )}
                 <p className="text-[10px] font-bold text-slate-600">Pay using UPI</p>
               </div>

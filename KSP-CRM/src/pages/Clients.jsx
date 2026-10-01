@@ -141,18 +141,20 @@ const Clients = () => {
           updated.verificationMethod = 'Pending'; updated.itrProcessedStatus = 'Pending';
           updated.itrFiledBy = ''; updated.regime = 'New'; updated.formNo = 'ITR-1';
         }
-        if (value !== 'ITR Filing' && value !== 'GST Registration') {
+        // 🔴 UPDATED: Added FSSAI Registration logic
+        if (!['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(value)) {
           updated.filingDate = '';
           updated.nextReminderDate = '';
         }
       }
 
-      if (name === 'filingDate' && value && ['ITR Filing', 'GST Registration'].includes(updated.service)) {
+      // 🔴 UPDATED: Added FSSAI Registration logic for Next Reminder
+      if (name === 'filingDate' && value && ['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(updated.service)) {
         const dateObj = new Date(value);
-        if (updated.service === 'ITR Filing') {
-          dateObj.setFullYear(dateObj.getFullYear() + 1); 
+        if (updated.service === 'ITR Filing' || updated.service === 'FSSAI Registration') {
+          dateObj.setFullYear(dateObj.getFullYear() + 1); // 1 Year Renewal
         } else if (updated.service === 'GST Registration') {
-          dateObj.setMonth(dateObj.getMonth() + 1); 
+          dateObj.setMonth(dateObj.getMonth() + 1); // 1 Month Default
         }
         updated.nextReminderDate = dateObj.toISOString().split('T')[0];
       }
@@ -471,7 +473,8 @@ const Clients = () => {
         
         let oldRem = originalData.nextReminderDate ? new Date(originalData.nextReminderDate).toISOString().split('T')[0] : 'None';
         let newRem = formData.nextReminderDate || 'None';
-        if (oldRem !== newRem && ['ITR Filing', 'GST Registration'].includes(formData.service)) {
+        // 🔴 UPDATED
+        if (oldRem !== newRem && ['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(formData.service)) {
           changes.push(`Next Reminder updated: ${newRem}`);
         }
 
@@ -491,8 +494,9 @@ const Clients = () => {
         ...formData, 
         remarks: finalRemarks,
         itrFiledUpToAY: formData.service === 'ITR Filing' ? formData.itrFiledUpToAY : null,
-        filingDate: ['ITR Filing', 'GST Registration'].includes(formData.service) && formData.filingDate ? formData.filingDate : null,
-        nextReminderDate: ['ITR Filing', 'GST Registration'].includes(formData.service) && formData.nextReminderDate ? formData.nextReminderDate : null,
+        // 🔴 UPDATED
+        filingDate: ['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(formData.service) && formData.filingDate ? formData.filingDate : null,
+        nextReminderDate: ['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(formData.service) && formData.nextReminderDate ? formData.nextReminderDate : null,
         referredByBA: formData.leadSource === 'BA' ? formData.referredByBA : null,
         referenceName: formData.leadSource === 'Reference' ? formData.referenceName : '',
         otherSourceName: formData.leadSource === 'Other' ? formData.otherSourceName : ''
@@ -664,7 +668,8 @@ const Clients = () => {
                 {serviceFilter === 'ITR Filing' && <th className="py-3.5 px-6">ITR AY</th>}
                 {serviceFilter !== 'ITR Filing' && <th className="py-3.5 px-6">Service</th>}
                 
-                {['ITR Filing', 'GST Registration'].includes(serviceFilter) && (
+                {/* 🔴 UPDATED: Added FSSAI Registration here */}
+                {['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(serviceFilter) && (
                   <>
                     <th className="py-3.5 px-6">Filing Date</th>
                     <th className="py-3.5 px-6">Next Reminder</th>
@@ -714,7 +719,8 @@ const Clients = () => {
                         </td>
                       )}
 
-                      {['ITR Filing', 'GST Registration'].includes(serviceFilter) && (
+                      {/* 🔴 UPDATED */}
+                      {['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(serviceFilter) && (
                         <>
                           <td className="py-4 px-6 text-xs font-medium text-slate-600">
                             {client.filingDate ? new Date(client.filingDate).toLocaleDateString('en-IN') : 'N/A'}
@@ -815,7 +821,6 @@ const Clients = () => {
 
                 <div className="col-span-4 h-px bg-slate-200 my-1"></div>
 
-                {/* VIEW MODAL: BANK DETAILS */}
                 <div className="col-span-4 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-blue-600 flex items-center gap-1.5">
                     <CreditCard size={14} /> Bank Account Details
@@ -849,17 +854,17 @@ const Clients = () => {
                   </span>
                 </div>
                 
-                {['ITR Filing', 'GST Registration'].includes(clientToView.service) && (
+                {/* 🔴 UPDATED */}
+                {['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(clientToView.service) && (
                   <div className="col-span-2">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Important Dates</p>
                     <div className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
-                      <span className="flex items-center gap-2"><CalendarClock size={12} className="text-slate-400"/> Filed On: {clientToView.filingDate ? new Date(clientToView.filingDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+                      <span className="flex items-center gap-2"><CalendarClock size={12} className="text-slate-400"/> Filed/Issued On: {clientToView.filingDate ? new Date(clientToView.filingDate).toLocaleDateString('en-IN') : 'N/A'}</span>
                       <span className="flex items-center gap-2 text-amber-600"><CalendarClock size={12} className="text-amber-500"/> Next Reminder: {clientToView.nextReminderDate ? new Date(clientToView.nextReminderDate).toLocaleDateString('en-IN') : 'Not Set'}</span>
                     </div>
                   </div>
                 )}
 
-                {/* VIEW MODAL: ITR SPECIFIC TAX DETAILS */}
                 {clientToView.service === 'ITR Filing' && (
                   <div className="col-span-4 bg-indigo-50 rounded-2xl p-4 border border-indigo-100 mt-2 space-y-3">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5">
@@ -1090,15 +1095,17 @@ const Clients = () => {
                     <option value="Trademark Registration">Trademark Registration</option>
                     <option value="Accounting">Accounting & Audit</option>
                     {/* 🔴 NEW OPTION ADDED HERE */}
+                    <option value="FSSAI Registration">FSSAI Registration</option>
                     <option value="Other Services">Other Services</option>
                   </select>
                 </div>
 
-                {['ITR Filing', 'GST Registration'].includes(formData.service) && (
+                {/* 🔴 UPDATED: Added FSSAI Registration here */}
+                {['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(formData.service) && (
                   <>
                     <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                       <label className="block text-xs font-bold uppercase tracking-wider text-blue-700 mb-1.5">
-                        {formData.service === 'ITR Filing' ? 'Date of ITR Filing' : 'Date of GST Return/Filing'}
+                        {formData.service === 'ITR Filing' ? 'Date of ITR Filing' : formData.service === 'FSSAI Registration' ? 'Date of FSSAI Reg/Renewal' : 'Date of GST Return/Filing'}
                       </label>
                       <input type="date" name="filingDate" value={formData.filingDate} onChange={handleChange} 
                         disabled={editMode && !isAdmin}
@@ -1108,7 +1115,7 @@ const Clients = () => {
 
                     <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
                       <label className="block text-xs font-bold uppercase tracking-wider text-amber-700 mb-1.5">
-                        {formData.service === 'ITR Filing' ? 'Next ITR Reminder' : 'Next GST Reminder'}
+                        {formData.service === 'ITR Filing' ? 'Next ITR Reminder' : formData.service === 'FSSAI Registration' ? 'FSSAI Renewal Reminder' : 'Next GST Reminder'}
                       </label>
                       <input type="date" name="nextReminderDate" value={formData.nextReminderDate} onChange={handleChange} 
                         disabled={editMode && !isAdmin}

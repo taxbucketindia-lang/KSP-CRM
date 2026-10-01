@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import express from 'express';
+import { startCronJobs } from './utils/cronJobs.js';    
 import dotenv from 'dotenv';
 import cors from 'cors';
 import cron from 'node-cron'; // <-- Naya package import kiya
@@ -22,6 +23,10 @@ import rocRoutes from './routes/rocRoutes.js';
 import tdsRoutes from './routes/tdsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
+import fssaiRoutes from './routes/fssaiRoutes.js';
+import expenseRoutes from './routes/expenseRoutes.js';
+import todoRoutes from './routes/todoRoutes.js';
+
 
 dotenv.config();
 connectDB();
@@ -52,9 +57,11 @@ app.use('/api/gst-scan', gstScanRoutes);
 app.use('/api/client-master', clientMasterRoutes);
 app.use('/api/roc', rocRoutes);
 app.use('/api/tds', tdsRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use('/api/notifications', notificationRoutes);  
 app.use('/api/audit', auditRoutes);
-
+app.use('/api/fssai', fssaiRoutes);
+app.use('/api/expenses', expenseRoutes);
+app.use('/api/todos', todoRoutes);
 
 // ==========================================
 // CRON JOB FOR DAILY FOLLOW-UP REMINDERS
@@ -95,6 +102,7 @@ mongoose.connection.once('open', async () => {
   } catch (error) {
     // Agar index pehle hi delete ho gaya hoga toh koi error nahi aayega
   }
+  startCronJobs();
 });
 
 const PORT = process.env.PORT || 5000;

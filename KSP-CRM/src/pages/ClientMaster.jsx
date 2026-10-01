@@ -6,7 +6,7 @@
 //   Building, Search, Plus, X, Mail, Phone, MapPin, 
 //   CheckCircle2, Edit, AlertCircle, RefreshCw, Trash2, AlertTriangle, 
 //   Briefcase, Eye, UserCircle, Hash, FileText, Calculator, Building2, FileKey, ShieldCheck,
-//   IndianRupee, MessageCircle, Clock
+//   IndianRupee, MessageCircle, Clock, CalendarDays, Filter, Store ,
 // } from 'lucide-react';
 
 // const ClientMaster = () => {
@@ -20,6 +20,8 @@
 //   const [searchQuery, setSearchQuery] = useState('');
 //   const [statusFilter, setStatusFilter] = useState('Active');
 //   const [typeFilter, setTypeFilter] = useState('All');
+//   const [monthFilter, setMonthFilter] = useState('All'); // 🔴 NAYA: Month Filter
+//   const [yearFilter, setYearFilter] = useState('All');   // 🔴 NAYA: Year Filter
 
 //   // Modals
 //   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -34,7 +36,7 @@
 //   const [clientInvoices, setClientInvoices] = useState([]);
 //   const [loadingInvoices, setLoadingInvoices] = useState(false);
 
-//   // Initial Form State (🔴 UPDATED with TradeName & Audit Fields)
+//   // Initial Form State
 //   const initialForm = {
 //     pan: '', name: '', tradeName: '', mobile: '', email: '', 
 //     clientType: 'Individual', address: '', state: '', pinCode: '',
@@ -64,6 +66,12 @@
 //     // eslint-disable-next-line
 //   }, [user.token]);
 
+//   // 🔴 NAYA: Extract Unique Years from Clients for Filter Dropdown
+//   const uniqueYears = useMemo(() => {
+//      const years = clients.map(c => new Date(c.createdAt).getFullYear());
+//      return [...new Set(years)].sort((a,b) => b - a); 
+//   }, [clients]);
+
 //   const filteredClients = useMemo(() => {
 //     return clients.filter(client => {
 //       const searchStr = searchQuery.toLowerCase();
@@ -77,9 +85,14 @@
 //       const matchesStatus = statusFilter === 'All' || client.status === statusFilter;
 //       const matchesType = typeFilter === 'All' || client.clientType === typeFilter;
       
-//       return matchesSearch && matchesStatus && matchesType;
+//       // 🔴 NAYA: Date Filtering Logic
+//       const createdDate = new Date(client.createdAt);
+//       const matchesYear = yearFilter === 'All' || createdDate.getFullYear().toString() === yearFilter;
+//       const matchesMonth = monthFilter === 'All' || (createdDate.getMonth() + 1).toString() === monthFilter;
+      
+//       return matchesSearch && matchesStatus && matchesType && matchesYear && matchesMonth;
 //     });
-//   }, [clients, searchQuery, statusFilter, typeFilter]);
+//   }, [clients, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
 
 //   const handleSave = async (e) => {
 //     e.preventDefault();
@@ -115,7 +128,7 @@
 //     setFormData({
 //       pan: client.pan || '', 
 //       name: client.name || '', 
-//       tradeName: client.tradeName || '', // 🔴
+//       tradeName: client.tradeName || '',
 //       mobile: client.mobile || '', 
 //       email: client.email || '', 
 //       clientType: client.clientType || 'Individual', 
@@ -128,7 +141,6 @@
 //       fatherName: client.fatherName || '',
 //       status: client.status || 'Active', 
 //       remarks: client.remarks || '',
-//       // 🔴 Audit specific A0 Fields
 //       constitution: client.constitution || '',
 //       cin_llpin: client.cin_llpin || '',
 //       date_of_incorporation: parseDate(client.date_of_incorporation),
@@ -219,37 +231,93 @@
 //         </button>
 //       </div>
 
+//       {/* 🔴 NAYA: METRICS ROW */}
+//       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+//         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-blue-500">
+//           <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0"><Building size={18} /></div>
+//           <div>
+//             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Clients</p>
+//             <h3 className="text-xl font-black text-slate-800">{clients.length}</h3>
+//           </div>
+//         </div>
+//         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-emerald-500">
+//           <div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold border border-emerald-100 shrink-0"><CheckCircle2 size={18} /></div>
+//           <div>
+//             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Clients</p>
+//             <h3 className="text-xl font-black text-emerald-700">{clients.filter(c => c.status === 'Active').length}</h3>
+//           </div>
+//         </div>
+//         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-indigo-500">
+//           <div className="h-10 w-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold border border-indigo-100 shrink-0"><Filter size={18} /></div>
+//           <div>
+//             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filtered View</p>
+//             <h3 className="text-xl font-black text-indigo-700">{filteredClients.length}</h3>
+//           </div>
+//         </div>
+//       </div>
+
 //       {/* FILTERS */}
 //       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-//         <div className="p-4 bg-slate-50/50 flex flex-col md:flex-row gap-4 items-center justify-between border-b border-slate-100">
-//           <div className="relative w-full md:w-1/3">
-//             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-//             <input 
-//               type="text" 
-//               placeholder="Search by ID, Name, Trade Name, PAN or GSTIN..." 
-//               value={searchQuery} 
-//               onChange={(e) => setSearchQuery(e.target.value)} 
-//               className="w-full pl-9 pr-3.5 py-2.5 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm" 
-//             />
-//           </div>
+//         <div className="p-4 bg-slate-50/50 flex flex-col gap-4 border-b border-slate-100">
           
-//           <div className="w-full md:w-auto flex gap-3">
-//             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full md:w-auto text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
-//               <option value="All">All Types</option>
-//               <option value="Individual">Individual</option>
-//               <option value="Proprietorship">Proprietorship</option>
-//               <option value="Partnership Firm">Partnership Firm</option>
-//               <option value="LLP">LLP</option>
-//               <option value="Private Limited">Private Limited</option>
-//               <option value="Other">Other</option>
-//             </select>
+//           <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+//             <div className="relative w-full md:w-1/3">
+//               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+//               <input 
+//                 type="text" 
+//                 placeholder="Search by ID, Name, Trade Name, PAN or GSTIN..." 
+//                 value={searchQuery} 
+//                 onChange={(e) => setSearchQuery(e.target.value)} 
+//                 className="w-full pl-9 pr-3.5 py-2.5 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm" 
+//               />
+//             </div>
+            
+//             <div className="w-full md:w-auto flex gap-3">
+//               <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full md:w-auto text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
+//                 <option value="All">All Types</option>
+//                 <option value="Individual">Individual</option>
+//                 <option value="Proprietorship">Proprietorship</option>
+//                 <option value="Partnership Firm">Partnership Firm</option>
+//                 <option value="LLP">LLP</option>
+//                 <option value="Private Limited">Private Limited</option>
+//                 <option value="Other">Other</option>
+//               </select>
 
-//             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full md:w-auto text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
-//               <option value="All">All Statuses</option>
-//               <option value="Active">Active</option>
-//               <option value="Inactive">Inactive</option>
+//               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full md:w-auto text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
+//                 <option value="All">All Statuses</option>
+//                 <option value="Active">Active</option>
+//                 <option value="Inactive">Inactive</option>
+//               </select>
+//             </div>
+//           </div>
+
+//           {/* 🔴 NAYA: Date Filters */}
+//           <div className="flex flex-wrap items-center gap-2">
+//             <div className="flex items-center gap-1.5 mr-2">
+//               <CalendarDays size={13} className="text-slate-400" />
+//               <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Onboarding Filters:</span>
+//             </div>
+//             <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
+//               <option value="All">All Months</option>
+//               <option value="1">January</option>
+//               <option value="2">February</option>
+//               <option value="3">March</option>
+//               <option value="4">April</option>
+//               <option value="5">May</option>
+//               <option value="6">June</option>
+//               <option value="7">July</option>
+//               <option value="8">August</option>
+//               <option value="9">September</option>
+//               <option value="10">October</option>
+//               <option value="11">November</option>
+//               <option value="12">December</option>
+//             </select>
+//             <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
+//               <option value="All">All Years</option>
+//               {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
 //             </select>
 //           </div>
+
 //         </div>
 
 //         {/* CLIENT LIST TABLE */}
@@ -261,15 +329,17 @@
 //                 <th className="py-4 px-5">Tax & Identifiers</th>
 //                 <th className="py-4 px-5">Contact Details</th>
 //                 <th className="py-4 px-5">Entity & Location</th>
+//                 {/* 🔴 NAYA: Onboarded Date Column */}
+//                 <th className="py-4 px-5">Onboarded Date</th>
 //                 <th className="py-4 px-5">Status</th>
 //                 <th className="py-4 px-5 text-right">Action</th>
 //               </tr>
 //             </thead>
 //             <tbody className="divide-y divide-slate-100 text-sm">
 //               {loading ? (
-//                 <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Master Database...</td></tr>
+//                 <tr><td colSpan="7" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Master Database...</td></tr>
 //               ) : filteredClients.length === 0 ? (
-//                 <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
+//                 <tr><td colSpan="7" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
 //               ) : (
 //                 filteredClients.map((client) => (
 //                   <tr key={client._id} className="hover:bg-slate-50/70 transition-colors group">
@@ -279,7 +349,6 @@
 //                           {client.name.charAt(0).toUpperCase()}
 //                         </div>
 //                         <div>
-//                           {/* 🔴 Added Trade Name Display */}
 //                           <p className="font-bold text-slate-800 flex flex-col gap-0.5">
 //                             <span className="flex items-center gap-2">
 //                               {client.name}
@@ -320,6 +389,13 @@
 //                         <MapPin size={12} className="text-slate-400 mt-0.5 shrink-0"/> 
 //                         <span className="truncate">{client.state ? `${client.state} ${client.pinCode ? `(${client.pinCode})` : ''}` : 'Location not added'}</span>
 //                       </p>
+//                     </td>
+//                     {/* 🔴 NAYA: Onboarded Date Data */}
+//                     <td className="py-3 px-5">
+//                       <div className="flex flex-col gap-0.5">
+//                          <span className="text-xs font-bold text-slate-800">{new Date(client.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+//                          <span className="text-[9px] font-bold text-slate-400 uppercase">{new Date(client.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+//                       </div>
 //                     </td>
 //                     <td className="py-3 px-5">
 //                       <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${getStatusBadge(client.status)}`}>
@@ -452,47 +528,47 @@
 //                 </div>
 //               </div>
 
-//               {/* 🔴 UPDATED: SERVICE LINKAGE SUMMARY (The 360 View) */}
+//               {/* SERVICE LINKAGE SUMMARY (The 360 View) */}
 //               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
 //                 <h3 className="text-sm font-black text-slate-800 mb-5 pb-2 border-b border-slate-100 flex items-center gap-2">
 //                   <ShieldCheck size={18} className="text-emerald-600"/> Connected Workspaces & Services
 //                 </h3>
                 
-//                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+//                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
 //                   {/* ITR Box */}
 //                   <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.itr ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
 //                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.itr ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-400'}`}><FileText size={18}/></div>
-//                     <span className="text-xs font-bold text-slate-700">Income Tax (ITR)</span>
+//                     <span className="text-[11px] font-bold text-slate-700">Income Tax (ITR)</span>
 //                     {clientToView.services?.itr ? (
-//                        <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+//                        <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
 //                     ) : (
-//                        <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+//                        <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
 //                     )}
 //                   </div>
                   
 //                   {/* GST Box */}
 //                   <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.gst ? 'bg-indigo-50/50 border-indigo-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
 //                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.gst ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}><Calculator size={18}/></div>
-//                     <span className="text-xs font-bold text-slate-700">GST Returns</span>
+//                     <span className="text-[11px] font-bold text-slate-700">GST Returns</span>
 //                     {clientToView.services?.gst ? (
-//                       <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+//                       <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
 //                     ) : (
-//                       <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+//                       <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
 //                     )}
 //                   </div>
 
 //                   {/* ROC Box */}
 //                   <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.roc ? 'bg-purple-50/50 border-purple-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
 //                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.roc ? 'bg-purple-100 text-purple-600' : 'bg-slate-200 text-slate-400'}`}><Building2 size={18}/></div>
-//                     <span className="text-xs font-bold text-slate-700">ROC / MCA</span>
+//                     <span className="text-[11px] font-bold text-slate-700">ROC / MCA</span>
 //                     {clientToView.services?.roc ? (
-//                        <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+//                        <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
 //                     ) : (
-//                        <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+//                        <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
 //                     )}
 //                   </div>
 
-//                   {/* 🔴 NAYA: TDS Box */}
+//                   {/* TDS Box */}
 //                   <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.tds ? 'bg-orange-50/50 border-orange-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
 //                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.tds ? 'bg-orange-100 text-orange-600' : 'bg-slate-200 text-slate-400'}`}><Hash size={18}/></div>
 //                     <span className="text-[11px] font-bold text-slate-700">TDS Return</span>
@@ -503,14 +579,26 @@
 //                     )}
 //                   </div>
 
-//                   {/* 🔴 Audit Box (Now Dynamic) */}
+//                   {/* Audit Box */}
 //                   <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.audit ? 'bg-amber-50/50 border-amber-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
 //                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.audit ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}><FileKey size={18}/></div>
-//                     <span className="text-xs font-bold text-slate-700">Audit Master</span>
+//                     <span className="text-[11px] font-bold text-slate-700">Audit Master</span>
 //                     {clientToView.services?.audit ? (
-//                        <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+//                        <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
 //                     ) : (
-//                        <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+//                        <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+//                     )}
+//                   </div>
+
+//                   <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.fssai ? 'bg-emerald-50/50 border-emerald-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
+//                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.fssai ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
+//                       <Store size={18}/>
+//                     </div>
+//                     <span className="text-[11px] font-bold text-slate-700">FSSAI / FoSCoS</span>
+//                     {clientToView.services?.fssai ? (
+//                        <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+//                     ) : (
+//                        <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
 //                     )}
 //                   </div>
 //                 </div>
@@ -609,7 +697,7 @@
               
 //               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 
-//                 {/* 🔴 PAN (Master Key) & Core Details (UPDATED WITH TRADENAME) */}
+//                 {/* PAN & Core Details */}
 //                 <div className="md:col-span-4 bg-blue-50/40 p-5 rounded-2xl border border-blue-100">
 //                   <h3 className="text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-blue-200/50 pb-2 mb-4 flex items-center gap-2">
 //                      Core Details (Master Identifiers)
@@ -638,7 +726,6 @@
 //                         className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white focus:ring-2 focus:ring-blue-500/20"
 //                       />
 //                     </div>
-//                     {/* 🔴 NAYA: TRADE NAME FIELD */}
 //                     <div className="md:col-span-1">
 //                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Trade / Firm Name</label>
 //                       <input 
@@ -714,7 +801,7 @@
 //                   </div>
 //                 </div>
 
-//                 {/* 🔴 NAYA: AUDIT & COMPLIANCE DETAILS (A0 FIELDS) */}
+//                 {/* AUDIT & COMPLIANCE DETAILS (A0 FIELDS) */}
 //                 <div className="md:col-span-4 mt-2 bg-amber-50/30 p-5 rounded-2xl border border-amber-100">
 //                   <h3 className="text-xs font-bold text-amber-700 uppercase tracking-wider border-b border-amber-200/50 pb-2 mb-4 flex items-center gap-2">
 //                      Audit & Compliance Details
@@ -847,7 +934,6 @@
 
 
 
-
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -856,7 +942,8 @@ import {
   Building, Search, Plus, X, Mail, Phone, MapPin, 
   CheckCircle2, Edit, AlertCircle, RefreshCw, Trash2, AlertTriangle, 
   Briefcase, Eye, UserCircle, Hash, FileText, Calculator, Building2, FileKey, ShieldCheck,
-  IndianRupee, MessageCircle, Clock, CalendarDays, Filter
+  IndianRupee, MessageCircle, Clock, CalendarDays, Filter, Store, 
+  BookOpen, Download, ChevronRight
 } from 'lucide-react';
 
 const ClientMaster = () => {
@@ -870,8 +957,8 @@ const ClientMaster = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('All');
-  const [monthFilter, setMonthFilter] = useState('All'); // 🔴 NAYA: Month Filter
-  const [yearFilter, setYearFilter] = useState('All');   // 🔴 NAYA: Year Filter
+  const [monthFilter, setMonthFilter] = useState('All'); 
+  const [yearFilter, setYearFilter] = useState('All');  
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -881,6 +968,10 @@ const ClientMaster = () => {
   // View Profile Modal
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [clientToView, setClientToView] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview'); 
+
+  // Workspace Click Detail Modal State
+  const [workspaceDetailModal, setWorkspaceDetailModal] = useState({ open: false, type: '', title: '' });
 
   // Invoices Data State for View Modal
   const [clientInvoices, setClientInvoices] = useState([]);
@@ -916,7 +1007,6 @@ const ClientMaster = () => {
     // eslint-disable-next-line
   }, [user.token]);
 
-  // 🔴 NAYA: Extract Unique Years from Clients for Filter Dropdown
   const uniqueYears = useMemo(() => {
      const years = clients.map(c => new Date(c.createdAt).getFullYear());
      return [...new Set(years)].sort((a,b) => b - a); 
@@ -935,7 +1025,6 @@ const ClientMaster = () => {
       const matchesStatus = statusFilter === 'All' || client.status === statusFilter;
       const matchesType = typeFilter === 'All' || client.clientType === typeFilter;
       
-      // 🔴 NAYA: Date Filtering Logic
       const createdDate = new Date(client.createdAt);
       const matchesYear = yearFilter === 'All' || createdDate.getFullYear().toString() === yearFilter;
       const matchesMonth = monthFilter === 'All' || (createdDate.getMonth() + 1).toString() === monthFilter;
@@ -972,31 +1061,17 @@ const ClientMaster = () => {
 
   const handleEdit = (client) => {
     setEditingId(client._id);
-    
     const parseDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
 
     setFormData({
-      pan: client.pan || '', 
-      name: client.name || '', 
-      tradeName: client.tradeName || '',
-      mobile: client.mobile || '', 
-      email: client.email || '', 
-      clientType: client.clientType || 'Individual', 
-      address: client.address || '', 
-      state: client.state || '', 
-      pinCode: client.pinCode || '',
-      gstin: client.gstin || '',
-      aadhaar: client.aadhaar || '',
-      dob: parseDate(client.dob),
-      fatherName: client.fatherName || '',
-      status: client.status || 'Active', 
-      remarks: client.remarks || '',
-      constitution: client.constitution || '',
-      cin_llpin: client.cin_llpin || '',
-      date_of_incorporation: parseDate(client.date_of_incorporation),
-      nature_of_business: client.nature_of_business || '',
-      registered_office_address: client.registered_office_address || '',
-      books_kept_at: client.books_kept_at || '',
+      pan: client.pan || '', name: client.name || '', tradeName: client.tradeName || '',
+      mobile: client.mobile || '', email: client.email || '', clientType: client.clientType || 'Individual', 
+      address: client.address || '', state: client.state || '', pinCode: client.pinCode || '',
+      gstin: client.gstin || '', aadhaar: client.aadhaar || '', dob: parseDate(client.dob),
+      fatherName: client.fatherName || '', status: client.status || 'Active', remarks: client.remarks || '',
+      constitution: client.constitution || '', cin_llpin: client.cin_llpin || '',
+      date_of_incorporation: parseDate(client.date_of_incorporation), nature_of_business: client.nature_of_business || '',
+      registered_office_address: client.registered_office_address || '', books_kept_at: client.books_kept_at || '',
       accounting_method: client.accounting_method || ''
     });
     setIsModalOpen(true);
@@ -1010,6 +1085,7 @@ const ClientMaster = () => {
 
   const handleOpenView = async (client) => {
     setClientToView(client);
+    setActiveTab('overview'); 
     setIsViewModalOpen(true);
     
     setLoadingInvoices(true);
@@ -1064,6 +1140,52 @@ const ClientMaster = () => {
       : 'bg-rose-50 text-rose-700 border-rose-200';
   };
 
+  const generateLedger = () => {
+    let ledger = [];
+    let runningBalance = 0;
+
+    const sortedInvoices = [...clientInvoices].sort((a, b) => new Date(a.invoiceDate) - new Date(b.invoiceDate));
+
+    sortedInvoices.forEach(inv => {
+      const billedAmount = inv.totalAmountAfterTax || 0;
+      runningBalance += billedAmount;
+      
+      ledger.push({
+        id: `inv-${inv._id}`,
+        date: inv.invoiceDate,
+        type: 'Invoice / Work',
+        particulars: `Invoice Raised (${inv.invoiceNo}) for ${inv.items?.[0]?.description || 'Professional Services'}`,
+        debit: billedAmount,
+        credit: 0,
+        balance: runningBalance,
+        status: 'Billed'
+      });
+
+      let actualReceived = Number(inv.amountReceived || 0);
+      if (inv.paymentStatus === 'Paid' && actualReceived === 0) {
+        actualReceived = billedAmount;
+      }
+
+      if (actualReceived > 0) {
+        runningBalance -= actualReceived;
+        ledger.push({
+          id: `pay-${inv._id}`,
+          date: inv.paymentDate || inv.invoiceDate, 
+          type: 'Payment',
+          particulars: `Payment Received against Invoice ${inv.invoiceNo}`,
+          debit: 0,
+          credit: actualReceived,
+          balance: runningBalance,
+          status: 'Received'
+        });
+      }
+    });
+
+    return ledger;
+  };
+
+  const clientLedger = generateLedger();
+
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6 pb-12">
       <Toaster position="top-right" />
@@ -1081,7 +1203,6 @@ const ClientMaster = () => {
         </button>
       </div>
 
-      {/* 🔴 NAYA: METRICS ROW */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-blue-500">
           <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0"><Building size={18} /></div>
@@ -1109,7 +1230,6 @@ const ClientMaster = () => {
       {/* FILTERS */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 bg-slate-50/50 flex flex-col gap-4 border-b border-slate-100">
-          
           <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
             <div className="relative w-full md:w-1/3">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -1141,7 +1261,6 @@ const ClientMaster = () => {
             </div>
           </div>
 
-          {/* 🔴 NAYA: Date Filters */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 mr-2">
               <CalendarDays size={13} className="text-slate-400" />
@@ -1149,25 +1268,13 @@ const ClientMaster = () => {
             </div>
             <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
               <option value="All">All Months</option>
-              <option value="1">January</option>
-              <option value="2">February</option>
-              <option value="3">March</option>
-              <option value="4">April</option>
-              <option value="5">May</option>
-              <option value="6">June</option>
-              <option value="7">July</option>
-              <option value="8">August</option>
-              <option value="9">September</option>
-              <option value="10">October</option>
-              <option value="11">November</option>
-              <option value="12">December</option>
+              {Array.from({length: 12}, (_, i) => <option key={i+1} value={i+1}>{new Date(0, i).toLocaleString('en', {month: 'long'})}</option>)}
             </select>
             <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
               <option value="All">All Years</option>
               {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
-
         </div>
 
         {/* CLIENT LIST TABLE */}
@@ -1179,7 +1286,6 @@ const ClientMaster = () => {
                 <th className="py-4 px-5">Tax & Identifiers</th>
                 <th className="py-4 px-5">Contact Details</th>
                 <th className="py-4 px-5">Entity & Location</th>
-                {/* 🔴 NAYA: Onboarded Date Column */}
                 <th className="py-4 px-5">Onboarded Date</th>
                 <th className="py-4 px-5">Status</th>
                 <th className="py-4 px-5 text-right">Action</th>
@@ -1240,7 +1346,6 @@ const ClientMaster = () => {
                         <span className="truncate">{client.state ? `${client.state} ${client.pinCode ? `(${client.pinCode})` : ''}` : 'Location not added'}</span>
                       </p>
                     </td>
-                    {/* 🔴 NAYA: Onboarded Date Data */}
                     <td className="py-3 px-5">
                       <div className="flex flex-col gap-0.5">
                          <span className="text-xs font-bold text-slate-800">{new Date(client.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
@@ -1273,240 +1378,330 @@ const ClientMaster = () => {
         </div>
       </div>
 
-      {/* FULL VIEW 360 PROFILE MODAL */}
+      {/* FULL VIEW 360 PROFILE MODAL (WITH STATEMENT TABS) */}
       {isViewModalOpen && clientToView && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-slate-50 rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
+          <div className="bg-slate-50 rounded-3xl w-full max-w-5xl shadow-2xl border border-slate-100 flex flex-col max-h-[95vh] overflow-hidden animate-in fade-in zoom-in-95">
             
-            <div className="relative px-8 pt-6 pb-16 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex justify-between items-start overflow-hidden">
+            {/* Modal Header */}
+            <div className="relative px-8 pt-6 pb-6 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex flex-col overflow-hidden shrink-0">
               <div className="absolute top-0 right-0 -mt-10 -mr-10 h-40 w-40 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
               
-              <div className="flex items-center gap-5 z-10">
-                <div className="h-16 w-16 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md border border-white/30 shadow-inner">
-                  <UserCircle size={36} className="text-white" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-black tracking-tight flex items-center gap-2">
-                    {clientToView.name} 
-                    {clientToView.tradeName && <span className="text-sm font-medium text-blue-200">({clientToView.tradeName})</span>}
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-blue-100 font-medium">
-                    {clientToView.clientId && (
-                      <span className="flex items-center gap-1.5 bg-white/20 px-2.5 py-1 rounded-md border border-white/30 font-mono tracking-wider text-white font-bold">
-                        ID: {clientToView.clientId}
+              <div className="flex justify-between items-start z-10 w-full">
+                <div className="flex items-center gap-5">
+                  <div className="h-16 w-16 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md border border-white/30 shadow-inner">
+                    <UserCircle size={36} className="text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-2">
+                      {clientToView.name} 
+                      {clientToView.tradeName && <span className="text-sm font-medium text-blue-200">({clientToView.tradeName})</span>}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-blue-100 font-medium">
+                      {clientToView.clientId && (
+                        <span className="flex items-center gap-1.5 bg-white/20 px-2.5 py-1 rounded-md border border-white/30 font-mono tracking-wider text-white font-bold">
+                          ID: {clientToView.clientId}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
+                        PAN: {clientToView.pan}
                       </span>
-                    )}
-                    <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
-                      PAN: {clientToView.pan}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Briefcase size={14} className="opacity-70"/> {clientToView.clientType}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${clientToView.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
-                      {clientToView.status}
-                    </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${clientToView.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
+                        {clientToView.status}
+                      </span>
+                    </div>
                   </div>
                 </div>
+                <button onClick={() => setIsViewModalOpen(false)} className="p-2 rounded-full bg-black/10 hover:bg-black/20 text-white transition-colors"><X size={20} strokeWidth={2.5} /></button>
               </div>
-              <button onClick={() => setIsViewModalOpen(false)} className="z-10 p-2 rounded-full bg-black/10 hover:bg-black/20 text-white transition-colors"><X size={20} strokeWidth={2.5} /></button>
+
+              {/* TABS Navigation */}
+              <div className="flex items-center gap-6 mt-6 z-10 border-b border-white/20">
+                <button 
+                  onClick={() => setActiveTab('overview')}
+                  className={`pb-3 text-sm font-bold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'overview' ? 'border-white text-white' : 'border-transparent text-blue-200 hover:text-white'}`}
+                >
+                  <Eye size={16}/> Profile Overview
+                </button>
+                <button 
+                  onClick={() => setActiveTab('ledger')}
+                  className={`pb-3 text-sm font-bold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'ledger' ? 'border-white text-white' : 'border-transparent text-blue-200 hover:text-white'}`}
+                >
+                  <BookOpen size={16}/> Account Statement & Ledger
+                </button>
+              </div>
             </div>
             
-            <div className="overflow-y-auto p-6 md:p-8 space-y-6 custom-scrollbar">
+            {/* TAB CONTENT AREA */}
+            <div className="overflow-y-auto p-6 md:p-8 custom-scrollbar flex-1">
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* Contact & General Card */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
-                    <MapPin size={14}/> General & Contact Info
-                  </h3>
-                  
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Mobile</p>
-                        <p className="text-sm font-semibold text-slate-800">{clientToView.mobile || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Email</p>
-                        <p className="text-sm font-semibold text-slate-800 truncate" title={clientToView.email}>{clientToView.email || 'N/A'}</p>
+              {/* TAB 1: PROFILE OVERVIEW */}
+              {activeTab === 'overview' && (
+                <div className="space-y-6 animate-in fade-in">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Contact & General Card */}
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                        <MapPin size={14}/> General & Contact Info
+                      </h3>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Mobile</p>
+                            <p className="text-sm font-semibold text-slate-800">{clientToView.mobile || 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Email</p>
+                            <p className="text-sm font-semibold text-slate-800 truncate" title={clientToView.email}>{clientToView.email || 'N/A'}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">DOB / Incorporation</p>
+                            <p className="text-sm font-semibold text-slate-800">{clientToView.dob ? new Date(clientToView.dob).toLocaleDateString('en-IN') : 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Father's Name</p>
+                            <p className="text-sm font-semibold text-slate-800">{clientToView.fatherName || 'N/A'}</p>
+                          </div>
+                        </div>
+                        <div className="pt-3 border-t border-slate-100">
+                          <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Full Address</p>
+                          <p className="text-sm font-semibold text-slate-700">
+                            {[clientToView.address, clientToView.district, clientToView.state, clientToView.pinCode].filter(Boolean).join(', ') || 'N/A'}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">DOB / Incorporation</p>
-                        <p className="text-sm font-semibold text-slate-800">{clientToView.dob ? new Date(clientToView.dob).toLocaleDateString('en-IN') : 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Father's Name</p>
-                        <p className="text-sm font-semibold text-slate-800">{clientToView.fatherName || 'N/A'}</p>
+
+                    {/* Tax Identifiers Card */}
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                        <Hash size={14}/> Tax & ID Credentials
+                      </h3>
+                      <div className="space-y-4">
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">PAN Number</span>
+                          <span className="text-sm font-mono font-black text-slate-800 tracking-widest">{clientToView.pan}</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">GSTIN</span>
+                          <span className="text-sm font-mono font-bold text-indigo-700">{clientToView.gstin || 'Not Provided'}</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Aadhaar (Masked)</span>
+                          <span className="text-sm font-mono font-bold text-slate-600">
+                            {clientToView.aadhaar ? `XXXX-XXXX-${clientToView.aadhaar.slice(-4)}` : 'Not Provided'}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <div className="pt-3 border-t border-slate-100">
-                      <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Full Address</p>
-                      <p className="text-sm font-semibold text-slate-700">
-                        {[clientToView.address, clientToView.district, clientToView.state, clientToView.pinCode].filter(Boolean).join(', ') || 'N/A'}
-                      </p>
+                  </div>
+
+                  {/* 🔴 PERFECTED CLICKABLE CONNECTED WORKSPACES */}
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <h3 className="text-sm font-black text-slate-800 mb-5 pb-2 border-b border-slate-100 flex items-center gap-2">
+                      <ShieldCheck size={18} className="text-emerald-600"/> Connected Workspaces (Click to View Activity)
+                    </h3>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                      {/* ITR Box */}
+                      <button 
+                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'ITR', title: 'Income Tax (ITR) Details' })}
+                        disabled={!clientToView.services?.itr}
+                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.itr ? 'bg-blue-50/50 border-blue-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                      >
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.itr ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-400'}`}><FileText size={18}/></div>
+                        <span className="text-[11px] font-bold text-slate-700">Income Tax (ITR)</span>
+                        {clientToView.services?.itr ? (
+                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                        ) : (
+                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                        )}
+                      </button>
+                      
+                      {/* GST Box */}
+                      <button 
+                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'GST', title: 'GST Returns Details' })}
+                        disabled={!clientToView.services?.gst}
+                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.gst ? 'bg-indigo-50/50 border-indigo-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                      >
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.gst ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}><Calculator size={18}/></div>
+                        <span className="text-[11px] font-bold text-slate-700">GST Returns</span>
+                        {clientToView.services?.gst ? (
+                          <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                        ) : (
+                          <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                        )}
+                      </button>
+
+                      {/* ROC Box */}
+                      <button 
+                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'ROC', title: 'ROC / MCA Services' })}
+                        disabled={!clientToView.services?.roc}
+                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.roc ? 'bg-purple-50/50 border-purple-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                      >
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.roc ? 'bg-purple-100 text-purple-600' : 'bg-slate-200 text-slate-400'}`}><Building2 size={18}/></div>
+                        <span className="text-[11px] font-bold text-slate-700">ROC / MCA</span>
+                        {clientToView.services?.roc ? (
+                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                        ) : (
+                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                        )}
+                      </button>
+
+                      {/* TDS Box */}
+                      <button 
+                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'TDS', title: 'TDS Returns Activity' })}
+                        disabled={!clientToView.services?.tds}
+                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.tds ? 'bg-orange-50/50 border-orange-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                      >
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.tds ? 'bg-orange-100 text-orange-600' : 'bg-slate-200 text-slate-400'}`}><Hash size={18}/></div>
+                        <span className="text-[11px] font-bold text-slate-700">TDS Return</span>
+                        {clientToView.services?.tds ? (
+                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                        ) : (
+                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                        )}
+                      </button>
+
+                      {/* Audit Box */}
+                      <button 
+                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'Audit', title: 'Audit Master Activity' })}
+                        disabled={!clientToView.services?.audit}
+                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.audit ? 'bg-amber-50/50 border-amber-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                      >
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.audit ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}><FileKey size={18}/></div>
+                        <span className="text-[11px] font-bold text-slate-700">Audit Master</span>
+                        {clientToView.services?.audit ? (
+                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                        ) : (
+                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                        )}
+                      </button>
+
+                      {/* FSSAI Box */}
+                      <button 
+                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'FSSAI', title: 'FSSAI / FoSCoS Activity' })}
+                        disabled={!clientToView.services?.fssai}
+                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.fssai ? 'bg-emerald-50/50 border-emerald-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                      >
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.fssai ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}><Store size={18}/></div>
+                        <span className="text-[11px] font-bold text-slate-700">FSSAI / FoSCoS</span>
+                        {clientToView.services?.fssai ? (
+                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                        ) : (
+                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                        )}
+                      </button>
+
                     </div>
                   </div>
                 </div>
+              )}
 
-                {/* Tax Identifiers Card */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
-                    <Hash size={14}/> Tax & ID Credentials
-                  </h3>
+              {/* TAB 2: ACCOUNT STATEMENT & LEDGER */}
+              {activeTab === 'ledger' && (
+                <div className="space-y-6 animate-in fade-in">
                   
-                  <div className="space-y-4">
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-500">PAN Number</span>
-                      <span className="text-sm font-mono font-black text-slate-800 tracking-widest">{clientToView.pan}</span>
+                  {/* Ledger Summary Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Billed (Debit)</span>
+                      <span className="text-xl font-black text-slate-800 flex items-center gap-1">
+                        <IndianRupee size={18}/> 
+                        {clientLedger.filter(l => l.debit > 0).reduce((acc, curr) => acc + curr.debit, 0).toLocaleString('en-IN')}
+                      </span>
                     </div>
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-500">GSTIN</span>
-                      <span className="text-sm font-mono font-bold text-indigo-700">{clientToView.gstin || 'Not Provided'}</span>
+                    <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100 shadow-sm flex flex-col">
+                      <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Total Received (Credit)</span>
+                      <span className="text-xl font-black text-emerald-700 flex items-center gap-1">
+                        <IndianRupee size={18}/> 
+                        {clientLedger.filter(l => l.credit > 0).reduce((acc, curr) => acc + curr.credit, 0).toLocaleString('en-IN')}
+                      </span>
                     </div>
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-500">Aadhaar (Masked)</span>
-                      <span className="text-sm font-mono font-bold text-slate-600">
-                        {clientToView.aadhaar ? `XXXX-XXXX-${clientToView.aadhaar.slice(-4)}` : 'Not Provided'}
+                    <div className="bg-rose-50 p-5 rounded-2xl border border-rose-100 shadow-sm flex flex-col">
+                      <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider mb-1">Net Balance Due</span>
+                      <span className="text-xl font-black text-rose-700 flex items-center gap-1">
+                        <IndianRupee size={18}/> 
+                        {clientLedger.length > 0 ? clientLedger[clientLedger.length - 1].balance.toLocaleString('en-IN') : 0}
                       </span>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              {/* SERVICE LINKAGE SUMMARY (The 360 View) */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="text-sm font-black text-slate-800 mb-5 pb-2 border-b border-slate-100 flex items-center gap-2">
-                  <ShieldCheck size={18} className="text-emerald-600"/> Connected Workspaces & Services
-                </h3>
-                
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                  {/* ITR Box */}
-                  <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.itr ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.itr ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-400'}`}><FileText size={18}/></div>
-                    <span className="text-[11px] font-bold text-slate-700">Income Tax (ITR)</span>
-                    {clientToView.services?.itr ? (
-                       <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                    ) : (
-                       <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                    )}
-                  </div>
-                  
-                  {/* GST Box */}
-                  <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.gst ? 'bg-indigo-50/50 border-indigo-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.gst ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}><Calculator size={18}/></div>
-                    <span className="text-[11px] font-bold text-slate-700">GST Returns</span>
-                    {clientToView.services?.gst ? (
-                      <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                    ) : (
-                      <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                    )}
-                  </div>
+                  {/* Ledger Table */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                      <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                        <BookOpen size={16} className="text-indigo-600"/> Account Ledger
+                      </h3>
+                      <button className="flex items-center gap-1.5 text-xs font-bold bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg shadow-sm hover:bg-slate-50">
+                        <Download size={14}/> Download PDF
+                      </button>
+                    </div>
 
-                  {/* ROC Box */}
-                  <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.roc ? 'bg-purple-50/50 border-purple-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.roc ? 'bg-purple-100 text-purple-600' : 'bg-slate-200 text-slate-400'}`}><Building2 size={18}/></div>
-                    <span className="text-[11px] font-bold text-slate-700">ROC / MCA</span>
-                    {clientToView.services?.roc ? (
-                       <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
+                    {loadingInvoices ? (
+                       <div className="flex justify-center items-center py-10 text-slate-400">
+                         <RefreshCw className="animate-spin mr-2" size={18}/> Fetching records...
+                       </div>
+                    ) : clientLedger.length === 0 ? (
+                       <div className="text-center py-12 bg-slate-50/30">
+                          <BookOpen size={32} className="mx-auto text-slate-300 mb-3"/>
+                          <p className="text-sm font-bold text-slate-500">No transactions found for this client.</p>
+                          <p className="text-xs text-slate-400 mt-1">Invoices, work tracking, and payments will appear here.</p>
+                       </div>
                     ) : (
-                       <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                    )}
-                  </div>
-
-                  {/* TDS Box */}
-                  <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.tds ? 'bg-orange-50/50 border-orange-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.tds ? 'bg-orange-100 text-orange-600' : 'bg-slate-200 text-slate-400'}`}><Hash size={18}/></div>
-                    <span className="text-[11px] font-bold text-slate-700">TDS Return</span>
-                    {clientToView.services?.tds ? (
-                       <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                    ) : (
-                       <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                    )}
-                  </div>
-
-                  {/* Audit Box */}
-                  <div className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.audit ? 'bg-amber-50/50 border-amber-200' : 'bg-slate-50 border-slate-100 opacity-60 grayscale'}`}>
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.audit ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}><FileKey size={18}/></div>
-                    <span className="text-[11px] font-bold text-slate-700">Audit Master</span>
-                    {clientToView.services?.audit ? (
-                       <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                    ) : (
-                       <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-100 border-b border-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-wider">
+                              <th className="py-3 px-4 w-28">Date</th>
+                              <th className="py-3 px-4">Particulars / Description</th>
+                              <th className="py-3 px-4 text-right">Debit (Billed)</th>
+                              <th className="py-3 px-4 text-right">Credit (Paid)</th>
+                              <th className="py-3 px-4 text-right bg-blue-50/50">Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                            {clientLedger.map((entry, index) => (
+                              <tr key={entry.id} className="hover:bg-slate-50">
+                                <td className="py-3 px-4 font-semibold text-slate-600 whitespace-nowrap">
+                                  {entry.date ? new Date(entry.date).toLocaleDateString('en-IN') : '---'}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`w-2 h-2 rounded-full ${entry.type === 'Payment' ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+                                    <span className="font-bold text-slate-800">{entry.particulars}</span>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono text-slate-700">
+                                  {entry.debit > 0 ? entry.debit.toLocaleString('en-IN') : '-'}
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono text-emerald-600 font-bold">
+                                  {entry.credit > 0 ? entry.credit.toLocaleString('en-IN') : '-'}
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono font-black bg-blue-50/30 text-blue-900">
+                                  ₹{entry.balance.toLocaleString('en-IN')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
                 </div>
-              </div>
-
-              {/* BILLING & INVOICES SUMMARY */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="text-sm font-black text-slate-800 mb-5 pb-2 border-b border-slate-100 flex items-center gap-2">
-                  <FileText size={18} className="text-blue-600"/> Billing & Invoices
-                </h3>
-                
-                {loadingInvoices ? (
-                  <div className="flex justify-center items-center py-6 text-slate-400">
-                    <RefreshCw className="animate-spin mr-2" size={16}/> Loading invoices...
-                  </div>
-                ) : clientInvoices.length === 0 ? (
-                  <div className="text-center py-6 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
-                     <p className="text-xs font-bold text-slate-400">No invoices generated for this client yet.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[10px] font-bold uppercase tracking-wider">
-                          <th className="py-2 px-3">Invoice No</th>
-                          <th className="py-2 px-3">Date</th>
-                          <th className="py-2 px-3">Amount</th>
-                          <th className="py-2 px-3">Status</th>
-                          <th className="py-2 px-3 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                        {clientInvoices.map((inv, idx) => (
-                          <tr key={inv._id || idx} className="hover:bg-slate-50/50">
-                            <td className="py-3 px-3 font-bold text-blue-900">{inv.invoiceNo} {inv.isProforma && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded ml-1">PROFORMA</span>}</td>
-                            <td className="py-3 px-3">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : 'N/A'}</td>
-                            <td className="py-3 px-3 font-black text-slate-800 flex items-center gap-0.5"><IndianRupee size={12}/>{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</td>
-                            <td className="py-3 px-3">
-                              {inv.paymentStatus === 'Paid' ? (
-                                <span className="flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-1 rounded w-max border border-emerald-200"><CheckCircle2 size={12}/> Paid</span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-1 rounded w-max border border-rose-200"><Clock size={12}/> Pending</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 text-right">
-                              {inv.paymentStatus !== 'Paid' && (
-                                <button 
-                                  onClick={() => sendWhatsappReminder(inv, clientToView)}
-                                  className="inline-flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-colors"
-                                  title="Send WhatsApp Reminder"
-                                >
-                                  <MessageCircle size={12}/> Reminder
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              )}
 
             </div>
             
-            <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
+            <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl shrink-0">
               <div></div>
               <div className="flex items-center gap-3">
                 <button onClick={() => setIsViewModalOpen(false)} className="px-5 py-2.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors">
-                  Close Profile
+                  Close Window
                 </button>
                 <button onClick={() => { setIsViewModalOpen(false); handleEdit(clientToView); }} className="px-5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2">
                   <Edit size={15} strokeWidth={2.5}/> Edit Details
@@ -1516,6 +1711,77 @@ const ClientMaster = () => {
           </div>
         </div>
       )}
+
+      {/* 🔴 WORKSPACE ACTIVITY DETAIL MODAL */}
+      {workspaceDetailModal.open && (() => {
+        const relatedInvoices = clientInvoices.filter(inv => {
+          const desc = inv.items?.[0]?.description?.toLowerCase() || '';
+          if (workspaceDetailModal.type === 'ITR') return desc.includes('itr') || desc.includes('tax');
+          if (workspaceDetailModal.type === 'GST') return desc.includes('gst');
+          if (workspaceDetailModal.type === 'ROC') return desc.includes('roc') || desc.includes('mca') || desc.includes('company');
+          if (workspaceDetailModal.type === 'TDS') return desc.includes('tds');
+          if (workspaceDetailModal.type === 'Audit') return desc.includes('audit');
+          if (workspaceDetailModal.type === 'FSSAI') return desc.includes('fssai') || desc.includes('food');
+          return true; 
+        });
+
+        return (
+        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80 flex justify-between items-center">
+               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                 <ShieldCheck className="text-blue-600"/> {workspaceDetailModal.title}
+               </h3>
+               <button onClick={() => setWorkspaceDetailModal({ open: false, type: '', title: '' })} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
+            </div>
+            
+            <div className="p-6 space-y-6 bg-white">
+               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex justify-between items-center">
+                 <div>
+                   <p className="text-xs font-bold text-slate-500 uppercase">Linked Client</p>
+                   <p className="text-sm font-black text-slate-800">{clientToView?.name}</p>
+                 </div>
+                 <div className="text-right">
+                   <p className="text-xs font-bold text-slate-500 uppercase">Filing / Work Date</p>
+                   <p className="text-sm font-bold text-blue-700">{clientToView?.filingDate ? new Date(clientToView.filingDate).toLocaleDateString('en-IN') : 'Not Updated'}</p>
+                 </div>
+               </div>
+
+               <div>
+                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Related Invoices & Work Log for {workspaceDetailModal.type}</h4>
+                 <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                    {relatedInvoices.length === 0 ? (
+                      <div className="p-4 text-center text-slate-400 bg-slate-50 rounded-lg text-sm border border-dashed border-slate-200">No invoices raised specifically for {workspaceDetailModal.type} yet.</div>
+                    ) : (
+                      relatedInvoices.map(inv => (
+                        <div key={inv._id} className="flex justify-between items-center p-3 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors">
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{inv.invoiceNo}</p>
+                            <p className="text-[10px] font-bold text-slate-500 mt-0.5">{inv.items?.[0]?.description || 'Service Rendered'}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{new Date(inv.invoiceDate).toLocaleDateString('en-IN')}</p>
+                          </div>
+                          <div className="text-right flex flex-col items-end gap-1.5">
+                            <span className="text-sm font-black text-slate-700">₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${inv.paymentStatus === 'Paid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                              {inv.paymentStatus}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                 </div>
+               </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 text-right">
+               <button onClick={() => setWorkspaceDetailModal({ open: false, type: '', title: '' })} className="px-5 py-2 text-xs font-bold bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl transition-colors shadow-sm">
+                 Close Detail
+               </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* ADD / EDIT CLIENT MODAL */}
       {isModalOpen && (
@@ -1763,3 +2029,4 @@ const ClientMaster = () => {
 };
 
 export default ClientMaster;
+

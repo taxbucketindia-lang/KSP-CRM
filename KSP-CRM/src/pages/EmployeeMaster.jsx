@@ -5,7 +5,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { 
   Users, Search, Plus, X, Briefcase, Mail, Phone, 
   IndianRupee, Calendar, CheckCircle2, Edit, AlertCircle, RefreshCw, 
-  KeyRound, ShieldCheck, Trash2, AlertTriangle, Clock, CreditCard, Eye, UserMinus
+  KeyRound, ShieldCheck, Trash2, AlertTriangle, Clock, CreditCard, Eye, UserMinus,Store,
 } from 'lucide-react';
 
 const EmployeeMaster = () => {
