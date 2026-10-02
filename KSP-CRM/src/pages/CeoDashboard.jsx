@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
+import toast, { Toaster } from 'react-hot-toast';
 import { 
   TrendingUp, Users, Wallet, AlertOctagon, Trophy, 
   Target, Activity, ArrowUpRight, PieChart, Briefcase, 
   UserCheck, PhoneCall, CheckCircle2, History, ClipboardList,
-  FileText, Image, IndianRupee, Banknote
+  FileText, Image, IndianRupee, Banknote,
+  Plus, X, BellRing, CalendarDays, Circle, Trash2, ListTodo, CheckSquare, Loader2, AlertCircle
 } from 'lucide-react';
 
 const CeoDashboard = () => {
@@ -15,11 +17,26 @@ const CeoDashboard = () => {
     clients: [], leads: [], tasks: [], itr: [], gst: [], employees: [], invoices: [], attendance: []
   });
 
+  // SUCCESS LIST (TODO) STATES
+  const [ceoTodos, setCeoTodos] = useState([]);
+  const [isTodoModalOpen, setIsTodoModalOpen] = useState(false);
+  const [todoSaving, setTodoSaving] = useState(false);
+  
+  // 🔴 NAYA: Tabs State for Success List (Default: 'Pending')
+  const [todoTab, setTodoTab] = useState('Pending'); 
+
+  const [todoForm, setTodoForm] = useState({
+    title: '', description: '', 
+    dueDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+    priority: 'High'
+  });
+
   useEffect(() => {
     const fetchCeoData = async () => {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const [clientsRes, leadsRes, tasksRes, itrRes, gstRes, empRes, invoiceRes, attRes] = await Promise.all([
+        const [clientsRes, leadsRes, tasksRes, itrRes, gstRes, empRes, invoiceRes, attRes, todosRes] = await Promise.all([
           axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/tasks`, { headers }).catch(() => ({ data: [] })),
@@ -27,7 +44,8 @@ const CeoDashboard = () => {
           axios.get(`${import.meta.env.VITE_API_URL}/gst`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/hr/employees`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance`, { headers }).catch(() => ({ data: [] }))
+          axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance`, { headers }).catch(() => ({ data: [] })),
+          axios.get(`${import.meta.env.VITE_API_URL}/todos`, { headers }).catch(() => ({ data: [] }))
         ]);
 
         setData({
@@ -40,6 +58,8 @@ const CeoDashboard = () => {
           invoices: Array.isArray(invoiceRes.data) ? invoiceRes.data : (invoiceRes.data?.invoices || []),
           attendance: Array.isArray(attRes.data) ? attRes.data : []
         });
+
+        setCeoTodos(Array.isArray(todosRes.data) ? todosRes.data : []);
       } catch (error) {
         console.error("Error fetching CEO data", error);
       } finally {
@@ -49,7 +69,79 @@ const CeoDashboard = () => {
     fetchCeoData();
   }, [user.token]);
 
+  // ==========================================
+  // SUCCESS LIST (TO-DO) HANDLERS
+  // ==========================================
+  const handleTodoChange = (e) => setTodoForm({ ...todoForm, [e.target.name]: e.target.value });
+
+  const handleTodoSave = async (e) => {
+    e.preventDefault();
+    if (!todoForm.title || !todoForm.endDate) return toast.error("Title and End Date are mandatory!");
+    setTodoSaving(true);
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const res = await axios.post(`${import.meta.env.VITE_API_URL}/todos`, todoForm, { headers });
+      toast.success("Task added to Success List! Reminder Active.");
+      setCeoTodos([...ceoTodos, res.data]);
+      setIsTodoModalOpen(false);
+      // Ensure tab remains on pending so user can see new task
+      setTodoTab('Pending');
+      setTodoForm({ title: '', description: '', dueDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], priority: 'High' });
+    } catch (error) {
+      toast.error("Error saving task");
+    } finally { setTodoSaving(false); }
+  };
+
+  const toggleTodoStatus = async (todo) => {
+    const newStatus = todo.status === 'Completed' ? 'Pending' : 'Completed';
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.put(`${import.meta.env.VITE_API_URL}/todos/${todo._id}`, { status: newStatus }, { headers });
+      setCeoTodos(prev => prev.map(t => t._id === todo._id ? { ...t, status: newStatus } : t));
+      if (newStatus === 'Completed') toast.success("Awesome! Task Completed 🎉");
+    } catch (error) { toast.error("Failed to update task"); }
+  };
+
+  const deleteTodo = async (id) => {
+    if (!window.confirm("Delete this task from Success List?")) return;
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.delete(`${import.meta.env.VITE_API_URL}/todos/${id}`, { headers });
+      setCeoTodos(prev => prev.filter(t => t._id !== id));
+      toast.success("Task deleted");
+    } catch (error) { toast.error("Error deleting task"); }
+  };
+
+  const isTodoOverdue = (todo) => {
+    if (todo.status === 'Completed') return false;
+    const end = new Date(todo.endDate || todo.dueDate);
+    end.setHours(23, 59, 59, 999);
+    return end < new Date();
+  };
+
+  const getPriorityColor = (priority) => {
+    if (priority === 'High') return 'text-rose-600 bg-rose-50 border-rose-200';
+    if (priority === 'Medium') return 'text-amber-600 bg-amber-50 border-amber-200';
+    return 'text-emerald-600 bg-emerald-50 border-emerald-200';
+  };
+
+  // 🔴 NAYA: Filter Logic based on Tabs
+  const filteredCeoTodos = useMemo(() => {
+    let filtered = ceoTodos;
+    if (todoTab !== 'All') {
+      filtered = filtered.filter(t => t.status === todoTab);
+    }
+    return filtered.sort((a, b) => {
+      if (a.status === 'Completed' && b.status !== 'Completed') return 1;
+      if (a.status !== 'Completed' && b.status === 'Completed') return -1;
+      return new Date(a.endDate || a.dueDate) - new Date(b.endDate || b.dueDate);
+    });
+  }, [ceoTodos, todoTab]);
+
+
+  // ==========================================
   // CEO Level Analytics Calculation
+  // ==========================================
   const analytics = useMemo(() => {
     const { clients, leads, tasks, itr, gst, employees, invoices, attendance } = data;
     
@@ -127,10 +219,9 @@ const CeoDashboard = () => {
       employeeStats.sort((a,b) => b.score - a.score);
     }
 
-    // 🔴 6. GENERAL LIVE TEAM ACTIVITY LOG (COMPREHENSIVE FIX)
+    // 6. GENERAL LIVE TEAM ACTIVITY LOG
     let allActivities = [];
 
-    // Leads Actions
     if (Array.isArray(leads)) {
         leads.forEach(l => {
             const time = new Date(l.updatedAt || l.createdAt);
@@ -147,7 +238,6 @@ const CeoDashboard = () => {
         });
     }
 
-    // Clients Actions
     if (Array.isArray(clients)) {
         clients.forEach(c => {
             const time = new Date(c.updatedAt || c.createdAt);
@@ -164,7 +254,6 @@ const CeoDashboard = () => {
         });
     }
 
-    // Tasks Actions
     if (Array.isArray(tasks)) {
       tasks.forEach(t => {
         const time = new Date(t.updatedAt || t.createdAt);
@@ -181,7 +270,6 @@ const CeoDashboard = () => {
       });
     }
     
-    // ITR Actions
     if (Array.isArray(itr)) {
       itr.forEach(i => {
         const time = new Date(i.updatedAt || i.createdAt);
@@ -198,7 +286,6 @@ const CeoDashboard = () => {
       });
     }
 
-    // GST Actions
     if (Array.isArray(gst)) {
       gst.forEach(g => {
         const time = new Date(g.updatedAt || g.createdAt);
@@ -215,7 +302,6 @@ const CeoDashboard = () => {
       });
     }
 
-    // Sort ALL activities chronologically (latest first) and keep top 25
     allActivities.sort((a, b) => b.time - a.time);
     const recentActivities = allActivities.slice(0, 25);
 
@@ -338,8 +424,83 @@ const CeoDashboard = () => {
         </div>
       </div>
 
+      {/* 🔴 NAYA: CEO SUCCESS LIST (TABS & HORIZONTAL TASKS) */}
+      <div className="mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+          <h2 className="text-sm font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
+            <ListTodo size={18}/> Success List (My Action Items)
+          </h2>
+          
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            {/* Tabs Component */}
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              {['All', 'Pending', 'Completed'].map(tab => (
+                <button 
+                  key={tab} 
+                  onClick={() => setTodoTab(tab)}
+                  className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all ${todoTab === tab ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            
+            <button onClick={() => setIsTodoModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all ml-auto">
+              <Plus size={14}/> Add Task
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+          {filteredCeoTodos.length === 0 ? (
+             <div className="bg-white p-6 rounded-3xl border border-slate-200 border-dashed w-full text-center text-slate-400 shadow-sm flex flex-col items-center">
+               <CheckSquare size={32} className="mx-auto mb-2 opacity-50"/>
+               <p className="text-sm font-bold text-slate-500">List is clear!</p>
+               <p className="text-xs">No {todoTab.toLowerCase()} tasks found.</p>
+             </div>
+          ) : (
+             filteredCeoTodos.map(todo => {
+                const isCompleted = todo.status === 'Completed';
+                const overdue = isTodoOverdue(todo);
+                return (
+                  <div key={todo._id} className={`bg-white p-4 rounded-2xl border shrink-0 min-w-[320px] max-w-[320px] flex flex-col ${isCompleted ? 'border-slate-200 opacity-60 grayscale-[50%]' : overdue ? 'border-rose-200 shadow-sm bg-rose-50/10' : 'border-slate-200 shadow-sm hover:shadow-md'} transition-all`}>
+                    <div className="flex items-start gap-3">
+                      <button onClick={() => toggleTodoStatus(todo)} className={`mt-0.5 transition-colors ${isCompleted ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}>
+                        {isCompleted ? <CheckCircle2 size={20} className="fill-emerald-50"/> : <Circle size={20} />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className={`text-sm font-bold truncate ${isCompleted ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={todo.title}>{todo.title}</h3>
+                          <button onClick={() => deleteTodo(todo._id)} className="text-slate-300 hover:text-rose-500 ml-auto"><Trash2 size={14}/></button>
+                        </div>
+                        {!isCompleted && (
+                          <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getPriorityColor(todo.priority)}`}>
+                            {todo.priority}
+                          </span>
+                        )}
+                        {overdue && !isCompleted && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border bg-rose-100 text-rose-700 border-rose-200 inline-flex items-center gap-1 animate-pulse ml-2">
+                            <AlertCircle size={10}/> Overdue
+                          </span>
+                        )}
+                        {todo.description && (
+                          <p className={`text-xs mt-2 line-clamp-2 leading-relaxed ${isCompleted ? 'text-slate-400' : 'text-slate-500'}`}>{todo.description}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className={`mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] font-bold uppercase ${isCompleted ? 'text-slate-300' : 'text-slate-400'}`}>
+                      <span className="flex items-center gap-1"><CalendarDays size={12}/> {new Date(todo.dueDate).toLocaleDateString('en-IN', {day:'numeric', month:'short'})}</span>
+                      <span className={`flex items-center gap-1 ${!isCompleted ? 'text-rose-500' : ''}`}>End: {new Date(todo.endDate).toLocaleDateString('en-IN', {day:'numeric', month:'short'})}</span>
+                    </div>
+                  </div>
+                );
+             })
+          )}
+        </div>
+      </div>
+
       {/* TIER 1: FINANCIAL HEALTH */}
-      <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">1. Business Health</h2>
+      <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2 mt-4">1. Business Health</h2>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
         
         <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden">
@@ -433,7 +594,7 @@ const CeoDashboard = () => {
           </div>
         </div>
 
-        {/* 🔴 RED FLAGS & NEW ATTENDANCE BLOCK */}
+        {/* RED FLAGS & NEW ATTENDANCE BLOCK */}
         <div className="flex flex-col gap-6 h-full">
           
           <div className="bg-rose-50 border border-rose-100 p-5 rounded-3xl shadow-sm">
@@ -561,8 +722,8 @@ const CeoDashboard = () => {
                                                       {idx === 0 ? <Trophy size={12}/> : `${idx + 1}`}
                                                   </div>
                                                   <div>
-                                                    <p className="font-bold text-slate-800">{emp.name}</p>
-                                                    <p className="text-[10px] text-slate-500 uppercase">{emp.designation}</p>
+                                                      <p className="font-bold text-slate-800">{emp.name}</p>
+                                                      <p className="text-[10px] text-slate-500 uppercase">{emp.designation}</p>
                                                   </div>
                                               </div>
                                           </td>
@@ -626,6 +787,59 @@ const CeoDashboard = () => {
               </div>
           </div>
       </div>
+
+      {/* NEW TASK MODAL FOR CEO */}
+      {isTodoModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+              <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <BellRing className="text-indigo-600" size={20}/> Add CEO Task
+              </h2>
+              <button onClick={() => setIsTodoModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
+            </div>
+            
+            <form onSubmit={handleTodoSave} className="p-6 space-y-5">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Task Title *</label>
+                <input type="text" name="title" required value={todoForm.title} onChange={handleTodoChange} placeholder="e.g. Discuss Q3 Sales Target" className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-indigo-500/20 outline-none" />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Details / Description</label>
+                <textarea name="description" rows="2" value={todoForm.description} onChange={handleTodoChange} placeholder="Any specific details..." className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1"><CalendarDays size={12}/> Start Date *</label>
+                  <input type="date" name="dueDate" required value={todoForm.dueDate} onChange={handleTodoChange} className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 text-slate-700 focus:ring-2 focus:ring-indigo-500/20 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1"><CalendarDays size={12}/> End Date *</label>
+                  <input type="date" name="endDate" required value={todoForm.endDate} onChange={handleTodoChange} className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 text-slate-700 focus:ring-2 focus:ring-indigo-500/20 outline-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Priority</label>
+                <select name="priority" value={todoForm.priority} onChange={handleTodoChange} className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 text-slate-700 focus:ring-2 focus:ring-indigo-500/20 outline-none">
+                  <option value="High">🔴 High Priority</option>
+                  <option value="Medium">🟡 Medium Priority</option>
+                  <option value="Low">🟢 Low Priority</option>
+                </select>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setIsTodoModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
+                <button type="submit" disabled={todoSaving} className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md transition-all flex items-center gap-2">
+                  {todoSaving ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16} />} Save Task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

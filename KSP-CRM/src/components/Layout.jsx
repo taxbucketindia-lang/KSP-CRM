@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, UserCircle, Briefcase, LogOut, Menu,
   X, Bell, ChevronRight, ChevronDown, ShieldCheck, PhoneCall, CheckCircle2,
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
-  Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo, // 🔴 Icons added
+  Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo,
   AlertCircle, BarChart3, TrendingUp, Code, Globe, Zap
 } from 'lucide-react';
 
@@ -107,10 +107,12 @@ const Layout = () => {
       category: 'Main',
       items: [
         { path: '/', name: 'Dashboard', icon: LayoutDashboard },
-        ...(user?.role !== 'Admin' ? [{ path: '/my-portal', name: 'My Portal', icon: CalendarClock }] : []),
         
-        // 🔴 NAYA: To-Do Reminder added in Main section
-        { path: '/todo', name: 'My To-Do Tasks', icon: ListTodo },
+        // 🔴 NAYA: Sirf Employee ko dikhega "My Portal" aur "Success List"
+        ...(user?.role !== 'Admin' ? [
+          { path: '/my-portal', name: 'My Portal', icon: CalendarClock },
+          { path: '/todo', name: 'Success List', icon: ListTodo }
+        ] : []),
         
         { path: '/custom-dashboards', name: 'Role Dashboards P', icon: BarChart3 }
       ]
@@ -181,8 +183,6 @@ const Layout = () => {
           { path: '/hr/holiday', name: 'Holiday', icon: ClipboardList },
           { path: '/hr/leave', name: 'Leave P', icon: FileText },
           { path: '/hr/performance', name: 'Performance P', icon: Activity },
-          
-          // 🔴 NAYA: Office Expense ka Icon 'Activity' se 'Receipt' kiya hai
           { path: '/officexpense', name: 'Office Expense', icon: Receipt }
         ] : []),
         
