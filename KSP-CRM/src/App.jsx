@@ -29,6 +29,7 @@ import FssaiWorkspace from './pages/FssaiWorkspace';
 import OfficeExpense from './pages/OfficeExpense';
 import TodoReminder from './pages/TodoReminder';
 import FeeAndDocuments from './pages/FeeAndDocuments';
+import BirthdayWishes from './pages/BirthdayWishes';
 
 // Placeholder Pages (Inko next step mein banayenge)
 // const Dashboard = () => <div><h1 className="text-2xl font-bold">Dashboard</h1><p>KPIs will appear here.</p></div>;
@@ -75,6 +76,7 @@ function App() {
             <Route path="/officexpense" element={<OfficeExpense />} />
             <Route path="/todo" element={<TodoReminder />} />
             <Route path="/feeanddocuments" element={<FeeAndDocuments />} />
+            <Route path="/birthday-wishes" element={<BirthdayWishes />} />
           </Route>
         </Routes>
       </Router>

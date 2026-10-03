@@ -817,6 +817,7 @@ const ItrReturns = () => {
               <option value="Aadhaar OTP">Aadhaar OTP</option>
               <option value="Net Banking / EVC">Net Banking / EVC</option>
               <option value="Sent to CPC (Physical)">Sent to CPC</option>
+              <option value="DSC Verified">DSC Verified</option>
             </select>
 
             <select value={processedFilter} onChange={(e) => setProcessedFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
@@ -1462,6 +1463,7 @@ const ItrReturns = () => {
                        <option value="Aadhaar OTP">Aadhaar OTP</option>
                        <option value="Net Banking / EVC">Net Banking / EVC</option>
                        <option value="Sent to CPC (Physical)">Sent to CPC (Physical)</option>
+                       <option value="DSC Verified">DSC Verified</option>
                     </select>
                   </div>
                   <div className="md:col-span-1">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -15,18 +15,22 @@ const MyPortal = () => {
   const [fetchingLocation, setFetchingLocation] = useState(false);
   
   const [myProfile, setMyProfile] = useState(null);
-  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  
+  // 🔴 NAYA: All Attendance Data and Month Filter State
+  const [allAttendance, setAllAttendance] = useState([]);
   
   // Date Utilities
   const offset = new Date().getTimezoneOffset() * 60000;
   const localToday = new Date(Date.now() - offset).toISOString().split('T')[0];
-  const currentMonthStr = localToday.substring(0, 7);
+  const currentMonthStr = localToday.substring(0, 7); // e.g., "2026-10"
+  
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
 
   // 🔴 LOCK STATES
   const [isStatusLocked, setIsStatusLocked] = useState(false);
   const [isInTimeLocked, setIsInTimeLocked] = useState(false);
   const [isOutTimeLocked, setIsOutTimeLocked] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false); // Enable/Disable Save button
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const [todayRecord, setTodayRecord] = useState({
     date: localToday,
@@ -35,7 +39,7 @@ const MyPortal = () => {
     inLocation: '',
     outLocation: '',
     totalHours: '',
-    status: '', // Blank initally
+    status: '', 
     remarks: ''
   });
 
@@ -53,14 +57,12 @@ const MyPortal = () => {
       if (me) {
         setMyProfile(me);
 
+        // Fetch ALL attendance records for this employee
         const attRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance?employee=${me._id}`, { headers });
-        
-        const thisMonthAtt = attRes.data.filter(a => a.date && a.date.startsWith(currentMonthStr));
-        
-        thisMonthAtt.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setAttendanceHistory(thisMonthAtt);
+        setAllAttendance(attRes.data || []);
 
-        const todayData = thisMonthAtt.find(a => a.date.startsWith(localToday));
+        // Find today's specific record to set up the punching widget
+        const todayData = (attRes.data || []).find(a => a.date && a.date.startsWith(localToday));
         
         if (todayData) {
           setTodayRecord({
@@ -130,7 +132,7 @@ const MyPortal = () => {
 
   const handleRecordChange = (field, value) => {
     const updated = { ...todayRecord, [field]: value };
-    setHasUnsavedChanges(true); // 🔴 Enable save button
+    setHasUnsavedChanges(true); 
 
     if (field === 'inTime' || field === 'outTime') {
       const inT = updated.inTime;
@@ -246,7 +248,7 @@ const MyPortal = () => {
       await axios.post(`${import.meta.env.VITE_API_URL}/hr/attendance`, { records: [payload] }, { headers });
       toast.success("Attendance marked successfully!");
       setHasUnsavedChanges(false);
-      fetchData(); // This will lock the inputs automatically because data is now saved
+      fetchData(); 
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to mark attendance.");
     } finally {
@@ -270,18 +272,19 @@ const MyPortal = () => {
         <span className="truncate" title={address}>
           <span className={prefix === 'IN' ? 'text-blue-500' : 'text-amber-500'}>{prefix}:</span> {address}
         </span>
-        {/* {link && (
-          <a href={link} target="_blank" rel="noreferrer" className="text-[9px] text-blue-600 hover:text-blue-800 underline mt-0.5 flex items-center gap-1">
-            <ExternalLink size={10} /> View Map
-          </a>
-        )} */}
       </div>
     );
   };
 
-  // 🔴 CALCULATE MONTHLY STATS
-  const totalPresent = attendanceHistory.filter(a => a.status === 'Present' || a.status === 'Half Day').length;
-  const totalAbsent = attendanceHistory.filter(a => a.status === 'Absent' || a.status === 'Leave').length;
+  // 🔴 NEW: Compute Filtered History based on selected month
+  const filteredHistory = useMemo(() => {
+    const history = allAttendance.filter(a => a.date && a.date.startsWith(selectedMonth));
+    return history.sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [allAttendance, selectedMonth]);
+
+  // 🔴 NEW: Calculate Stats based ONLY on the Selected Month
+  const totalPresent = filteredHistory.filter(a => a.status === 'Present' || a.status === 'Half Day').length;
+  const totalAbsent = filteredHistory.filter(a => a.status === 'Absent' || a.status === 'Leave').length;
 
   if (loading) {
     return (
@@ -379,7 +382,7 @@ const MyPortal = () => {
               <input 
                 type="time" 
                 value={todayRecord.inTime} 
-                readOnly // 🔴 MADE READ-ONLY
+                readOnly
                 className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 bg-slate-50 text-slate-700 cursor-not-allowed"
                 placeholder="--:--"
               />
@@ -405,7 +408,7 @@ const MyPortal = () => {
               <input 
                 type="time" 
                 value={todayRecord.outTime} 
-                readOnly // 🔴 MADE READ-ONLY
+                readOnly
                 className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 bg-slate-50 text-slate-700 cursor-not-allowed"
                 placeholder="--:--"
               />
@@ -499,16 +502,22 @@ const MyPortal = () => {
             </div>
           </div>
 
-          {/* 🔴 NEW: MONTHLY STATS SUMMARY CARD */}
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 flex items-center justify-around">
-            <div className="text-center">
+          {/* 🔴 NEW: DYNAMIC MONTHLY STATS SUMMARY CARD */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 flex items-center justify-around relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-16 h-16 bg-blue-50 rounded-bl-full -z-0"></div>
+            
+            <div className="text-center relative z-10">
                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Present</p>
                <div className="text-2xl font-black text-emerald-600">{totalPresent}</div>
             </div>
-            <div className="w-px h-10 bg-slate-200"></div>
-            <div className="text-center">
+            <div className="w-px h-10 bg-slate-200 relative z-10"></div>
+            <div className="text-center relative z-10">
                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Absent</p>
                <div className="text-2xl font-black text-rose-600">{totalAbsent}</div>
+            </div>
+            
+            <div className="absolute bottom-1 right-3 text-[8px] font-bold text-slate-300 uppercase">
+              {new Date(selectedMonth + '-01').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}
             </div>
           </div>
         </div>
@@ -516,12 +525,27 @@ const MyPortal = () => {
         {/* RIGHT COLUMN: History Table */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden h-full flex flex-col">
-            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+            
+            {/* 🔴 NEW: ADVANCED HISTORY HEADER WITH MONTH FILTER */}
+            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                <div>
                  <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                    <Calendar size={18} className="text-blue-600"/> Attendance History
                  </h3>
-                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Your logs for {new Date(localToday).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</p>
+                 <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                   Showing logs for <span className="font-bold text-slate-700">{new Date(selectedMonth + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                 </p>
+               </div>
+               
+               {/* 🔴 The Month Filter Dropdown */}
+               <div className="flex items-center gap-2">
+                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Select Month</label>
+                 <input 
+                   type="month" 
+                   value={selectedMonth}
+                   onChange={(e) => setSelectedMonth(e.target.value)}
+                   className="text-sm font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500/20 outline-none shadow-sm cursor-pointer"
+                 />
                </div>
             </div>
             
@@ -539,10 +563,10 @@ const MyPortal = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
-                  {attendanceHistory.length === 0 ? (
-                    <tr><td colSpan="7" className="text-center py-12 text-slate-400">No attendance records found for this month yet.</td></tr>
+                  {filteredHistory.length === 0 ? (
+                    <tr><td colSpan="7" className="text-center py-12 text-slate-400">No attendance records found for this month.</td></tr>
                   ) : (
-                    attendanceHistory.map((row) => {
+                    filteredHistory.map((row) => {
                       const displayDate = row.date.split('T')[0];
                       const dayName = new Date(displayDate).toLocaleDateString('en-US', { weekday: 'short' });
                       const isWeekend = dayName === 'Sat' || dayName === 'Sun';

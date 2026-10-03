@@ -4,11 +4,8 @@ const invoiceSchema = new mongoose.Schema({
   invoiceNo: { type: String, required: true },
   invoiceDate: { type: String, required: true },
 
-  paymentStatus: { 
-    type: String, 
-    enum: ['Pending', 'Paid'], 
-    default: 'Pending' 
-  },
+  amountReceived: { type: Number, default: 0 },
+paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], default: 'Pending' },
   
   companyDetails: {
     name: String,
@@ -21,6 +18,8 @@ const invoiceSchema = new mongoose.Schema({
   },
   showQr: { type: Boolean, default: true },
   isProforma: { type: Boolean, default: false },
+  dailyAlert: { type: Boolean, default: false },
+
 
   customer: {
     name: { type: String, required: true },

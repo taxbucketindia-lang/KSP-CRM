@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee } from 'lucide-react';
+import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing } from 'lucide-react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -40,7 +40,6 @@ const InvoiceGenerator = () => {
 
   const emptyCompany = { name: "", phone: "", email: "", website: "", cin: "", udyam: "", gstin: "" };
 
-  // 🔴 BANK PRESETS
   const axisBankPreset = {
     bankName: "Axis Bank Ltd", branch: "Gopi Nath Bazar, Delhi Cantt", accNo: "924020007339476", ifsc: "UTIB0004552", upiId: "taxbucket@axis"
   };
@@ -69,7 +68,6 @@ const InvoiceGenerator = () => {
   });
 
   const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
-
   const [bank, setBank] = useState(axisBankPreset);
 
   const [historyList, setHistoryList] = useState([]);
@@ -83,6 +81,9 @@ const InvoiceGenerator = () => {
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendMethod, setSendMethod] = useState('whatsapp'); 
   const [sendContact, setSendContact] = useState('');
+
+  const [paymentModal, setPaymentModal] = useState({ open: false, invoice: null, amountReceived: '', mode: 'UPI/Online' });
+  const [processingPayment, setProcessingPayment] = useState(false);
 
   const handleCompanyToggle = () => {
     if (isTaxbucket) {
@@ -152,8 +153,6 @@ const InvoiceGenerator = () => {
     : 0;
   const totalAmountAfterTax = taxableAmount + totalGstAmount;
 
-  // 🔴 DYNAMIC QR URL GENERATOR
-  // This will auto-update whenever UPI ID or Amount changes
   const upiLink = `upi://pay?pa=${bank.upiId}&pn=${companyDetails.name || 'Business'}&am=${totalAmountAfterTax}&cu=INR`;
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(upiLink)}`;
 
@@ -173,15 +172,64 @@ const InvoiceGenerator = () => {
     }
   };
 
-  const togglePaymentStatus = async (invId, currentStatus) => {
+  // PARTIAL PAYMENT RECORDER
+  const handleRecordPayment = async (e) => {
+    e.preventDefault();
+    setProcessingPayment(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
-      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${invId}`, { paymentStatus: newStatus }, { headers });
-      toast.success(`Payment marked as ${newStatus}`);
-      fetchHistory();
+      
+      const currentReceived = Number(paymentModal.invoice.amountReceived || 0);
+      const newAmountToAdd = Number(paymentModal.amountReceived);
+      const invoiceTotal = Number(paymentModal.invoice.totalAmountAfterTax);
+      
+      const updatedTotalReceived = currentReceived + newAmountToAdd;
+      
+      let newStatus = 'Pending';
+      if (updatedTotalReceived >= invoiceTotal) newStatus = 'Paid';
+      else if (updatedTotalReceived > 0) newStatus = 'Partially Paid';
+
+      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${paymentModal.invoice._id}`, { 
+        amountReceived: updatedTotalReceived,
+        paymentStatus: newStatus 
+      }, { headers });
+
+      toast.success(`Payment of ₹${newAmountToAdd} successfully recorded!`);
+      setPaymentModal({ open: false, invoice: null, amountReceived: '', mode: 'UPI' });
+      fetchHistory(); 
     } catch (error) {
-      toast.error("Failed to update payment status");
+      toast.error("Failed to record payment in database.");
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
+  // WHATSAPP REMINDER SENDER
+  const handleSendReminder = (inv) => {
+    const total = Number(inv.totalAmountAfterTax || 0);
+    const received = Number(inv.amountReceived || 0);
+    const due = total - received;
+
+    if (due <= 0) return toast.error("This invoice is already fully paid!");
+    if (!inv.customer?.phone) return toast.error("No phone number saved for this customer!");
+
+    const text = `Dear ${inv.customer.name},\n\nThis is a gentle reminder regarding your pending invoice.\n\n📄 *Invoice No:* ${inv.invoiceNo}\n💰 *Total Bill:* ₹${total.toLocaleString('en-IN')}\n✅ *Amount Paid:* ₹${received.toLocaleString('en-IN')}\n🚨 *Pending Balance: ₹${due.toLocaleString('en-IN')}*\n\nPlease process the pending amount at the earliest to avoid service interruption.\n\nThank you,\n${inv.companyDetails?.name || 'TaxBucket'}`;
+    
+    const encodedText = encodeURIComponent(text);
+    const waLink = `https://wa.me/91${inv.customer.phone.replace(/\D/g, '')}?text=${encodedText}`;
+    window.open(waLink, '_blank');
+  };
+
+  // 🔴 NAYA: DAILY APP ALERT TOGGLE FUNCTION
+  const toggleDailyAlert = async (inv) => {
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const newAlertStatus = !inv.dailyAlert;
+      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${inv._id}`, { dailyAlert: newAlertStatus }, { headers });
+      toast.success(newAlertStatus ? "Daily App Reminder Turned ON!" : "Daily Reminder Stopped.");
+      fetchHistory(); // Refresh to show new bell status
+    } catch (error) {
+      toast.error("Failed to set alert status.");
     }
   };
 
@@ -517,7 +565,6 @@ const InvoiceGenerator = () => {
           <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 gap-3">
              <div className="flex items-center gap-4">
                <h3 className="text-sm font-bold text-slate-700 uppercase">Bank Details Configuration</h3>
-               {/* 🔴 NEW BANK SELECTION DROPDOWN */}
                <select onChange={handleBankSelect} className="text-xs font-bold bg-white border border-slate-300 rounded-lg p-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-indigo-700 shadow-sm cursor-pointer">
                  <option value="axis">Axis Bank (Default)</option>
                  <option value="kotak">Kotak Mahindra Bank</option>
@@ -559,7 +606,6 @@ const InvoiceGenerator = () => {
             )}
           </div>
 
-          {/* 🔴 DYNAMIC QR PREVIEW IN FORM */}
           {showQr && bank.upiId && (
             <div className="mt-4 flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-max">
               {customQrImage ? (
@@ -633,6 +679,7 @@ const InvoiceGenerator = () => {
         </div>
       </div>
 
+      {/* MODAL: SEND INVOICE VIA WHATSAPP/EMAIL */}
       {showSendModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
@@ -687,62 +734,162 @@ const InvoiceGenerator = () => {
         </div>
       )}
 
-      {/* 🔴 PAYMENT TRACKER & HISTORY MODAL */}
+      {/* 🔴 NEW MODAL: RECORD PARTIAL PAYMENT */}
+      {paymentModal.open && paymentModal.invoice && (
+        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <IndianRupee className="text-emerald-600" size={20}/> Record Payment
+              </h3>
+              <button onClick={() => setPaymentModal({open: false, invoice: null, amountReceived: '', mode: 'UPI'})} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
+                <X size={16}/>
+              </button>
+            </div>
+            
+            <form onSubmit={handleRecordPayment} className="space-y-5">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex justify-between text-xs font-bold text-slate-500">
+                  <span>Total Bill Amount:</span>
+                  <span className="text-slate-800 font-mono">₹{paymentModal.invoice.totalAmountAfterTax?.toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between text-xs font-bold text-slate-500">
+                  <span>Already Received:</span>
+                  <span className="text-emerald-600 font-mono">₹{paymentModal.invoice.amountReceived?.toLocaleString('en-IN') || 0}</span>
+                </div>
+                <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-black text-slate-700">
+                  <span>Current Due:</span>
+                  <span className="text-rose-600 font-mono">₹{(paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0)).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                  Amount Received Now
+                </label>
+                <input 
+                  type="number"
+                  required
+                  min="1"
+                  max={paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0)}
+                  value={paymentModal.amountReceived}
+                  onChange={(e) => setPaymentModal({...paymentModal, amountReceived: e.target.value})}
+                  placeholder="Enter amount"
+                  className="w-full text-lg font-bold border border-emerald-200 bg-emerald-50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-emerald-800 transition-all shadow-sm"
+                />
+              </div>
+
+              <button type="submit" disabled={processingPayment} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center gap-2">
+                {processingPayment ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16} />} Update Balance
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🔴 ADVANCED HISTORY & PAYMENTS MODAL */}
       {showHistoryModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-purple-600"/> Saved Invoices & Payments</h3>
+          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 custom-scrollbar">
+            <div className="flex justify-between items-center border-b pb-3 sticky top-0 bg-white z-10">
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-purple-600"/> Saved Invoices & Advanced Payments</h3>
               <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-slate-800 bg-slate-100 p-1.5 rounded-lg"><X size={18}/></button>
             </div>
+            
             {historyList.length === 0 ? (
               <p className="text-center text-slate-500 py-6 text-sm">No saved invoices found.</p>
             ) : (
               <div className="space-y-3">
-                {historyList.map((inv) => (
-                  <div key={inv._id} className="flex flex-col md:flex-row justify-between md:items-center bg-slate-50 p-4 rounded-xl border border-slate-200 gap-4">
-                    <div className="flex-1">
-                      <p className="font-bold text-blue-900 text-sm">
-                         {inv.invoiceNo} - {inv.customer?.name} 
-                         {inv.isProforma && <span className="ml-2 bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded uppercase">Proforma</span>}
-                      </p>
-                      <p className="text-xs font-semibold text-slate-500 mt-1">{inv.companyDetails?.name || 'Taxbucket'} | Total: <span className="text-slate-800 font-bold">₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</span></p>
-                      
-                      {inv.sendLogs && inv.sendLogs.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {inv.sendLogs.map((log, idx) => (
-                            <p key={idx} className="text-[10px] font-bold text-slate-600 flex flex-wrap items-center gap-1.5 w-fit">
-                              Sent via <span className="uppercase text-slate-900">{log.method}</span> 
-                              to <span className="text-slate-900">{log.contact}</span> 
-                              on {new Date(log.sentAt).toLocaleDateString('en-IN')}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                {historyList.map((inv) => {
+                  const total = Number(inv.totalAmountAfterTax || 0);
+                  const received = Number(inv.amountReceived || 0);
+                  const due = total - received;
+                  const percentPaid = total > 0 ? (received / total) * 100 : 0;
 
-                    <div className="flex items-center gap-3">
-                      {/* PAYMENT STATUS TOGGLE */}
-                      <div className="flex flex-col items-center">
-                        <span className="text-[9px] font-bold uppercase text-slate-400 mb-1">Payment Status</span>
-                        {inv.paymentStatus === 'Paid' ? (
-                          <button onClick={() => togglePaymentStatus(inv._id, inv.paymentStatus)} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-200 flex items-center gap-1 transition-colors">
-                            <CheckCircle2 size={14}/> Paid
-                          </button>
-                        ) : (
-                          <button onClick={() => togglePaymentStatus(inv._id, inv.paymentStatus)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-200 flex items-center gap-1 transition-colors relative group">
-                            <AlertTriangle size={14}/> Pending Due
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-800 text-white text-[10px] px-2 py-1 rounded w-max">Click to Mark as Paid</div>
-                          </button>
+                  return (
+                    <div key={inv._id} className="flex flex-col md:flex-row justify-between md:items-center bg-slate-50 p-4 rounded-xl border border-slate-200 gap-4">
+                      
+                      {/* Invoice Basic Info */}
+                      <div className="flex-1">
+                        <p className="font-bold text-blue-900 text-sm">
+                           {inv.invoiceNo} - {inv.customer?.name} 
+                           {inv.isProforma && <span className="ml-2 bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded uppercase">Proforma</span>}
+                        </p>
+                        <p className="text-xs font-semibold text-slate-500 mt-1">{inv.companyDetails?.name || 'Taxbucket'} | Bill: <span className="text-slate-800 font-bold">₹{total.toLocaleString('en-IN')}</span></p>
+                        
+                        {inv.sendLogs && inv.sendLogs.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {inv.sendLogs.map((log, idx) => (
+                              <p key={idx} className="text-[9px] font-bold text-slate-500 flex flex-wrap items-center gap-1.5 w-fit">
+                                Sent via <span className="uppercase text-slate-800">{log.method}</span> 
+                                to <span className="text-slate-800">{log.contact}</span> 
+                                on {new Date(log.sentAt).toLocaleDateString('en-IN')}
+                              </p>
+                            ))}
+                          </div>
                         )}
                       </div>
 
-                      <button onClick={() => loadInvoiceForEdit(inv)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm h-max">
-                        Load Details
-                      </button>
+                      {/* 🔴 ADVANCED PAYMENT TRACKER UI */}
+                      <div className="flex items-center gap-4">
+                        <div className="flex flex-col items-end gap-2 w-48">
+                          
+                          {/* Progress Bar */}
+                          <div className="w-full">
+                             <div className="flex justify-between text-[10px] font-bold mb-1">
+                                <span className="text-emerald-600">Paid: ₹{received}</span>
+                                <span className={due > 0 ? "text-rose-500" : "text-slate-400"}>Due: ₹{due}</span>
+                             </div>
+                             <div className="w-full bg-slate-200 rounded-full h-2">
+                                <div className={`h-2 rounded-full transition-all ${percentPaid >= 100 ? 'bg-emerald-500' : 'bg-amber-400'}`} style={{ width: `${Math.min(percentPaid, 100)}%` }}></div>
+                             </div>
+                          </div>
+                          
+                          {/* Action Buttons */}
+                          <div className="flex gap-2 mt-1">
+                             
+                             {/* 🔴 NAYA: DAILY ALERT TOGGLE BUTTON */}
+                             {due > 0 && (
+                               <button 
+                                 onClick={() => toggleDailyAlert(inv)}
+                                 title={inv.dailyAlert ? "Disable Daily System Alert" : "Enable Daily System Alert"}
+                                 className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded transition-colors flex items-center gap-1 border ${inv.dailyAlert ? 'bg-rose-100 text-rose-700 border-rose-200 hover:bg-rose-200' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                               >
+                                 <BellRing size={10} className={inv.dailyAlert ? 'animate-pulse' : ''} />
+                                 {inv.dailyAlert ? 'Alert ON' : 'Alert OFF'}
+                               </button>
+                             )}
+
+                             {percentPaid < 100 && (
+                               <button 
+                                 onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, mode: 'UPI' })} 
+                                 className="text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1 rounded hover:bg-amber-100 transition-colors"
+                               >
+                                 + Payment
+                               </button>
+                             )}
+                             {due > 0 && (
+                               <button 
+                                 onClick={() => handleSendReminder(inv)} 
+                                 className="text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 transition-colors flex items-center gap-1"
+                               >
+                                 <Bell size={10}/> Msg
+                               </button>
+                             )}
+                             {percentPaid >= 100 && (
+                               <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 flex items-center gap-1"><CheckCircle2 size={12}/> Fully Paid</span>
+                             )}
+                          </div>
+                        </div>
+
+                        <button onClick={() => loadInvoiceForEdit(inv)} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm h-max transition-colors">
+                          Load Invoice
+                        </button>
+                      </div>
+
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -932,7 +1079,6 @@ const InvoiceGenerator = () => {
               </div>
             </div>
             
-            {/* 🔴 DYNAMIC QR RENDER IN PRINT TEMPLATE */}
             {showQr && bank.upiId && (
               <div className="mt-4 flex items-center gap-3 bg-slate-50 p-2 rounded border">
                 {customQrImage ? (
@@ -976,6 +1122,7 @@ const InvoiceGenerator = () => {
           <p>1. Subject to Local Jurisdiction.</p>
           <p>2. This {isProforma ? 'estimate' : 'invoice'} is generated by {companyDetails.name || "us"}.</p>
           <p>3. Payment made to us within 15/45 days as per MSME Act.</p>
+          <p>4. Powered By TaxBucket</p>
         </div>
 
       </div>

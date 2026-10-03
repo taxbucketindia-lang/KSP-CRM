@@ -7,8 +7,20 @@ import {
   Users, Wallet, Briefcase, TrendingUp, ArrowRight,
   Activity, UserCircle, Clock, IndianRupee, CheckCircle2, AlertCircle,
   Phone, CalendarDays, X, FileText, CalendarClock,
-  ClipboardList, UsersRound, AlertTriangle, Receipt, Sparkles, PieChart, BellRing, Gift
+  ClipboardList, UsersRound, AlertTriangle, Receipt, Sparkles, PieChart, BellRing, Gift, Cake,
+  LogIn, LogOut, MapPin
 } from 'lucide-react';
+
+// 🔴 NAYA: 12-Hour Format Helper Function
+const formatTo12Hour = (timeStr) => {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':');
+  let hours = parseInt(h, 10);
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; 
+  return `${hours}:${m} ${ampm}`;
+};
 
 const Dashboard = () => {
   const { user } = useContext(AuthContext);
@@ -16,13 +28,15 @@ const Dashboard = () => {
   
   const [data, setData] = useState({ 
     leads: [], clients: [], tasks: [], employees: [], attendance: [],
-    itr: [], gst: [], roc: [], audit: []
+    itr: [], gst: [], roc: [], audit: [], invoices: []
   });
   
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
+
+  const [punchLoading, setPunchLoading] = useState(false);
 
   const isAdmin = user?.role === 'Admin';
 
@@ -33,7 +47,7 @@ const Dashboard = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       
-      const [leadsRes, clientsRes, tasksRes, empRes, attRes, itrRes, gstRes, rocRes, auditRes] = await Promise.all([
+      const [leadsRes, clientsRes, tasksRes, empRes, attRes, itrRes, gstRes, rocRes, auditRes, invoicesRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/tasks`, { headers }).catch(() => ({ data: [] })),
@@ -42,7 +56,8 @@ const Dashboard = () => {
         axios.get(`${import.meta.env.VITE_API_URL}/itr`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/gst`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/roc`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/audit`, { headers }).catch(() => ({ data: [] }))
+        axios.get(`${import.meta.env.VITE_API_URL}/audit`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: [] }))
       ]);
 
       setData({
@@ -54,7 +69,8 @@ const Dashboard = () => {
         itr: itrRes.data || [],
         gst: gstRes.data || [],
         roc: rocRes.data || [],
-        audit: auditRes.data || []
+        audit: auditRes.data || [],
+        invoices: Array.isArray(invoicesRes.data?.data) ? invoicesRes.data.data : (invoicesRes.data || [])
       });
       setLastUpdated(new Date());
     } catch (error) {
@@ -65,7 +81,6 @@ const Dashboard = () => {
     }
   };
 
-  // 30 SECOND AUTO REFRESH LOGIC
   useEffect(() => {
     fetchMegaDashboardData(); 
 
@@ -76,6 +91,102 @@ const Dashboard = () => {
     return () => clearInterval(intervalId); 
     // eslint-disable-next-line
   }, [user.token]);
+
+  // ========================================================
+  // QUICK PUNCH-IN / PUNCH-OUT LOGIC (GPS BASED)
+  // ========================================================
+  const localToday = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
+
+  const myEmpRecord = useMemo(() => {
+    return data.employees.find(e => e.email === user.email || (e.userId && (e.userId._id === user._id || e.userId === user._id)));
+  }, [data.employees, user]);
+
+  const myTodayAttendance = useMemo(() => {
+    if (!myEmpRecord) return null;
+    return data.attendance.find(a => {
+       const empId = a.employee?._id || a.employee; 
+       return empId === myEmpRecord._id && a.date && a.date.startsWith(localToday);
+    });
+  }, [data.attendance, myEmpRecord, localToday]);
+
+  const fetchCurrentLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject("Geolocation is not supported by your browser.");
+      } else {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            const googleMapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
+            try {
+              const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+              if (res.data && res.data.display_name) {
+                const addressParts = res.data.display_name.split(',');
+                resolve(`${addressParts.slice(0, 3).join(',')}|${googleMapsLink}`);
+              } else {
+                resolve(`Lat: ${latitude.toFixed(2)}, Lng: ${longitude.toFixed(2)}|${googleMapsLink}`);
+              }
+            } catch (err) {
+              resolve(`Lat: ${latitude.toFixed(2)}, Lng: ${longitude.toFixed(2)}|${googleMapsLink}`); 
+            }
+          },
+          () => reject("Location access denied or failed.")
+        );
+      }
+    });
+  };
+
+  const handleQuickPunch = async (type) => {
+    if (!myEmpRecord) return toast.error("Your Employee profile is not linked. Contact Admin.");
+    setPunchLoading(true);
+
+    try {
+      const locStr = await fetchCurrentLocation();
+      const now = new Date();
+      const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+      let payload = {
+        employee: myEmpRecord._id,
+        companyName: myEmpRecord.companyName || 'SkyEdge Taxbucket India',
+        date: localToday,
+        status: 'Present',
+        remarks: 'Punched from Quick Dashboard'
+      };
+
+      if (type === 'IN') {
+        payload.inTime = timeStr;
+        payload.inLocation = locStr;
+      } else if (type === 'OUT') {
+        if (!myTodayAttendance || !myTodayAttendance.inTime) {
+          toast.error("Please punch in first!");
+          setPunchLoading(false);
+          return;
+        }
+        payload.inTime = myTodayAttendance.inTime;
+        payload.inLocation = myTodayAttendance.inLocation;
+        payload.outTime = timeStr;
+        payload.outLocation = locStr;
+
+        const [inH, inM] = payload.inTime.split(':').map(Number);
+        const [outH, outM] = payload.outTime.split(':').map(Number);
+        let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
+        if (diffMins < 0) diffMins += 24 * 60; 
+        payload.totalHours = `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
+      }
+
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.post(`${import.meta.env.VITE_API_URL}/hr/attendance`, { records: [payload] }, { headers });
+
+      toast.success(`Successfully Punched ${type}! Location captured.`);
+      fetchMegaDashboardData(true);
+
+    } catch (error) {
+      toast.error(typeof error === 'string' ? error : "Failed to punch attendance.");
+    } finally {
+      setPunchLoading(false);
+    }
+  };
+
 
   // --- CALCULATIONS ---
 
@@ -97,97 +208,61 @@ const Dashboard = () => {
   }, [data.leads, data.clients]);
 
   const stats = useMemo(() => {
-    const { leads, clients, tasks, employees, attendance, itr, gst, roc, audit } = data;
+    const { leads, clients, tasks, employees, attendance, itr, gst, roc, audit, invoices } = data;
     
-    // 🔴 1. FINANCIALS: SMART ANTI-DOUBLE-COUNTING LOGIC
     let totalRevenue = 0;
     let totalReceived = 0;
     let totalPending = 0;
-    let paidClientsCount = 0;
-    let focClientsCount = 0; // 🔴 NEW FOC COUNTER
+    let focClientsCount = 0; 
     
-    const defaulters = []; // Store defaulters list
-    
-    const workspaceRecordsMap = new Map();
+    const defaultersMap = new Map();
 
-    const processWorkspaceItem = (item, source) => {
-      const uniqueKey = item.crmClientId || item.pan || item._id; 
-      workspaceRecordsMap.set(uniqueKey, item);
-
-      const fee = Number(item.feeAmount || 0);
-      const rec = Number(item.amountReceived || 0);
-      const due = fee - rec;
-
-      totalRevenue += fee;
-      totalReceived += rec;
-      totalPending += (due > 0 ? due : 0);
-
-      if (item.feeStatus === 'Paid') paidClientsCount++;
-      if (item.feeStatus === 'FOC') focClientsCount++; // 🔴 COUNT FOC
-      
-      if(due > 0) {
-          defaulters.push({
-              name: item.assesseeName || item.tradeName,
-              mobile: item.mobile,
-              due: due,
-              source: source,
-              id: item._id
-          });
-      }
-    };
-
-    itr.forEach(item => processWorkspaceItem(item, 'ITR'));
-    gst.forEach(item => processWorkspaceItem(item, 'GST'));
-    roc.forEach(item => processWorkspaceItem(item, 'ROC'));
-    audit.forEach(item => processWorkspaceItem(item, 'Audit'));
-
-    let pureClientCount = 0;
-
-    clients.forEach(c => {
-      const uniqueKey = c._id || c.pan;
-      
-      if (!workspaceRecordsMap.has(uniqueKey)) {
-        pureClientCount++;
-
-        const fee = Number(c.feeAmount || 0);
-        const rec = Number(c.amountReceived || 0);
-        const due = fee - rec;
-
-        totalRevenue += fee;
-        totalReceived += rec;
-        totalPending += (due > 0 ? due : 0);
-
-        if (c.feeStatus === 'Paid') paidClientsCount++;
-        if (c.feeStatus === 'FOC') focClientsCount++; // 🔴 COUNT FOC
+    if (Array.isArray(invoices)) {
+      invoices.forEach(inv => {
+        const invTotal = Number(inv.totalAmountAfterTax || 0);
+        let invReceived = Number(inv.amountReceived || 0);
         
-        if(due > 0) {
-            defaulters.push({
-                name: c.assesseeName || c.tradeName,
-                mobile: c.mobile,
-                due: due,
-                source: 'CRM',
-                id: c._id
-            });
+        if (inv.paymentStatus === 'Paid' && invReceived === 0) {
+          invReceived = invTotal;
         }
-      }
-    });
+        
+        const due = invTotal - invReceived;
 
+        totalRevenue += invTotal;
+        totalReceived += invReceived;
+        
+        if (inv.feeStatus === 'FOC') focClientsCount++; 
+        
+        if (due > 0 && inv.paymentStatus !== 'Paid') {
+          totalPending += due;
+          const clientName = inv.customer?.name || inv.clientName || 'Unknown Client';
+          const mobile = inv.customer?.phone || '';
+          
+          if (defaultersMap.has(clientName)) {
+             defaultersMap.get(clientName).due += due;
+          } else {
+             defaultersMap.set(clientName, { name: clientName, mobile, due, id: inv._id, source: 'Invoice' });
+          }
+        }
+      });
+    }
+
+    const defaulters = Array.from(defaultersMap.values());
     const topDefaulters = defaulters.sort((a,b) => b.due - a.due).slice(0,5);
 
     const revenuePercentage = totalRevenue > 0 ? Math.round((totalReceived / totalRevenue) * 100) : 0;
-    
-    // 2. LEADS
+    const paidClientsCount = Array.isArray(invoices) ? invoices.filter(i => i.paymentStatus === 'Paid').length : 0;
+    const totalInvoicesCount = Array.isArray(invoices) ? invoices.length : 0;
+
     const newLeads = leads.filter(l => l.status === 'New').length;
     const hotLeads = leads.filter(l => l.priority === 'Hot').length;
     const convertedLeads = leads.filter(l => l.status === 'Converted').length;
     
-    // 3. TASKS & LATEST ACTIVITY
     const activeTasks = tasks.filter(t => !['Completed', 'Approved'].includes(t.currentStatus)).length;
     const overdueTasks = tasks.filter(t => t.isOverdue).length;
     const sortedTasks = [...tasks].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     const latestTask = sortedTasks.length > 0 ? sortedTasks[0] : null;
 
-    // Critical Alerts
     const criticalAlerts = [];
     gst.forEach(g => {
         if(g.gstStatus === 'Error/Mismatch') criticalAlerts.push({ name: g.tradeName || g.assesseeName, issue: 'Error/Mismatch in GST', id: g._id, link: '/clients?service=GST%20Registration' });
@@ -196,32 +271,43 @@ const Dashboard = () => {
         if(i.itrProcessedStatus === 'Defective') criticalAlerts.push({ name: i.assesseeName, issue: 'Defective ITR', id: i._id, link: '/clients?service=ITR%20Filing' });
     });
 
-    // 4. HR & ATTENDANCE
-    const todayStr = new Date().toISOString().split('T')[0];
+    const offset = new Date().getTimezoneOffset() * 60000;
+    const localToday = new Date(Date.now() - offset).toISOString().split('T')[0];
+    
     const activeEmployees = employees.filter(e => e.status === 'Active');
     const totalEmps = activeEmployees.length;
     
-    const presentCount = attendance.filter(a => a.date && a.date.startsWith(todayStr) && ['Present', 'WFH', 'Half Day'].includes(a.status)).length;
-    const absentCount = totalEmps > 0 ? totalEmps - presentCount : 0;
+    let presentCount = 0;
+    let absentCount = 0;
 
-    // Service Breakdown
+    if (Array.isArray(attendance)) {
+        const todaysRecords = attendance.filter(a => a.date && a.date.startsWith(localToday));
+        todaysRecords.forEach(a => {
+            if (['Present', 'WFH', 'Half Day'].includes(a.status)) {
+                presentCount++;
+            } else if (['Absent', 'Leave'].includes(a.status)) {
+                absentCount++;
+            }
+        });
+    }
+
+    const notMarkedCount = totalEmps > 0 ? (totalEmps - presentCount - absentCount) : 0;
+
     const serviceBreakdown = {
       ITR: itr.length,
       GST: gst.length,
       ROC: roc.length,
       Audit: audit.length,
-      Other: pureClientCount
+      Other: clients.length
     };
-    
-    const totalClientsCount = pureClientCount + workspaceRecordsMap.size; 
 
     return {
-      totalClients: totalClientsCount,
+      totalInvoices: totalInvoicesCount,
       totalRevenue,
       totalPending,
       totalReceived,
       paidClientsCount,
-      focClientsCount, // 🔴 EXPORTING FOC COUNT
+      focClientsCount,
       revenuePercentage,
       topDefaulters,
       
@@ -239,6 +325,7 @@ const Dashboard = () => {
       totalEmps,
       presentCount,
       absentCount,
+      notMarkedCount,
       serviceBreakdown
     };
   }, [data, todaysReminders.length]);
@@ -260,13 +347,25 @@ const Dashboard = () => {
     <div className="space-y-6 max-w-7xl mx-auto relative pb-10">
       <Toaster position="top-right" />
 
+      {/* LOCATION LOADER OVERLAY */}
+      {punchLoading && (
+          <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+               <div className="bg-white p-6 rounded-2xl flex flex-col items-center shadow-xl animate-in fade-in zoom-in-95">
+                   <MapPin className="animate-bounce text-blue-500 mb-2" size={32} />
+                   <p className="text-slate-800 font-bold">Capturing GPS Coordinates...</p>
+                   <p className="text-xs text-slate-500 mt-1">Please allow location access if prompted.</p>
+               </div>
+          </div>
+      )}
+
       {/* HERO HEADER WITH LIVE SYNC BADGE */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 p-8 rounded-3xl text-white shadow-xl shadow-blue-900/20 relative overflow-hidden group">
+      <div className="flex flex-col md:flex-row justify-between gap-6 bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 p-8 rounded-3xl text-white shadow-xl shadow-blue-900/20 relative overflow-hidden group">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors duration-1000"></div>
         <div className="absolute bottom-0 left-0 -mb-10 -ml-10 w-32 h-32 bg-blue-500/20 rounded-full blur-2xl"></div>
         
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-2">
+        {/* LEFT SECTION */}
+        <div className="relative z-10 flex flex-col justify-end">
+          <div className="flex items-center gap-3 mb-3">
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold uppercase tracking-wider backdrop-blur-md">
               <span className={`w-2 h-2 rounded-full ${isRefreshing ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`}></span>
               {isRefreshing ? 'Syncing...' : 'Live Auto-Sync'}
@@ -277,21 +376,46 @@ const Dashboard = () => {
             Welcome, {user?.name?.split(' ')[0] || 'Admin'}! 👋
           </h1>
           <p className="text-blue-200 mt-2 text-sm md:text-base font-medium max-w-xl">
-            {isAdmin ? "Here is the 360° overview of operations, finances, and team performance." : "Here is your daily task and prospect overview."}
+            {isAdmin ? "Here is the 360° overview of operations, financials, and team performance." : "Here is your daily task and prospect overview."}
           </p>
         </div>
 
-        <div className="relative z-10 flex items-center gap-3">
+        {/* 🔴 RIGHT SECTION (ATTENDANCE MOVED TO TOP RIGHT) */}
+        <div className="relative z-10 flex flex-col items-start md:items-end gap-3">
+          
+          {!isAdmin && (
+             <div className="flex flex-wrap items-center gap-3 bg-white/10 backdrop-blur-md p-2.5 rounded-2xl border border-white/20 w-fit">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-blue-100 flex items-center gap-1 ml-2">
+                   <Clock size={14}/> Quick Punch:
+                </div>
+                <button
+                  onClick={() => handleQuickPunch('IN')}
+                  disabled={punchLoading || myTodayAttendance?.inTime}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${myTodayAttendance?.inTime ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
+                >
+                   <LogIn size={14}/> {myTodayAttendance?.inTime ? `In (${formatTo12Hour(myTodayAttendance.inTime)})` : 'Punch In'}
+                </button>
+                <button
+                  onClick={() => handleQuickPunch('OUT')}
+                  disabled={punchLoading || !myTodayAttendance?.inTime || myTodayAttendance?.outTime}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${myTodayAttendance?.outTime ? 'bg-rose-500/20 text-rose-200 border border-rose-500/30 cursor-not-allowed' : !myTodayAttendance?.inTime ? 'bg-slate-500/40 text-slate-300 cursor-not-allowed border border-slate-500/30' : 'bg-rose-500 hover:bg-rose-600 text-white'}`}
+                >
+                   <LogOut size={14}/> {myTodayAttendance?.outTime ? `Out (${formatTo12Hour(myTodayAttendance.outTime)})` : 'Punch Out'}
+                </button>
+             </div>
+          )}
+
           {stats.todaysRemindersCount > 0 && (
             <button 
               onClick={() => setIsFollowUpModalOpen(true)}
-              className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 animate-bounce cursor-pointer"
+              className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg flex items-center justify-center gap-2 animate-bounce cursor-pointer w-full md:w-auto"
             >
               <CalendarDays size={18} /> Due Today ({stats.todaysRemindersCount})
             </button>
           )}
-          <div className="bg-white/10 backdrop-blur-md px-5 py-2.5 rounded-xl border border-white/20 text-sm font-bold flex items-center gap-2">
-            <Clock size={18} className="text-blue-300" />
+
+          <div className="bg-white/10 backdrop-blur-md px-5 py-2.5 rounded-xl border border-white/20 text-sm font-bold flex items-center justify-center gap-2 w-full md:w-auto mt-auto">
+            <CalendarDays size={16} className="text-blue-300" />
             {currentDate}
           </div>
         </div>
@@ -305,8 +429,8 @@ const Dashboard = () => {
                   <h3 className="text-sm font-bold text-rose-800">Critical Client Alerts</h3>
               </div>
               <ul className="space-y-1 ml-6 list-disc text-xs text-rose-700 font-medium">
-                  {stats.criticalAlerts.map(alert => (
-                      <li key={alert.id}>
+                  {stats.criticalAlerts.map((alert, idx) => (
+                      <li key={idx}>
                           <strong>{alert.name}</strong> - {alert.issue} 
                           <Link to={alert.link} className="ml-2 underline text-blue-600 hover:text-blue-800">Review</Link>
                       </li>
@@ -321,17 +445,17 @@ const Dashboard = () => {
           
           {/* Revenue Graph Card */}
           <div className="lg:col-span-1 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col items-center justify-center hover:-translate-y-1 transition-transform duration-300 relative overflow-hidden">
-            {/* 🔴 NEW FOC BADGE */}
-            <div className="absolute top-4 right-4 bg-purple-50 border border-purple-100 px-3 py-1.5 rounded-lg flex flex-col items-end shadow-sm">
-                <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1"><Gift size={10}/> Free of Cost</span>
-                <span className="text-sm font-black text-purple-600">{stats.focClientsCount} Files</span>
-            </div>
+            {stats.focClientsCount > 0 && (
+              <div className="absolute top-4 right-4 bg-purple-50 border border-purple-100 px-3 py-1.5 rounded-lg flex flex-col items-end shadow-sm">
+                  <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1"><Gift size={10}/> Free of Cost</span>
+                  <span className="text-sm font-black text-purple-600">{stats.focClientsCount} Files</span>
+              </div>
+            )}
 
             <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-6 w-full text-left flex items-center gap-2">
               <Activity size={16} className="text-blue-600"/> Revenue Overview
             </h2>
             
-            {/* CSS DONUT CHART */}
             <div className="relative w-36 h-36 rounded-full flex items-center justify-center shadow-inner" 
                  style={{ background: `conic-gradient(#10b981 ${stats.revenuePercentage}%, #f1f5f9 ${stats.revenuePercentage}%)` }}>
               <div className="absolute w-24 h-24 bg-white rounded-full flex flex-col items-center justify-center shadow-sm">
@@ -362,7 +486,7 @@ const Dashboard = () => {
                   <h3 className="text-3xl font-black text-blue-600 flex items-center"><IndianRupee size={28} className="mr-0.5" />{stats.totalRevenue.toLocaleString('en-IN')}</h3>
                 </div>
                 <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-lg"><Receipt size={14} /> Overall Business</div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-lg"><Receipt size={14} /> From All Invoices</div>
                   <div className="h-10 w-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center"><Wallet size={20} /></div>
                 </div>
               </div>
@@ -372,17 +496,16 @@ const Dashboard = () => {
               <div className="absolute top-0 right-0 w-20 h-20 bg-amber-50 rounded-bl-full -z-0 group-hover:scale-110 transition-transform"></div>
               <div className="relative z-10 flex flex-col h-full justify-between">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Total Tasks & Files</p>
-                  <h3 className="text-3xl font-black text-slate-800">{stats.totalClients}</h3>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Total Client Base</p>
+                  <h3 className="text-3xl font-black text-slate-800">{stats.totalInvoices}</h3>
                 </div>
                 <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg"><CheckCircle2 size={14} /> {stats.paidClientsCount} Fully Paid</div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg"><CheckCircle2 size={14} /> {stats.paidClientsCount} Invoices Fully Paid</div>
                   <div className="h-10 w-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><Users size={20} /></div>
                 </div>
               </div>
             </div>
             
-            {/* Live HR Attendance */}
             <div className="sm:col-span-2 bg-gradient-to-r from-slate-800 to-slate-900 p-6 rounded-3xl border border-slate-800 shadow-lg text-white relative overflow-hidden">
               <div className="absolute top-0 right-0 opacity-10"><UsersRound size={120} className="-mt-4 -mr-4" /></div>
               <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
@@ -394,13 +517,17 @@ const Dashboard = () => {
                 </div>
                 
                 <div className="flex gap-4 w-full sm:w-auto">
-                  <div className="bg-white/10 backdrop-blur px-4 py-3 rounded-2xl flex-1 sm:w-32 border border-white/10">
-                    <p className="text-[10px] uppercase text-emerald-400 font-bold mb-0.5">Present / WFH</p>
-                    <p className="text-xl font-black">{stats.presentCount}</p>
+                  <div className="bg-emerald-500/20 backdrop-blur px-4 py-3 rounded-2xl flex-1 sm:w-28 border border-emerald-500/20">
+                    <p className="text-[10px] uppercase text-emerald-400 font-bold mb-0.5">Present</p>
+                    <p className="text-xl font-black text-emerald-300">{stats.presentCount}</p>
                   </div>
-                  <div className="bg-rose-500/20 backdrop-blur px-4 py-3 rounded-2xl flex-1 sm:w-32 border border-rose-500/20">
-                    <p className="text-[10px] uppercase text-rose-400 font-bold mb-0.5">Absent / Leave</p>
+                  <div className="bg-rose-500/20 backdrop-blur px-4 py-3 rounded-2xl flex-1 sm:w-28 border border-rose-500/20">
+                    <p className="text-[10px] uppercase text-rose-400 font-bold mb-0.5">Absent/Leave</p>
                     <p className="text-xl font-black text-rose-300">{stats.absentCount}</p>
+                  </div>
+                  <div className="bg-amber-500/20 backdrop-blur px-4 py-3 rounded-2xl flex-1 sm:w-28 border border-amber-500/20">
+                    <p className="text-[10px] uppercase text-amber-400 font-bold mb-0.5">Unmarked</p>
+                    <p className="text-xl font-black text-amber-300">{stats.notMarkedCount}</p>
                   </div>
                 </div>
               </div>
@@ -412,7 +539,6 @@ const Dashboard = () => {
       {/* LATEST ACTIVITY TICKER & OPERATIONS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-bottom-6 duration-500 delay-100">
         
-        {/* Activity Ticker */}
         <div className="lg:col-span-3 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-indigo-600 text-white flex items-center justify-center animate-pulse shadow-md">
@@ -438,7 +564,6 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* Task Stats */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500 hover:-translate-y-1 transition-transform">
           <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Open Tasks</p>
           <div className="flex items-end justify-between">
@@ -574,6 +699,12 @@ const Dashboard = () => {
               <div className="flex items-center gap-3"><div className="bg-white p-2.5 rounded-xl text-indigo-600 shadow-sm"><ClipboardList size={20} /></div><div className="text-sm font-bold text-slate-700">Work Management</div></div>
               <ArrowRight size={16} className="text-slate-400 group-hover:text-indigo-600" />
             </Link>
+            
+            <Link to="/birthday-wishes" className="flex items-center justify-between p-3.5 rounded-2xl border border-pink-100 bg-pink-50/50 hover:bg-pink-100 transition-all hover:scale-[1.02] group shadow-sm hover:shadow">
+              <div className="flex items-center gap-3"><div className="bg-white p-2.5 rounded-xl text-pink-600 shadow-sm"><Cake size={20} /></div><div className="text-sm font-bold text-slate-700">Birthday Wishes</div></div>
+              <ArrowRight size={16} className="text-slate-400 group-hover:text-pink-600" />
+            </Link>
+
             {isAdmin && (
               <Link to="/hr/attendance" className="flex items-center justify-between p-3.5 rounded-2xl border border-slate-100 bg-slate-50 hover:bg-orange-50 transition-all hover:scale-[1.02] group shadow-sm hover:shadow">
                 <div className="flex items-center gap-3"><div className="bg-white p-2.5 rounded-xl text-orange-600 shadow-sm"><UsersRound size={20} /></div><div className="text-sm font-bold text-slate-700">Attendance Log</div></div>

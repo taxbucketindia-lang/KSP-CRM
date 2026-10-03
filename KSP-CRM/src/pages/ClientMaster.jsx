@@ -933,7 +933,6 @@
 
 
 
-
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -943,13 +942,14 @@ import {
   CheckCircle2, Edit, AlertCircle, RefreshCw, Trash2, AlertTriangle, 
   Briefcase, Eye, UserCircle, Hash, FileText, Calculator, Building2, FileKey, ShieldCheck,
   IndianRupee, MessageCircle, Clock, CalendarDays, Filter, Store, 
-  BookOpen, Download, ChevronRight
+  BookOpen, Download, ChevronRight, Bell
 } from 'lucide-react';
 
 const ClientMaster = () => {
   const { user } = useContext(AuthContext);
   
   const [clients, setClients] = useState([]);
+  const [allInvoices, setAllInvoices] = useState([]); // 🔴 NAYA: Financial calculations ke liye
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -969,13 +969,7 @@ const ClientMaster = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [clientToView, setClientToView] = useState(null);
   const [activeTab, setActiveTab] = useState('overview'); 
-
-  // Workspace Click Detail Modal State
   const [workspaceDetailModal, setWorkspaceDetailModal] = useState({ open: false, type: '', title: '' });
-
-  // Invoices Data State for View Modal
-  const [clientInvoices, setClientInvoices] = useState([]);
-  const [loadingInvoices, setLoadingInvoices] = useState(false);
 
   // Initial Form State
   const initialForm = {
@@ -989,21 +983,27 @@ const ClientMaster = () => {
   
   const [formData, setFormData] = useState(initialForm);
 
-  const fetchClients = async () => {
+  // 🔴 UPDATED: Ek sath Clients aur Invoices dono layenge
+  const fetchData = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers });
-      setClients(res.data || []);
+      const [clientsRes, invoicesRes] = await Promise.all([
+        axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }),
+        axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: { data: [] } }))
+      ]);
+      
+      setClients(clientsRes.data || []);
+      setAllInvoices(invoicesRes.data?.data || []);
     } catch (error) {
-      toast.error("Failed to load clients");
+      toast.error("Failed to load database");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchClients();
+    fetchData();
     // eslint-disable-next-line
   }, [user.token]);
 
@@ -1033,6 +1033,46 @@ const ClientMaster = () => {
     });
   }, [clients, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
 
+  // 🔴 NAYA: Global Financial Calculations (For Top Cards)
+  const globalFinances = useMemo(() => {
+    let billed = 0;
+    let received = 0;
+    
+    allInvoices.forEach(inv => {
+      const invTotal = Number(inv.totalAmountAfterTax || 0);
+      let invReceived = Number(inv.amountReceived || 0);
+      
+      // Backward compatibility: If marked Paid but amountReceived is 0, assume full received
+      if (inv.paymentStatus === 'Paid' && invReceived === 0) {
+        invReceived = invTotal;
+      }
+      
+      billed += invTotal;
+      received += invReceived;
+    });
+    
+    return { billed, received, due: billed - received };
+  }, [allInvoices]);
+
+  // 🔴 NAYA: Helper to calculate specific client's pending due
+  const getClientDueAmount = (client) => {
+    const clientInvs = allInvoices.filter(inv => 
+      (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
+      (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
+      (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
+    );
+
+    let totalDue = 0;
+    clientInvs.forEach(inv => {
+      const invTotal = Number(inv.totalAmountAfterTax || 0);
+      let invReceived = Number(inv.amountReceived || 0);
+      if (inv.paymentStatus === 'Paid' && invReceived === 0) invReceived = invTotal;
+      totalDue += (invTotal - invReceived);
+    });
+
+    return totalDue > 0 ? totalDue : 0;
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (!formData.pan) return toast.error("PAN Number is required!");
@@ -1051,7 +1091,7 @@ const ClientMaster = () => {
       }
       
       setIsModalOpen(false);
-      fetchClients();
+      fetchData();
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to save client");
     } finally {
@@ -1083,43 +1123,22 @@ const ClientMaster = () => {
     setIsModalOpen(true);
   };
 
-  const handleOpenView = async (client) => {
+  const handleOpenView = (client) => {
     setClientToView(client);
     setActiveTab('overview'); 
     setIsViewModalOpen(true);
-    
-    setLoadingInvoices(true);
-    try {
-      const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers });
-      const allInvoices = res.data.data || [];
-      
-      const matchingInvoices = allInvoices.filter(inv => 
-        (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
-        (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
-        (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
-      );
-      
-      setClientInvoices(matchingInvoices);
-    } catch (error) {
-      console.error("Failed to load invoices", error);
-    } finally {
-      setLoadingInvoices(false);
-    }
   };
 
-  const sendWhatsappReminder = (inv, client) => {
-    const phone = inv.customer?.phone || client.mobile;
-    if (!phone) {
-       return toast.error("Mobile number is missing for this client!");
-    }
+  // 🔴 NAYA: WhatsApp Reminder specifically for Total Pending Due
+  const sendDueReminder = (client, dueAmount) => {
+    if (!client.mobile) return toast.error("Mobile number is missing for this client!");
     
-    const text = `Hello ${client.name},\n\nThis is a gentle reminder regarding your Invoice (${inv.invoiceNo}) for Rs. ${inv.totalAmountAfterTax?.toLocaleString('en-IN')}.\n\nThe payment status is currently marked as *PENDING*.\nPlease process the payment at your earliest convenience.\n\nThank you,\nSkyEdge Taxbucket`;
+    const text = `Dear ${client.name},\n\nThis is a gentle reminder from SkyEdge Taxbucket.\n\nYour total pending balance across invoices is *₹${dueAmount.toLocaleString('en-IN')}*.\n\nPlease process the payment at your earliest convenience to avoid any service interruptions.\n\nThank you,\nTeam Taxbucket`;
     const encodedText = encodeURIComponent(text);
-    const waLink = `https://wa.me/91${phone.replace(/\D/g, '')}?text=${encodedText}`;
+    const waLink = `https://wa.me/91${client.mobile.replace(/\D/g, '')}?text=${encodedText}`;
     
     window.open(waLink, '_blank');
-    toast.success("Opening WhatsApp for Reminder!");
+    toast.success("Opening WhatsApp to send payment reminder!");
   };
 
   const executeDelete = async () => {
@@ -1128,7 +1147,7 @@ const ClientMaster = () => {
       await axios.delete(`${import.meta.env.VITE_API_URL}/client-master/${deleteModal.client._id}`, { headers });
       toast.success("Client deleted permanently.");
       setDeleteModal({ open: false, client: null });
-      fetchClients();
+      fetchData();
     } catch (error) {
       toast.error(error.response?.data?.message || "Error deleting client");
     }
@@ -1140,9 +1159,16 @@ const ClientMaster = () => {
       : 'bg-rose-50 text-rose-700 border-rose-200';
   };
 
+  // Profile Modal Ledger Logic
   const generateLedger = () => {
     let ledger = [];
     let runningBalance = 0;
+
+    const clientInvoices = allInvoices.filter(inv => 
+      (clientToView?.pan && inv.customer?.pan?.toUpperCase() === clientToView.pan?.toUpperCase()) || 
+      (clientToView?.gstin && inv.customer?.gstin?.toUpperCase() === clientToView.gstin?.toUpperCase()) ||
+      (inv.customer?.name?.toLowerCase() === clientToView?.name?.toLowerCase())
+    );
 
     const sortedInvoices = [...clientInvoices].sort((a, b) => new Date(a.invoiceDate) - new Date(b.invoiceDate));
 
@@ -1162,15 +1188,13 @@ const ClientMaster = () => {
       });
 
       let actualReceived = Number(inv.amountReceived || 0);
-      if (inv.paymentStatus === 'Paid' && actualReceived === 0) {
-        actualReceived = billedAmount;
-      }
+      if (inv.paymentStatus === 'Paid' && actualReceived === 0) actualReceived = billedAmount;
 
       if (actualReceived > 0) {
         runningBalance -= actualReceived;
         ledger.push({
           id: `pay-${inv._id}`,
-          date: inv.paymentDate || inv.invoiceDate, 
+          date: inv.paymentDate || inv.updatedAt || inv.invoiceDate, 
           type: 'Payment',
           particulars: `Payment Received against Invoice ${inv.invoiceNo}`,
           debit: 0,
@@ -1184,7 +1208,7 @@ const ClientMaster = () => {
     return ledger;
   };
 
-  const clientLedger = generateLedger();
+  const clientLedger = isViewModalOpen ? generateLedger() : [];
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6 pb-12">
@@ -1196,13 +1220,14 @@ const ClientMaster = () => {
           <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
             <Building size={28} className="text-blue-600" /> Client Master (360° Profile)
           </h1>
-          <p className="text-sm text-slate-500 mt-1 font-medium">Global central database for all your clients across ITR, GST, ROC & Audits.</p>
+          <p className="text-sm text-slate-500 mt-1 font-medium">Global central database & unified financial tracking.</p>
         </div>
         <button onClick={openNewModal} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all">
           <Plus size={18} strokeWidth={2.5} /> Add New Client
         </button>
       </div>
 
+      {/* 🔴 NAYA: ADVANCED FINANCIAL SUMMARY CARDS */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-blue-500">
           <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0"><Building size={18} /></div>
@@ -1211,18 +1236,28 @@ const ClientMaster = () => {
             <h3 className="text-xl font-black text-slate-800">{clients.length}</h3>
           </div>
         </div>
+        
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-emerald-500">
-          <div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold border border-emerald-100 shrink-0"><CheckCircle2 size={18} /></div>
+          <div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold border border-emerald-100 shrink-0"><FileText size={18} /></div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Clients</p>
-            <h3 className="text-xl font-black text-emerald-700">{clients.filter(c => c.status === 'Active').length}</h3>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Billed</p>
+            <h3 className="text-xl font-black text-emerald-700 flex items-center gap-0.5"><IndianRupee size={16}/>{globalFinances.billed.toLocaleString('en-IN')}</h3>
           </div>
         </div>
+        
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-indigo-500">
-          <div className="h-10 w-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold border border-indigo-100 shrink-0"><Filter size={18} /></div>
+          <div className="h-10 w-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold border border-indigo-100 shrink-0"><CheckCircle2 size={18} /></div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filtered View</p>
-            <h3 className="text-xl font-black text-indigo-700">{filteredClients.length}</h3>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Received</p>
+            <h3 className="text-xl font-black text-indigo-700 flex items-center gap-0.5"><IndianRupee size={16}/>{globalFinances.received.toLocaleString('en-IN')}</h3>
+          </div>
+        </div>
+
+        <div className="bg-rose-50 p-4 rounded-xl border border-rose-200 shadow-sm flex items-center gap-4 border-l-4 border-l-rose-500">
+          <div className="h-10 w-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center font-bold border border-rose-200 shrink-0"><AlertCircle size={18} /></div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-500">Pending Dues</p>
+            <h3 className="text-xl font-black text-rose-700 flex items-center gap-0.5"><IndianRupee size={16}/>{globalFinances.due.toLocaleString('en-IN')}</h3>
           </div>
         </div>
       </div>
@@ -1250,6 +1285,9 @@ const ClientMaster = () => {
                 <option value="Partnership Firm">Partnership Firm</option>
                 <option value="LLP">LLP</option>
                 <option value="Private Limited">Private Limited</option>
+                <option value="Public Limited">Public Limited</option>
+                <option value="HUF">HUF</option>
+                <option value="Trust">Trust</option>
                 <option value="Other">Other</option>
               </select>
 
@@ -1285,93 +1323,113 @@ const ClientMaster = () => {
                 <th className="py-4 px-5">Client Info</th>
                 <th className="py-4 px-5">Tax & Identifiers</th>
                 <th className="py-4 px-5">Contact Details</th>
-                <th className="py-4 px-5">Entity & Location</th>
-                <th className="py-4 px-5">Onboarded Date</th>
-                <th className="py-4 px-5">Status</th>
+                <th className="py-4 px-5">Location</th>
+                <th className="py-4 px-5">Status & Dues</th>
                 <th className="py-4 px-5 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {loading ? (
-                <tr><td colSpan="7" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Master Database...</td></tr>
+                <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Master Database...</td></tr>
               ) : filteredClients.length === 0 ? (
-                <tr><td colSpan="7" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
+                <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
               ) : (
-                filteredClients.map((client) => (
-                  <tr key={client._id} className="hover:bg-slate-50/70 transition-colors group">
-                    <td className="py-3 px-5">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-black text-sm shrink-0 border border-blue-200">
-                          {client.name.charAt(0).toUpperCase()}
+                filteredClients.map((client) => {
+                  const clientDue = getClientDueAmount(client); // Calculate due for this client
+                  
+                  return (
+                    <tr key={client._id} className={`hover:bg-slate-50/70 transition-colors group ${clientDue > 0 ? 'bg-amber-50/20' : ''}`}>
+                      <td className="py-3 px-5">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-black text-sm shrink-0 border border-blue-200">
+                            {client.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-800 flex flex-col gap-0.5">
+                              <span className="flex items-center gap-2">
+                                {client.name}
+                                {client.clientId && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-slate-200/70 text-slate-600 tracking-wider">
+                                    {client.clientId}
+                                  </span>
+                                )}
+                              </span>
+                              {client.tradeName && <span className="text-[10px] text-slate-500 font-medium">({client.tradeName})</span>}
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-1">
+                              <Briefcase size={10} /> {client.clientType}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-slate-800 flex flex-col gap-0.5">
-                            <span className="flex items-center gap-2">
-                              {client.name}
-                              {client.clientId && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-slate-200/70 text-slate-600 tracking-wider">
-                                  {client.clientId}
-                                </span>
-                              )}
-                            </span>
-                            {client.tradeName && <span className="text-[10px] text-slate-500 font-medium">({client.tradeName})</span>}
+                      </td>
+                      <td className="py-3 px-5">
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 inline-block w-max">
+                            PAN: {client.pan}
                           </p>
-                          <p className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-1">
-                            <Briefcase size={10} /> {client.clientType}
-                          </p>
+                          {client.gstin && (
+                            <p className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 inline-block w-max">
+                              GST: {client.gstin}
+                            </p>
+                          )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-5">
-                      <div className="space-y-1.5">
-                        <p className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 inline-block w-max">
-                          PAN: {client.pan}
+                      </td>
+                      <td className="py-3 px-5">
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {client.mobile || 'N/A'}</p>
+                          {client.email && <p className="text-[10px] font-bold text-blue-600 flex items-center gap-1.5 truncate max-w-[150px]" title={client.email}><Mail size={10} className="shrink-0"/> {client.email}</p>}
+                        </div>
+                      </td>
+                      <td className="py-3 px-5">
+                        <p className="text-[11px] text-slate-600 flex items-start gap-1.5 mt-0.5 max-w-[150px]">
+                          <MapPin size={12} className="text-slate-400 mt-0.5 shrink-0"/> 
+                          <span className="truncate">{client.state ? `${client.state} ${client.pinCode ? `(${client.pinCode})` : ''}` : 'Location not added'}</span>
                         </p>
-                        {client.gstin && (
-                          <p className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 inline-block w-max">
-                            GST: {client.gstin}
-                          </p>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-5">
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {client.mobile || 'N/A'}</p>
-                        {client.email && <p className="text-[10px] font-bold text-blue-600 flex items-center gap-1.5 truncate max-w-[150px]" title={client.email}><Mail size={10} className="shrink-0"/> {client.email}</p>}
-                      </div>
-                    </td>
-                    <td className="py-3 px-5">
-                      <p className="text-[11px] text-slate-600 flex items-start gap-1.5 mt-0.5 max-w-[180px]">
-                        <MapPin size={12} className="text-slate-400 mt-0.5 shrink-0"/> 
-                        <span className="truncate">{client.state ? `${client.state} ${client.pinCode ? `(${client.pinCode})` : ''}` : 'Location not added'}</span>
-                      </p>
-                    </td>
-                    <td className="py-3 px-5">
-                      <div className="flex flex-col gap-0.5">
-                         <span className="text-xs font-bold text-slate-800">{new Date(client.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                         <span className="text-[9px] font-bold text-slate-400 uppercase">{new Date(client.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-5">
-                      <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${getStatusBadge(client.status)}`}>
-                        {client.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-5 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => handleOpenView(client)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent" title="View 360 Profile">
-                          <Eye size={16}/>
-                        </button>
-                        <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Client">
-                          <Edit size={16}/>
-                        </button>
-                        <button onClick={() => setDeleteModal({ open: true, client: client })} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Client">
-                          <Trash2 size={16}/>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="py-3 px-5">
+                        <div className="flex flex-col items-start gap-1.5">
+                          <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${getStatusBadge(client.status)}`}>
+                            {client.status}
+                          </span>
+                          
+                          {/* 🔴 PENDING DUE BADGE IN TABLE */}
+                          {clientDue > 0 ? (
+                             <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-100 px-2 py-0.5 rounded border border-rose-200">
+                               Due: ₹{clientDue.toLocaleString('en-IN')}
+                             </span>
+                          ) : (
+                             <span className="text-[10px] font-bold text-slate-400">Dues Clear</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-5 text-right">
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => handleOpenView(client)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent" title="View 360 Profile">
+                              <Eye size={16}/>
+                            </button>
+                            <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Client">
+                              <Edit size={16}/>
+                            </button>
+                            <button onClick={() => setDeleteModal({ open: true, client: client })} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Client">
+                              <Trash2 size={16}/>
+                            </button>
+                          </div>
+                          
+                          {/* 🔴 PAYMENT REMINDER BUTTON */}
+                          {clientDue > 0 && (
+                             <button 
+                               onClick={() => sendDueReminder(client, clientDue)} 
+                               className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 transition-colors border border-amber-200"
+                             >
+                               <Bell size={10} className="animate-pulse"/> Reminder
+                             </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -1500,7 +1558,7 @@ const ClientMaster = () => {
                     </div>
                   </div>
 
-                  {/* 🔴 PERFECTED CLICKABLE CONNECTED WORKSPACES */}
+                  {/* CONNECTED WORKSPACES */}
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h3 className="text-sm font-black text-slate-800 mb-5 pb-2 border-b border-slate-100 flex items-center gap-2">
                       <ShieldCheck size={18} className="text-emerald-600"/> Connected Workspaces (Click to View Activity)
@@ -1642,11 +1700,7 @@ const ClientMaster = () => {
                       </button>
                     </div>
 
-                    {loadingInvoices ? (
-                       <div className="flex justify-center items-center py-10 text-slate-400">
-                         <RefreshCw className="animate-spin mr-2" size={18}/> Fetching records...
-                       </div>
-                    ) : clientLedger.length === 0 ? (
+                    {clientLedger.length === 0 ? (
                        <div className="text-center py-12 bg-slate-50/30">
                           <BookOpen size={32} className="mx-auto text-slate-300 mb-3"/>
                           <p className="text-sm font-bold text-slate-500">No transactions found for this client.</p>
@@ -1712,8 +1766,14 @@ const ClientMaster = () => {
         </div>
       )}
 
-      {/* 🔴 WORKSPACE ACTIVITY DETAIL MODAL */}
+      {/* WORKSPACE ACTIVITY DETAIL MODAL */}
       {workspaceDetailModal.open && (() => {
+        const clientInvoices = allInvoices.filter(inv => 
+          (clientToView?.pan && inv.customer?.pan?.toUpperCase() === clientToView.pan?.toUpperCase()) || 
+          (clientToView?.gstin && inv.customer?.gstin?.toUpperCase() === clientToView.gstin?.toUpperCase()) ||
+          (inv.customer?.name?.toLowerCase() === clientToView?.name?.toLowerCase())
+        );
+
         const relatedInvoices = clientInvoices.filter(inv => {
           const desc = inv.items?.[0]?.description?.toLowerCase() || '';
           if (workspaceDetailModal.type === 'ITR') return desc.includes('itr') || desc.includes('tax');
@@ -1740,10 +1800,6 @@ const ClientMaster = () => {
                  <div>
                    <p className="text-xs font-bold text-slate-500 uppercase">Linked Client</p>
                    <p className="text-sm font-black text-slate-800">{clientToView?.name}</p>
-                 </div>
-                 <div className="text-right">
-                   <p className="text-xs font-bold text-slate-500 uppercase">Filing / Work Date</p>
-                   <p className="text-sm font-bold text-blue-700">{clientToView?.filingDate ? new Date(clientToView.filingDate).toLocaleDateString('en-IN') : 'Not Updated'}</p>
                  </div>
                </div>
 
@@ -2029,4 +2085,3 @@ const ClientMaster = () => {
 };
 
 export default ClientMaster;
-

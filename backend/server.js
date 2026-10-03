@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import express from 'express';
-import { startCronJobs } from './utils/cronJobs.js';    
+import { startCronJobs } from './utils/cronJobs.js';
+import { startBirthdayCron } from './utils/birthdayCron.js';    
+import { startInvoiceReminderCron } from './utils/invoiceReminderCron.js';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import cron from 'node-cron'; // <-- Naya package import kiya
@@ -26,6 +28,7 @@ import auditRoutes from './routes/auditRoutes.js';
 import fssaiRoutes from './routes/fssaiRoutes.js';
 import expenseRoutes from './routes/expenseRoutes.js';
 import todoRoutes from './routes/todoRoutes.js';
+import birthdayRoutes from './routes/birthdayRoutes.js';
 
 
 dotenv.config();
@@ -62,6 +65,7 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/fssai', fssaiRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/todos', todoRoutes);
+app.use('/api/birthdays', birthdayRoutes);
 
 // ==========================================
 // CRON JOB FOR DAILY FOLLOW-UP REMINDERS
@@ -103,6 +107,8 @@ mongoose.connection.once('open', async () => {
     // Agar index pehle hi delete ho gaya hoga toh koi error nahi aayega
   }
   startCronJobs();
+  startBirthdayCron();
+  startInvoiceReminderCron();
 });
 
 const PORT = process.env.PORT || 5000;
