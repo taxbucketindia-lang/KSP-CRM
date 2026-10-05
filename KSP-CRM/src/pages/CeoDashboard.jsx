@@ -850,7 +850,6 @@
 
 
 
-
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -870,7 +869,8 @@ const CeoDashboard = () => {
   
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
-    clients: [], leads: [], tasks: [], itr: [], gst: [], employees: [], invoices: [], attendance: []
+    clients: [], leads: [], tasks: [], itr: [], gst: [], employees: [], invoices: [], attendance: [], 
+    clientMaster: [] // 🔴 NAYA: Client Master Data Array
   });
 
   // SUCCESS LIST (TODO) STATES
@@ -891,7 +891,8 @@ const CeoDashboard = () => {
     const fetchCeoData = async () => {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const [clientsRes, leadsRes, tasksRes, itrRes, gstRes, empRes, invoiceRes, attRes, todosRes] = await Promise.all([
+        // 🔴 NAYA: Added Client Master API Endpoint
+        const [clientsRes, leadsRes, tasksRes, itrRes, gstRes, empRes, invoiceRes, attRes, todosRes, clientMasterRes] = await Promise.all([
           axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/tasks`, { headers }).catch(() => ({ data: [] })),
@@ -900,7 +901,8 @@ const CeoDashboard = () => {
           axios.get(`${import.meta.env.VITE_API_URL}/users/employees`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${import.meta.env.VITE_API_URL}/todos`, { headers }).catch(() => ({ data: [] }))
+          axios.get(`${import.meta.env.VITE_API_URL}/todos`, { headers }).catch(() => ({ data: [] })),
+          axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: { data: [] } }))
         ]);
 
         setData({
@@ -911,7 +913,8 @@ const CeoDashboard = () => {
           gst: Array.isArray(gstRes.data) ? gstRes.data : [],
           employees: Array.isArray(empRes.data) ? empRes.data : [],
           invoices: Array.isArray(invoiceRes.data) ? invoiceRes.data : (invoiceRes.data?.data || invoiceRes.data?.invoices || []),
-          attendance: Array.isArray(attRes.data) ? attRes.data : []
+          attendance: Array.isArray(attRes.data) ? attRes.data : [],
+          clientMaster: Array.isArray(clientMasterRes.data?.data) ? clientMasterRes.data.data : (clientMasterRes.data || []) // 🔴 Data set kara
         });
 
         setCeoTodos(Array.isArray(todosRes.data) ? todosRes.data : []);
@@ -996,12 +999,20 @@ const CeoDashboard = () => {
   // CEO Level Analytics Calculation
   // ==========================================
   const analytics = useMemo(() => {
-    const { clients, leads, tasks, itr, gst, employees, invoices, attendance } = data;
+    const { clients, leads, tasks, itr, gst, employees, invoices, attendance, clientMaster } = data;
     
-    // 1. FINANCES (Strictly calculated from Invoices)
+    // 1. FINANCES (Now pulling from both Invoices and Client Master)
     let totalRevenue = 0;
     let totalCollected = 0;
+    let totalOpeningBalance = 0; // 🔴 NEW VARIABLE
     const totalInvoicesGenerated = Array.isArray(invoices) ? invoices.length : 0;
+
+    // 🔴 Calculate Opening Balances first
+    if (Array.isArray(clientMaster)) {
+      clientMaster.forEach(client => {
+        totalOpeningBalance += Number(client.openingBalance || 0);
+      });
+    }
 
     if (Array.isArray(invoices)) {
       invoices.forEach(inv => {
@@ -1017,8 +1028,10 @@ const CeoDashboard = () => {
       });
     }
     
-    const outstanding = totalRevenue - totalCollected;
-    const collectionRate = totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0;
+    // 🔴 Total Expected Revenue ab Opening Balance ko bhi ginega
+    const finalTotalRevenue = totalRevenue + totalOpeningBalance;
+    const outstanding = finalTotalRevenue - totalCollected;
+    const collectionRate = finalTotalRevenue > 0 ? Math.round((totalCollected / finalTotalRevenue) * 100) : 0;
 
     // Latest 5 Invoices
     const latestInvoices = Array.isArray(invoices) 
@@ -1153,7 +1166,7 @@ const CeoDashboard = () => {
     billingLogs.sort((a,b) => b.time - a.time);
     const recentBillingLogs = billingLogs.slice(0, 20); 
 
-    // 🔴 7. HR / ATTENDANCE TODAY (BUG FIXED)
+    // 7. HR / ATTENDANCE TODAY
     const offset = new Date().getTimezoneOffset() * 60000;
     const localToday = new Date(Date.now() - offset).toISOString().split('T')[0];
 
@@ -1161,7 +1174,6 @@ const CeoDashboard = () => {
     let absentToday = 0;
     let onLeaveToday = 0;
     
-    // Sirf pure employees ko ginenge (Admin ya Client roles nahi)
     const activeEmployeesList = Array.isArray(employees) ? employees.filter(e => e.status === 'Active' && e.role !== 'Admin' && e.role !== 'Client') : [];
     const activeEmployeesCount = activeEmployeesList.length;
 
@@ -1177,7 +1189,6 @@ const CeoDashboard = () => {
                 let empName = 'Unknown';
                 let empIdStr = 'EMP---';
                 
-                // Populated ya array matching dono scenarios handle kiye hain
                 if (r.employee && typeof r.employee === 'object') {
                     empName = r.employee.name || 'Unknown';
                     empIdStr = r.employee.empId || 'EMP---';
@@ -1189,7 +1200,6 @@ const CeoDashboard = () => {
                     }
                 }
 
-                // Check-in Time Formatting
                 let checkInTime = 'N/A';
                 if (r.checkInTime) {
                     checkInTime = new Date(r.checkInTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
@@ -1215,7 +1225,12 @@ const CeoDashboard = () => {
                             : 0;
 
     return {
-      totalRevenue, totalCollected, outstanding, collectionRate, totalInvoicesGenerated, latestInvoices,
+      totalRevenue: finalTotalRevenue, // 🔴 UPDATED
+      totalCollected, 
+      outstanding, 
+      collectionRate, 
+      totalInvoicesGenerated, 
+      latestInvoices,
       totalLeads, newLeads, inTalksLeads, convertedLeads, conversionRate,
       leadServiceItr, leadServiceGst, leadServiceReg,
       overdueTasks, totalCriticalIssues, defectiveItr, gstErrors,
@@ -1323,13 +1338,13 @@ const CeoDashboard = () => {
         </div>
       </div>
 
-      {/* TIER 1: FINANCIAL HEALTH (Strictly Invoice Based) */}
+      {/* TIER 1: FINANCIAL HEALTH (Invoice + Opening Balances) */}
       <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2 mt-4">1. Business Health</h2>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
         
         <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 p-4 opacity-20"><Wallet size={80} /></div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Total Expected Revenue</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Total Expected Revenue (Inv + O.B.)</p>
           <h3 className="text-3xl font-black flex items-center mb-4">₹{analytics.totalRevenue.toLocaleString('en-IN')}</h3>
           <div className="bg-white/10 backdrop-blur px-3 py-2 rounded-lg inline-flex items-center gap-2 text-xs font-bold text-emerald-400 border border-white/10">
             <ArrowUpRight size={14} /> Pipeline Looks Good
@@ -1505,7 +1520,6 @@ const CeoDashboard = () => {
                 </div>
              </div>
 
-             {/* 🔴 NEW: Present Employees Check-in List */}
              <div className="mt-4 pt-4 border-t border-slate-700">
                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Punched In Today</p>
                 <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-1">

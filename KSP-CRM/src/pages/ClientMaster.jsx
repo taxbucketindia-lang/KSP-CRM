@@ -932,11 +932,13 @@
 
 
 
-
-import React, { useState, useEffect, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
+import * as XLSX from 'xlsx'; 
+import ExcelJS from 'exceljs'; 
+import { saveAs } from 'file-saver';
 import { 
   Building, Search, Plus, X, Mail, Phone, MapPin, 
   CheckCircle2, Edit, AlertCircle, RefreshCw, Trash2, AlertTriangle, 
@@ -949,7 +951,7 @@ const ClientMaster = () => {
   const { user } = useContext(AuthContext);
   
   const [clients, setClients] = useState([]);
-  const [allInvoices, setAllInvoices] = useState([]); // 🔴 NAYA: Financial calculations ke liye
+  const [allInvoices, setAllInvoices] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -976,14 +978,13 @@ const ClientMaster = () => {
     pan: '', name: '', tradeName: '', mobile: '', email: '', 
     clientType: 'Individual', address: '', state: '', pinCode: '',
     gstin: '', aadhaar: '', dob: '', fatherName: '', 
-    status: 'Active', remarks: '',
+    status: 'Active', remarks: '', openingBalance: '',
     constitution: '', cin_llpin: '', date_of_incorporation: '', nature_of_business: '',
     registered_office_address: '', books_kept_at: '', accounting_method: ''
   };
   
   const [formData, setFormData] = useState(initialForm);
 
-  // 🔴 UPDATED: Ek sath Clients aur Invoices dono layenge
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -1033,28 +1034,33 @@ const ClientMaster = () => {
     });
   }, [clients, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
 
-  // 🔴 NAYA: Global Financial Calculations (For Top Cards)
+  // 🔴 UPDATED: Total Billed ab Opening Balance ko bhi ginega taaki calculation theek dikhe
   const globalFinances = useMemo(() => {
     let billed = 0;
     let received = 0;
+    let totalOpeningBalance = 0;
     
+    clients.forEach(c => {
+      totalOpeningBalance += Number(c.openingBalance || 0);
+    });
+
     allInvoices.forEach(inv => {
       const invTotal = Number(inv.totalAmountAfterTax || 0);
       let invReceived = Number(inv.amountReceived || 0);
-      
-      // Backward compatibility: If marked Paid but amountReceived is 0, assume full received
       if (inv.paymentStatus === 'Paid' && invReceived === 0) {
         invReceived = invTotal;
       }
-      
       billed += invTotal;
       received += invReceived;
     });
     
-    return { billed, received, due: billed - received };
-  }, [allInvoices]);
+    // Ab Billed = Invoice Amount + Purana Opeing Balance
+    const finalBilled = billed + totalOpeningBalance;
+    const finalDue = finalBilled - received;
 
-  // 🔴 NAYA: Helper to calculate specific client's pending due
+    return { billed: finalBilled, received, due: finalDue };
+  }, [allInvoices, clients]);
+
   const getClientDueAmount = (client) => {
     const clientInvs = allInvoices.filter(inv => 
       (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
@@ -1062,15 +1068,107 @@ const ClientMaster = () => {
       (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
     );
 
-    let totalDue = 0;
+    let invoiceDue = 0;
     clientInvs.forEach(inv => {
       const invTotal = Number(inv.totalAmountAfterTax || 0);
       let invReceived = Number(inv.amountReceived || 0);
       if (inv.paymentStatus === 'Paid' && invReceived === 0) invReceived = invTotal;
-      totalDue += (invTotal - invReceived);
+      invoiceDue += (invTotal - invReceived);
     });
 
+    const openingBalance = Number(client.openingBalance || 0);
+    const totalDue = (invoiceDue > 0 ? invoiceDue : 0) + openingBalance;
+
     return totalDue > 0 ? totalDue : 0;
+  };
+
+  const handleExportExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Client Master');
+
+    // Define columns
+    worksheet.columns = [
+      { header: 'Client ID', key: 'clientId', width: 15 },
+      { header: 'PAN', key: 'pan', width: 15 },
+      { header: 'Name', key: 'name', width: 30 },
+      { header: 'Trade Name', key: 'tradeName', width: 25 },
+      { header: 'Mobile', key: 'mobile', width: 15 },
+      { header: 'Email', key: 'email', width: 25 },
+      { header: 'Client Type', key: 'clientType', width: 20 },
+      { header: 'Constitution', key: 'constitution', width: 20 },
+      { header: 'GSTIN', key: 'gstin', width: 20 },
+      { header: 'Aadhaar (Last 4)', key: 'aadhaar', width: 15 },
+      { header: 'DOB/Incorporation', key: 'dob', width: 15 },
+      { header: 'Father Name', key: 'fatherName', width: 20 },
+      { header: 'Address', key: 'address', width: 30 },
+      { header: 'State', key: 'state', width: 15 },
+      { header: 'PIN Code', key: 'pinCode', width: 15 },
+      { header: 'CIN / LLPIN', key: 'cin_llpin', width: 25 },
+      { header: 'Date of Incorporation', key: 'date_of_incorporation', width: 15 },
+      { header: 'Nature of Business', key: 'nature_of_business', width: 25 },
+      { header: 'Accounting Method', key: 'accounting_method', width: 15 },
+      { header: 'Status', key: 'status', width: 15 },
+      { header: 'Remarks', key: 'remarks', width: 30 },
+      { header: 'Opening Balance (₹)', key: 'openingBalance', width: 18 }, 
+      { header: 'Total Billed (₹)', key: 'totalBilled', width: 15 },
+      { header: 'Total Received (₹)', key: 'totalReceived', width: 15 },
+      { header: 'Pending Dues (₹)', key: 'pendingDues', width: 15 }
+    ];
+
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+
+    filteredClients.forEach(client => {
+      const clientDue = getClientDueAmount(client);
+      
+      const clientInvs = allInvoices.filter(inv => 
+        (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
+        (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
+        (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
+      );
+      
+      let billed = 0;
+      let received = 0;
+      clientInvs.forEach(inv => {
+        const invTotal = Number(inv.totalAmountAfterTax || 0);
+        let invReceived = Number(inv.amountReceived || 0);
+        if (inv.paymentStatus === 'Paid' && invReceived === 0) invReceived = invTotal;
+        billed += invTotal;
+        received += invReceived;
+      });
+
+      worksheet.addRow({
+        clientId: client.clientId || 'Pending',
+        pan: client.pan || '',
+        name: client.name || '',
+        tradeName: client.tradeName || '',
+        mobile: client.mobile || '',
+        email: client.email || '',
+        clientType: client.clientType || 'Individual',
+        constitution: client.constitution || '',
+        gstin: client.gstin || '',
+        aadhaar: client.aadhaar || '',
+        dob: client.dob ? new Date(client.dob).toLocaleDateString('en-IN') : '',
+        fatherName: client.fatherName || '',
+        address: client.address || '',
+        state: client.state || '',
+        pinCode: client.pinCode || '',
+        cin_llpin: client.cin_llpin || '',
+        date_of_incorporation: client.date_of_incorporation ? new Date(client.date_of_incorporation).toLocaleDateString('en-IN') : '',
+        nature_of_business: client.nature_of_business || '',
+        accounting_method: client.accounting_method || '',
+        status: client.status || 'Active',
+        remarks: client.remarks || '',
+        openingBalance: Number(client.openingBalance || 0), 
+        totalBilled: billed,
+        totalReceived: received,
+        pendingDues: clientDue
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `Client_Master_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const handleSave = async (e) => {
@@ -1082,11 +1180,16 @@ const ClientMaster = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       
+      const payload = {
+        ...formData,
+        openingBalance: Number(formData.openingBalance || 0)
+      };
+
       if (editingId) {
-        await axios.put(`${import.meta.env.VITE_API_URL}/client-master/${editingId}`, formData, { headers });
+        await axios.put(`${import.meta.env.VITE_API_URL}/client-master/${editingId}`, payload, { headers });
         toast.success("Client Updated Successfully!");
       } else {
-        await axios.post(`${import.meta.env.VITE_API_URL}/client-master`, formData, { headers });
+        await axios.post(`${import.meta.env.VITE_API_URL}/client-master`, payload, { headers });
         toast.success("New Client Added!");
       }
       
@@ -1108,7 +1211,8 @@ const ClientMaster = () => {
       mobile: client.mobile || '', email: client.email || '', clientType: client.clientType || 'Individual', 
       address: client.address || '', state: client.state || '', pinCode: client.pinCode || '',
       gstin: client.gstin || '', aadhaar: client.aadhaar || '', dob: parseDate(client.dob),
-      fatherName: client.fatherName || '', status: client.status || 'Active', remarks: client.remarks || '',
+      fatherName: client.fatherName || '', status: client.status || 'Active', 
+      remarks: client.remarks || '', openingBalance: client.openingBalance || '', 
       constitution: client.constitution || '', cin_llpin: client.cin_llpin || '',
       date_of_incorporation: parseDate(client.date_of_incorporation), nature_of_business: client.nature_of_business || '',
       registered_office_address: client.registered_office_address || '', books_kept_at: client.books_kept_at || '',
@@ -1129,7 +1233,6 @@ const ClientMaster = () => {
     setIsViewModalOpen(true);
   };
 
-  // 🔴 NAYA: WhatsApp Reminder specifically for Total Pending Due
   const sendDueReminder = (client, dueAmount) => {
     if (!client.mobile) return toast.error("Mobile number is missing for this client!");
     
@@ -1159,10 +1262,24 @@ const ClientMaster = () => {
       : 'bg-rose-50 text-rose-700 border-rose-200';
   };
 
-  // Profile Modal Ledger Logic
   const generateLedger = () => {
     let ledger = [];
     let runningBalance = 0;
+
+    const openingBal = Number(clientToView?.openingBalance || 0);
+    if (openingBal > 0) {
+       runningBalance += openingBal;
+       ledger.push({
+         id: 'opening-bal',
+         date: clientToView.createdAt, 
+         type: 'Opening',
+         particulars: 'Opening Balance Carried Forward',
+         debit: openingBal,
+         credit: 0,
+         balance: runningBalance,
+         status: 'Pending'
+       });
+    }
 
     const clientInvoices = allInvoices.filter(inv => 
       (clientToView?.pan && inv.customer?.pan?.toUpperCase() === clientToView.pan?.toUpperCase()) || 
@@ -1222,12 +1339,16 @@ const ClientMaster = () => {
           </h1>
           <p className="text-sm text-slate-500 mt-1 font-medium">Global central database & unified financial tracking.</p>
         </div>
-        <button onClick={openNewModal} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all">
-          <Plus size={18} strokeWidth={2.5} /> Add New Client
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={handleExportExcel} className="inline-flex items-center gap-2 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 text-sm font-bold px-4 py-2.5 rounded-xl shadow-sm transition-colors">
+            <Download size={18} strokeWidth={2.5} /> Export Excel
+          </button>
+          <button onClick={openNewModal} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all">
+            <Plus size={18} strokeWidth={2.5} /> Add New Client
+          </button>
+        </div>
       </div>
 
-      {/* 🔴 NAYA: ADVANCED FINANCIAL SUMMARY CARDS */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-blue-500">
           <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0"><Building size={18} /></div>
@@ -1335,7 +1456,7 @@ const ClientMaster = () => {
                 <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
               ) : (
                 filteredClients.map((client) => {
-                  const clientDue = getClientDueAmount(client); // Calculate due for this client
+                  const clientDue = getClientDueAmount(client); 
                   
                   return (
                     <tr key={client._id} className={`hover:bg-slate-50/70 transition-colors group ${clientDue > 0 ? 'bg-amber-50/20' : ''}`}>
@@ -1392,7 +1513,7 @@ const ClientMaster = () => {
                             {client.status}
                           </span>
                           
-                          {/* 🔴 PENDING DUE BADGE IN TABLE */}
+                          {/* PENDING DUE BADGE IN TABLE */}
                           {clientDue > 0 ? (
                              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-100 px-2 py-0.5 rounded border border-rose-200">
                                Due: ₹{clientDue.toLocaleString('en-IN')}
@@ -1416,7 +1537,6 @@ const ClientMaster = () => {
                             </button>
                           </div>
                           
-                          {/* 🔴 PAYMENT REMINDER BUTTON */}
                           {clientDue > 0 && (
                              <button 
                                onClick={() => sendDueReminder(client, clientDue)} 
@@ -1442,7 +1562,7 @@ const ClientMaster = () => {
           <div className="bg-slate-50 rounded-3xl w-full max-w-5xl shadow-2xl border border-slate-100 flex flex-col max-h-[95vh] overflow-hidden animate-in fade-in zoom-in-95">
             
             {/* Modal Header */}
-            <div className="relative px-8 pt-6 pb-6 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex flex-col overflow-hidden shrink-0">
+            <div className="relative px-8 pt-6 pb-16 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex flex-col overflow-hidden shrink-0">
               <div className="absolute top-0 right-0 -mt-10 -mr-10 h-40 w-40 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
               
               <div className="flex justify-between items-start z-10 w-full">
@@ -1726,7 +1846,7 @@ const ClientMaster = () => {
                                 </td>
                                 <td className="py-3 px-4">
                                   <div className="flex items-center gap-2">
-                                    <span className={`w-2 h-2 rounded-full ${entry.type === 'Payment' ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+                                    <span className={`w-2 h-2 rounded-full ${entry.type === 'Opening' ? 'bg-amber-500' : entry.type === 'Payment' ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
                                     <span className="font-bold text-slate-800">{entry.particulars}</span>
                                   </div>
                                 </td>
@@ -2027,7 +2147,7 @@ const ClientMaster = () => {
                   </div>
                 </div>
 
-                {/* Status & Remarks */}
+                {/* Status, Opening Balance & Remarks */}
                 <div className="md:col-span-4 mt-2">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
@@ -2037,7 +2157,18 @@ const ClientMaster = () => {
                         <option value="Inactive">Inactive</option>
                       </select>
                     </div>
-                    <div className="md:col-span-3">
+                    {/* 🔴 NEW FIELD: OPENING BALANCE */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Opening Balance (₹)</label>
+                      <input 
+                        type="number" 
+                        placeholder="0" 
+                        value={formData.openingBalance} 
+                        onChange={(e) => setFormData({...formData, openingBalance: e.target.value})} 
+                        className="w-full p-2.5 border border-rose-200 rounded-xl text-sm font-bold text-rose-700 bg-rose-50 focus:ring-2 focus:ring-rose-500/20"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Remarks / Notes</label>
                       <input type="text" placeholder="Any internal notes for this client" value={formData.remarks} onChange={(e) => setFormData({...formData, remarks: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500/20"/>
                     </div>

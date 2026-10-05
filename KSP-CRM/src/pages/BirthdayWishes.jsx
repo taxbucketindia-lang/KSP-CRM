@@ -51,8 +51,23 @@ const BirthdayWishes = () => {
     return age;
   };
 
+  const getNextBirthday = (dobString) => {
+    if (!dobString) return new Date(9999, 11, 31).getTime(); 
+    
+    const dob = new Date(dobString);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let nextBday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+    
+    if (nextBday < today) {
+      nextBday.setFullYear(today.getFullYear() + 1);
+    }
+    return nextBday.getTime();
+  };
+
   const filteredClients = useMemo(() => {
-    return data.clientsList.filter(client => {
+    const filtered = data.clientsList.filter(client => {
       const matchesSearch = client.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             client.clientId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             client.mobile?.includes(searchQuery);
@@ -61,10 +76,15 @@ const BirthdayWishes = () => {
       
       return matchesSearch && matchesStatus;
     });
+
+    return filtered.sort((a, b) => {
+      const dateA = getNextBirthday(a.dob);
+      const dateB = getNextBirthday(b.dob);
+      return dateA - dateB;
+    });
   }, [data.clientsList, searchQuery, statusFilter]);
 
   const openSendModal = (client) => {
-    // Default Template from PDF Requirement
     const defaultMsg = `Happy Birthday, ${client.name}!\n\nWishing you a very happy birthday and a year filled with happiness, good health and success.\n\nThank you for being a valued client of TaxBucket. We truly appreciate your trust and association with us.\n\nWarm Regards,\nTeam TaxBucket\nTaxBucket.in - Bridging the Gap.`;
     
     setSendModal({ 
@@ -77,20 +97,38 @@ const BirthdayWishes = () => {
 
   const handleManualSend = async (e) => {
     e.preventDefault();
+    
+    const clientPhone = sendModal.client.mobile;
+    const clientEmail = sendModal.client.email;
+    const messageText = sendModal.message;
+
+    if (sendModal.channel === 'WhatsApp') {
+      if (!clientPhone) return toast.error("Mobile number is missing for this client!");
+      const encodedText = encodeURIComponent(messageText);
+      const waLink = `https://wa.me/91${clientPhone.replace(/\D/g, '')}?text=${encodedText}`;
+      window.open(waLink, '_blank');
+    } else if (sendModal.channel === 'Email') {
+      if (!clientEmail) return toast.error("Email ID is missing for this client!");
+      const encodedSubject = encodeURIComponent(`Happy Birthday ${sendModal.client.name}! 🎉`);
+      const encodedBody = encodeURIComponent(messageText);
+      const mailtoLink = `mailto:${clientEmail}?subject=${encodedSubject}&body=${encodedBody}`;
+      window.location.href = mailtoLink;
+    }
+
     setSending(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       await axios.post(`${import.meta.env.VITE_API_URL}/birthdays/send-manual`, {
         clientId: sendModal.client._id,
         channel: sendModal.channel,
-        message: sendModal.message
+        message: messageText
       }, { headers });
       
-      toast.success(`${sendModal.channel} Wish Sent Successfully! 🎉`);
+      toast.success(`${sendModal.channel} Wish Action Recorded! 🎉`);
       setSendModal({ open: false, client: null, message: '', channel: 'WhatsApp' });
-      fetchBirthdayData(); // Refresh list to update status
+      fetchBirthdayData(); 
     } catch (error) {
-      toast.error(error.response?.data?.message || "Failed to send wish");
+      toast.error(error.response?.data?.message || "Failed to save log in database");
     } finally {
       setSending(false);
     }
@@ -129,7 +167,7 @@ const BirthdayWishes = () => {
         </button>
       </div>
 
-      {/* 🔴 7 SUMMARY CARDS (As per PDF) */}
+      {/* SUMMARY CARDS */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         <div className="bg-gradient-to-br from-pink-500 to-rose-500 p-4 rounded-2xl text-white shadow-md relative overflow-hidden flex flex-col justify-between h-24">
           <Cake className="absolute top-2 right-2 opacity-20" size={40}/>
@@ -148,10 +186,13 @@ const BirthdayWishes = () => {
           <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Wish Sent</p>
           <div className="flex items-center gap-2"><Send className="text-emerald-500" size={20}/><h3 className="text-2xl font-black text-emerald-700">{stats.wishSent || 0}</h3></div>
         </div>
+        
+        {/* 🔴 NAYA HACK: PENDING CARD KABHI MINUS MEIN NA JAYE */}
         <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl shadow-sm flex flex-col justify-between h-24">
           <p className="text-[9px] font-bold uppercase tracking-wider text-amber-600">Pending</p>
-          <div className="flex items-center gap-2"><Clock className="text-amber-500" size={20}/><h3 className="text-2xl font-black text-amber-700">{stats.pending || 0}</h3></div>
+          <div className="flex items-center gap-2"><Clock className="text-amber-500" size={20}/><h3 className="text-2xl font-black text-amber-700">{Math.max(0, stats.pending || 0)}</h3></div>
         </div>
+        
         <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl shadow-sm flex flex-col justify-between h-24">
           <p className="text-[9px] font-bold uppercase tracking-wider text-rose-600">Failed / Error</p>
           <div className="flex items-center gap-2"><AlertTriangle className="text-rose-500" size={20}/><h3 className="text-2xl font-black text-rose-700">{stats.failed || 0}</h3></div>
@@ -196,9 +237,16 @@ const BirthdayWishes = () => {
                 filteredClients.map((client) => {
                   const age = calculateAge(client.dob);
                   const isToday = client.birthdayStatus === 'Today';
+
+                  // 🔴 NAYA LOGIC: Check agar client ko aaj message bheja gaya hai
+                  const clientLogs = data.logs.filter(l => l.client === client._id || l.client?._id === client._id);
+                  const sentToday = clientLogs.some(log => 
+                    new Date(log.sentAt).toDateString() === new Date().toDateString() && 
+                    (log.status === 'Sent' || log.status === 'Delivered')
+                  );
                   
                   return (
-                    <tr key={client._id} className={`hover:bg-slate-50/50 transition-colors ${isToday ? 'bg-pink-50/30' : ''}`}>
+                    <tr key={client._id} className={`transition-colors ${isToday ? 'bg-pink-50/70 border-l-4 border-l-pink-500 hover:bg-pink-100/60' : 'hover:bg-slate-50/50 border-l-4 border-transparent'}`}>
                       <td className="py-4 px-5">
                         <div className="flex flex-col">
                           <span className="font-bold text-slate-800">{client.name}</span>
@@ -209,11 +257,11 @@ const BirthdayWishes = () => {
                       <td className="py-4 px-5">
                         {client.dob ? (
                           <>
-                            <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                            <span className={`font-bold flex items-center gap-1.5 ${isToday ? 'text-pink-600' : 'text-slate-700'}`}>
                               <CalendarDays size={14} className={isToday ? 'text-pink-500' : 'text-slate-400'}/>
                               {new Date(client.dob).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'})}
                             </span>
-                            <span className="text-[11px] text-slate-500 mt-1 block">Turns {age} Years</span>
+                            <span className={`text-[11px] mt-1 block ${isToday ? 'text-pink-500 font-bold' : 'text-slate-500'}`}>Turns {age} Years</span>
                           </>
                         ) : (
                           <span className="text-xs text-slate-400 italic">Not Added</span>
@@ -239,14 +287,19 @@ const BirthdayWishes = () => {
                           <button onClick={() => openHistoryModal(client)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-200" title="View History">
                             <History size={16} strokeWidth={2.5}/>
                           </button>
-                          <button 
-                            onClick={() => openSendModal(client)} 
-                            disabled={!client.consent}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all border shadow-sm ${!client.consent ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : 'text-pink-700 bg-pink-50 hover:bg-pink-600 hover:text-white border-pink-200'}`} 
-                            title="Send Wish Manually"
-                          >
-                            <Send size={13} strokeWidth={2.5}/> Send Wish
-                          </button>
+                          
+                          {/* 🔴 NAYA SMART BUTTON LOGIC: Sent hone ke baad GREEN ho jayega */}
+                          {isToday && (
+                            <button 
+                              onClick={() => openSendModal(client)} 
+                              disabled={!client.consent}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all border shadow-sm ${!client.consent ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : sentToday ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-600 hover:text-white border-emerald-200' : 'text-pink-700 bg-pink-50 hover:bg-pink-600 hover:text-white border-pink-200'}`} 
+                              title={sentToday ? "Send Again (Already Sent)" : "Send Wish Manually"}
+                            >
+                              {sentToday ? <CheckCircle2 size={13} strokeWidth={2.5}/> : <Send size={13} strokeWidth={2.5}/>} 
+                              {sentToday ? 'Wish Sent' : 'Send Wish'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -258,7 +311,7 @@ const BirthdayWishes = () => {
         </div>
       </div>
 
-      {/* 🔴 MODAL: SEND WISH MANUAL */}
+      {/* MODAL: SEND WISH MANUAL (UPDATED WITH TARGET INFO) */}
       {sendModal.open && sendModal.client && (
         <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
@@ -294,6 +347,22 @@ const BirthdayWishes = () => {
                 </div>
               </div>
 
+              <div className={`p-3 rounded-xl border flex items-center gap-2 ${sendModal.channel === 'WhatsApp' ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
+                 {sendModal.channel === 'WhatsApp' ? (
+                   <>
+                     <Phone size={14} className="text-emerald-600"/>
+                     <span className="text-xs font-bold text-slate-600">Sending to: </span>
+                     <span className="text-sm font-black text-emerald-800 tracking-wide">{sendModal.client.mobile || <span className="text-rose-500 italic text-xs">No Number Found</span>}</span>
+                   </>
+                 ) : (
+                   <>
+                     <Mail size={14} className="text-blue-600"/>
+                     <span className="text-xs font-bold text-slate-600">Sending to: </span>
+                     <span className="text-sm font-black text-blue-800 tracking-wide">{sendModal.client.email || <span className="text-rose-500 italic text-xs">No Email Found</span>}</span>
+                   </>
+                 )}
+              </div>
+
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Message Preview (Editable)</label>
                 <textarea rows="7" required value={sendModal.message} onChange={(e) => setSendModal({...sendModal, message: e.target.value})} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-4 focus:ring-2 focus:ring-pink-500/20 outline-none resize-none bg-slate-50 leading-relaxed shadow-inner" />
@@ -310,7 +379,7 @@ const BirthdayWishes = () => {
         </div>
       )}
 
-      {/* 🔴 MODAL: VIEW HISTORY LOGS */}
+      {/* MODAL: VIEW HISTORY LOGS */}
       {historyModal.open && historyModal.client && (
         <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">

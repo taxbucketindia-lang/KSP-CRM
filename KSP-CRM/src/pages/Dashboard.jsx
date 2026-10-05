@@ -11,7 +11,6 @@ import {
   LogIn, LogOut, MapPin
 } from 'lucide-react';
 
-// 🔴 NAYA: 12-Hour Format Helper Function
 const formatTo12Hour = (timeStr) => {
   if (!timeStr) return '';
   const [h, m] = timeStr.split(':');
@@ -28,7 +27,7 @@ const Dashboard = () => {
   
   const [data, setData] = useState({ 
     leads: [], clients: [], tasks: [], employees: [], attendance: [],
-    itr: [], gst: [], roc: [], audit: [], invoices: []
+    itr: [], gst: [], roc: [], audit: [], invoices: [], clientMaster: [] // 🔴 NAYA: clientMaster array added
   });
   
   const [loading, setLoading] = useState(true);
@@ -47,7 +46,8 @@ const Dashboard = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       
-      const [leadsRes, clientsRes, tasksRes, empRes, attRes, itrRes, gstRes, rocRes, auditRes, invoicesRes] = await Promise.all([
+      // 🔴 NAYA: Client Master API Call Added to Fetch Array
+      const [leadsRes, clientsRes, tasksRes, empRes, attRes, itrRes, gstRes, rocRes, auditRes, invoicesRes, clientMasterRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/tasks`, { headers }).catch(() => ({ data: [] })),
@@ -57,7 +57,8 @@ const Dashboard = () => {
         axios.get(`${import.meta.env.VITE_API_URL}/gst`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/roc`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/audit`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: [] }))
+        axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: [] }))
       ]);
 
       setData({
@@ -70,7 +71,8 @@ const Dashboard = () => {
         gst: gstRes.data || [],
         roc: rocRes.data || [],
         audit: auditRes.data || [],
-        invoices: Array.isArray(invoicesRes.data?.data) ? invoicesRes.data.data : (invoicesRes.data || [])
+        invoices: Array.isArray(invoicesRes.data?.data) ? invoicesRes.data.data : (invoicesRes.data || []),
+        clientMaster: Array.isArray(clientMasterRes.data?.data) ? clientMasterRes.data.data : (clientMasterRes.data || [])
       });
       setLastUpdated(new Date());
     } catch (error) {
@@ -92,9 +94,6 @@ const Dashboard = () => {
     // eslint-disable-next-line
   }, [user.token]);
 
-  // ========================================================
-  // QUICK PUNCH-IN / PUNCH-OUT LOGIC (GPS BASED)
-  // ========================================================
   const localToday = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
 
   const myEmpRecord = useMemo(() => {
@@ -208,7 +207,7 @@ const Dashboard = () => {
   }, [data.leads, data.clients]);
 
   const stats = useMemo(() => {
-    const { leads, clients, tasks, employees, attendance, itr, gst, roc, audit, invoices } = data;
+    const { leads, clients, tasks, employees, attendance, itr, gst, roc, audit, invoices, clientMaster } = data;
     
     let totalRevenue = 0;
     let totalReceived = 0;
@@ -217,6 +216,27 @@ const Dashboard = () => {
     
     const defaultersMap = new Map();
 
+    // 🔴 1. ADD CLIENT MASTER OPENING BALANCES FIRST
+    if (Array.isArray(clientMaster)) {
+      clientMaster.forEach(client => {
+        const openingBal = Number(client.openingBalance || 0);
+        if (openingBal > 0) {
+          totalRevenue += openingBal;
+          totalPending += openingBal;
+          
+          const clientName = client.name || 'Unknown Client';
+          defaultersMap.set(clientName, {
+            name: clientName,
+            mobile: client.mobile || '',
+            due: openingBal,
+            id: client._id,
+            source: 'Opening Balance'
+          });
+        }
+      });
+    }
+
+    // 🔴 2. THEN ADD INVOICES DATA
     if (Array.isArray(invoices)) {
       invoices.forEach(inv => {
         const invTotal = Number(inv.totalAmountAfterTax || 0);
@@ -240,6 +260,10 @@ const Dashboard = () => {
           
           if (defaultersMap.has(clientName)) {
              defaultersMap.get(clientName).due += due;
+             // Dono ka pending hai toh tag update kar do
+             if (!defaultersMap.get(clientName).source.includes('Invoice')) {
+               defaultersMap.get(clientName).source += ' + Invoice';
+             }
           } else {
              defaultersMap.set(clientName, { name: clientName, mobile, due, id: inv._id, source: 'Invoice' });
           }
@@ -380,7 +404,7 @@ const Dashboard = () => {
           </p>
         </div>
 
-        {/* 🔴 RIGHT SECTION (ATTENDANCE MOVED TO TOP RIGHT) */}
+        {/* RIGHT SECTION */}
         <div className="relative z-10 flex flex-col items-start md:items-end gap-3">
           
           {!isAdmin && (
@@ -486,7 +510,7 @@ const Dashboard = () => {
                   <h3 className="text-3xl font-black text-blue-600 flex items-center"><IndianRupee size={28} className="mr-0.5" />{stats.totalRevenue.toLocaleString('en-IN')}</h3>
                 </div>
                 <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-lg"><Receipt size={14} /> From All Invoices</div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-lg"><Receipt size={14} /> From All Invoices & O.B.</div>
                   <div className="h-10 w-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center"><Wallet size={20} /></div>
                 </div>
               </div>
@@ -608,7 +632,10 @@ const Dashboard = () => {
                      <tbody className="divide-y divide-slate-50">
                          {stats.topDefaulters.map((defaulter, idx) => (
                              <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                 <td className="py-3 font-bold text-slate-800">{defaulter.name} <span className="ml-2 text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{defaulter.source}</span></td>
+                                 <td className="py-3 font-bold text-slate-800">
+                                   {defaulter.name} 
+                                   <span className="ml-2 text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{defaulter.source}</span>
+                                 </td>
                                  <td className="py-3 text-slate-600">{defaulter.mobile || 'N/A'}</td>
                                  <td className="py-3 font-black text-rose-600 text-right">₹{defaulter.due.toLocaleString('en-IN')}</td>
                                  <td className="py-3 text-center">
