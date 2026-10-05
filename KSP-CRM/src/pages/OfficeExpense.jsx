@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { IndianRupee, Plus, Receipt, Calendar, User, FileText, Loader2, Filter } from 'lucide-react';
+import { IndianRupee, Plus, Receipt, Calendar, User, FileText, Loader2, Filter, Edit, Trash2 } from 'lucide-react';
 import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import { AuthContext } from '../context/AuthContext'; 
 
 const OfficeExpense = () => {
   const { user } = useContext(AuthContext);
+
+  // 🔴 NAYA: Check if user is Admin
+  const isAdmin = user?.role === 'Admin';
+  const [editingId, setEditingId] = useState(null); // Track which expense is being edited
 
   // Form State
   const [formData, setFormData] = useState({
@@ -20,7 +24,6 @@ const OfficeExpense = () => {
   const [loading, setLoading] = useState(false); 
   const [fetchLoading, setFetchLoading] = useState(true); 
 
-  // 🔴 NAYA: Default filter abhi ka mahina aur saal uthayega
   const currentMonth = String(new Date().getMonth() + 1);
   const currentYear = String(new Date().getFullYear());
 
@@ -46,12 +49,11 @@ const OfficeExpense = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle Input Changes
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // 2. Submit New Expense to Backend
+  // 2. 🔴 NAYA: Create AND Update Logic
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.amount || !formData.nature || !formData.paidBy) {
@@ -66,15 +68,23 @@ const OfficeExpense = () => {
         amount: Number(formData.amount) 
       };
 
-      const res = await axios.post(`${import.meta.env.VITE_API_URL}/expenses`, payload, { headers });
+      if (editingId) {
+        // 🔴 UPDATE EXISTING EXPENSE (Admin Only)
+        const res = await axios.put(`${import.meta.env.VITE_API_URL}/expenses/${editingId}`, payload, { headers });
+        const updatedExpense = res.data.data || res.data;
+        setExpenses(prev => prev.map(exp => exp._id === editingId ? updatedExpense : exp));
+        toast.success("Expense Updated Successfully!");
+      } else {
+        // 🔴 ADD NEW EXPENSE
+        const res = await axios.post(`${import.meta.env.VITE_API_URL}/expenses`, payload, { headers });
+        const newExpense = res.data.data || res.data; 
+        setExpenses((prev) => [newExpense, ...prev]); 
+        toast.success("Office Expense Recorded!");
+      }
       
-      const newExpense = res.data.data || res.data; 
-      setExpenses((prev) => [newExpense, ...prev]); 
-
-      toast.success("Office Expense Recorded!");
-      
+      setEditingId(null);
       setFormData({
-        date: formData.date,
+        date: new Date().toISOString().split('T')[0],
         nature: '',
         paidBy: '',
         amount: '',
@@ -82,20 +92,52 @@ const OfficeExpense = () => {
       });
     } catch (error) {
       console.error("Error saving expense:", error);
-      toast.error(error.response?.data?.message || "Failed to record expense");
+      toast.error(error.response?.data?.message || "Failed to save expense");
     } finally {
       setLoading(false);
     }
   };
 
-  // Unique Years for Filter (Current year hamesha include karega)
+  // 🔴 NAYA: Load data into form for Editing
+  const handleEditClick = (exp) => {
+    setEditingId(exp._id);
+    setFormData({
+      date: exp.date ? new Date(exp.date).toISOString().split('T')[0] : '',
+      nature: exp.nature,
+      paidBy: exp.paidBy,
+      amount: exp.amount,
+      remarks: exp.remarks || ''
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' }); // Form ke paas scroll karega
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setFormData({
+      date: new Date().toISOString().split('T')[0],
+      nature: '', paidBy: '', amount: '', remarks: ''
+    });
+  };
+
+  // 🔴 NAYA: Delete Logic
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to permanently delete this expense?")) return;
+    try {
+      const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+      await axios.delete(`${import.meta.env.VITE_API_URL}/expenses/${id}`, { headers });
+      setExpenses(prev => prev.filter(exp => exp._id !== id));
+      toast.success("Expense deleted successfully.");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete expense");
+    }
+  };
+
   const uniqueYears = useMemo(() => {
     const years = expenses.map(e => new Date(e.date).getFullYear());
-    if (!years.includes(Number(currentYear))) years.push(Number(currentYear)); // Ensure current year is in list
+    if (!years.includes(Number(currentYear))) years.push(Number(currentYear));
     return [...new Set(years)].sort((a,b) => b - a);
   }, [expenses, currentYear]);
 
-  // Filter Logic (Month & Year ke hisaab se)
   const filteredExpenses = useMemo(() => {
     return expenses.filter(exp => {
       const expDate = new Date(exp.date);
@@ -105,7 +147,6 @@ const OfficeExpense = () => {
     });
   }, [expenses, monthFilter, yearFilter]);
 
-  // Total amount calculate karna (Sirf Filtered Data ka)
   const totalExpenses = filteredExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
   return (
@@ -121,7 +162,7 @@ const OfficeExpense = () => {
           <p className="text-sm text-slate-500 mt-1">Manage and track daily office expenditures</p>
         </div>
         
-        {/* Total Expense Box (Updates Dynamically) */}
+        {/* Total Expense Box */}
         <div className="bg-blue-50 border border-blue-200 px-5 py-2.5 rounded-xl text-right shadow-sm">
           <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">
             {monthFilter !== 'All' || yearFilter !== 'All' ? 'Filtered Total' : 'Total Expenses'}
@@ -136,7 +177,17 @@ const OfficeExpense = () => {
         
         {/* ADD EXPENSE FORM */}
         <div className="lg:col-span-1 bg-white p-6 rounded-3xl border border-slate-200 shadow-lg self-start sticky top-6">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Add New Expense</h2>
+          <div className="flex justify-between items-center mb-4 border-b pb-2">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+              {editingId ? <Edit size={18} className="text-amber-500"/> : <Plus size={18} className="text-blue-500"/>} 
+              {editingId ? "Edit Expense" : "Add New Expense"}
+            </h2>
+            {editingId && (
+              <button onClick={cancelEdit} className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-1 rounded hover:bg-slate-200">
+                Cancel Edit
+              </button>
+            )}
+          </div>
           
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -216,10 +267,10 @@ const OfficeExpense = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center gap-2"
+              className={`w-full py-3 mt-2 disabled:opacity-70 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center gap-2 ${editingId ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'}`}
             >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />} 
-              {loading ? 'Saving...' : 'Record Expense'}
+              {loading ? <Loader2 size={18} className="animate-spin" /> : editingId ? <Edit size={18} /> : <Plus size={18} />} 
+              {loading ? 'Saving...' : editingId ? 'Update Expense' : 'Record Expense'}
             </button>
           </form>
         </div>
@@ -260,19 +311,21 @@ const OfficeExpense = () => {
                   <th className="px-5 py-4">Paid By</th>
                   <th className="px-5 py-4">Remarks</th>
                   <th className="px-5 py-4 text-right">Amount</th>
+                  {/* 🔴 NAYA: ACTION COLUMN ONLY FOR ADMIN */}
+                  {isAdmin && <th className="px-5 py-4 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {fetchLoading ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center text-slate-500 font-medium">
+                    <td colSpan={isAdmin ? "6" : "5"} className="px-6 py-12 text-center text-slate-500 font-medium">
                       <Loader2 size={24} className="animate-spin mx-auto mb-2 text-blue-500" />
                       Loading expenses...
                     </td>
                   </tr>
                 ) : filteredExpenses.length > 0 ? (
                   filteredExpenses.map((item) => (
-                    <tr key={item._id || item.id} className="hover:bg-slate-50 transition-colors">
+                    <tr key={item._id || item.id} className={`transition-colors ${editingId === item._id ? 'bg-amber-50/50' : 'hover:bg-slate-50'}`}>
                       <td className="px-5 py-4 whitespace-nowrap text-slate-600 font-bold text-xs">
                         {new Date(item.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
@@ -288,11 +341,33 @@ const OfficeExpense = () => {
                       <td className="px-5 py-4 text-right font-black text-rose-600 whitespace-nowrap text-sm">
                         - ₹{Number(item.amount).toLocaleString('en-IN')}
                       </td>
+                      
+                      {/* 🔴 NAYA: ADMIN ACTION BUTTONS */}
+                      {isAdmin && (
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button 
+                              onClick={() => handleEditClick(item)} 
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-200" 
+                              title="Edit"
+                            >
+                              <Edit size={16}/>
+                            </button>
+                            <button 
+                              onClick={() => handleDelete(item._id)} 
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200" 
+                              title="Delete"
+                            >
+                              <Trash2 size={16}/>
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center text-slate-400 font-medium bg-slate-50/50">
+                    <td colSpan={isAdmin ? "6" : "5"} className="px-6 py-12 text-center text-slate-400 font-medium bg-slate-50/50">
                       No expenses found for the selected period.
                     </td>
                   </tr>

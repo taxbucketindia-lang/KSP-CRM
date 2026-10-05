@@ -98,11 +98,24 @@ export const deleteAuditor = async (req, res) => {
 // 📄 AUDIT ENGAGEMENT (A1) CONTROLLERS
 // ==========================================
 
+// export const getAllAudits = async (req, res) => {
+//   try {
+//     const audits = await AuditEngagement.find({ is_active: true })
+//       // 🔴 Client ki details populate karna zaroori hai table ke liye
+//       .populate('client_id', 'clientId name pan constitution cin_llpin gstin')
+//       .populate('assigned_executive_id', 'name role')
+//       .sort({ createdAt: -1 });
+      
+//     res.status(200).json(audits);
+//   } catch (error) {
+//     res.status(500).json({ message: error.message });
+//   }
+// };
 export const getAllAudits = async (req, res) => {
   try {
     const audits = await AuditEngagement.find({ is_active: true })
-      // 🔴 Client ki details populate karna zaroori hai table ke liye
-      .populate('client_id', 'clientId name pan constitution cin_llpin gstin')
+      // 👇 Yahan maine aapke purane fields ke sath naye fields bhi add kar diye hain
+      .populate('client_id', 'clientId name pan constitution cin_llpin gstin date_of_incorporation nature_of_business registered_office_address books_kept_at accounting_method') 
       .populate('assigned_executive_id', 'name role')
       .sort({ createdAt: -1 });
       

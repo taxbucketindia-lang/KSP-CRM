@@ -1337,8 +1337,8 @@
 
 
 
-
-import React, { useState, useEffect, useContext, useMemo } from 'react';
+import { useState, useEffect, useContext, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -1392,10 +1392,10 @@ const WorkManagement = () => {
   };
   const [formData, setFormData] = useState(initialForm);
 
+  // 🔴 FIX: Removed outputFile from state
   const [updateForm, setUpdateForm] = useState({
     status: '', pendingReason: '', remarks: '', 
-    followUpDate: '', followUpMode: 'Call',
-    outputFile: null
+    followUpDate: '', followUpMode: 'Call'
   });
 
   const [eodForm, setEodForm] = useState({
@@ -1492,7 +1492,6 @@ const WorkManagement = () => {
     });
   }, [tasks, searchQuery, statusFilter, priorityFilter, employeeFilter, clients]);
 
-  // Dashboard Cards ke liye Stats
   const stats = useMemo(() => {
     return {
       total: filteredTasks.length,
@@ -1503,7 +1502,6 @@ const WorkManagement = () => {
     };
   }, [filteredTasks]);
 
-  // 🔴 BUG FIX 2: Original employee stats for EOD Report (Ignores search filters)
   const employeeEodStats = useMemo(() => {
     const myTasks = isAdmin ? tasks : tasks.filter(t => t.assignedTo?._id === user._id || t.assignedTo === user._id);
     return {
@@ -1571,32 +1569,26 @@ const WorkManagement = () => {
     }
   };
 
-  // 🔴 BUG FIX 1: Fixed File Upload Logic for Task Updates
+  // 🔴 FIX: Changed to Standard JSON Payload (No Multipart FormData)
   const handleUpdateStatus = async (e) => {
     e.preventDefault();
     try {
-      // Changed to multipart/form-data for file uploads
-      const headers = { 
-        Authorization: `Bearer ${user.token}`,
-        'Content-Type': 'multipart/form-data' 
+      const headers = { Authorization: `Bearer ${user.token}` };
+      
+      // Sending standard JSON object
+      const payload = {
+        currentStatus: updateForm.status,
+        pendingReason: updateForm.pendingReason,
+        remarks: updateForm.remarks,
+        nextFollowUpDate: updateForm.followUpDate,
+        followUpMode: updateForm.followUpMode
       };
-      
-      const formDataToSend = new FormData();
-      formDataToSend.append('currentStatus', updateForm.status);
-      formDataToSend.append('pendingReason', updateForm.pendingReason);
-      formDataToSend.append('remarks', updateForm.remarks);
-      formDataToSend.append('nextFollowUpDate', updateForm.followUpDate);
-      formDataToSend.append('followUpMode', updateForm.followUpMode);
-      
-      if (updateForm.outputFile) {
-        formDataToSend.append('outputFile', updateForm.outputFile);
-      }
 
-      await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToUpdate._id}/status`, formDataToSend, { headers });
+      await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToUpdate._id}/status`, payload, { headers });
       
       toast.success(`Task updated!`);
       setIsUpdateModalOpen(false);
-      setUpdateForm({ status: '', pendingReason: '', remarks: '', followUpDate: '', followUpMode: 'Call', outputFile: null });
+      setUpdateForm({ status: '', pendingReason: '', remarks: '', followUpDate: '', followUpMode: 'Call' });
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to update status");
@@ -1630,7 +1622,6 @@ const WorkManagement = () => {
     }
   };
 
-  // 🔴 BUG FIX 2 APPLIED HERE: Using employeeEodStats instead of global stats
   const handleEodSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -1667,8 +1658,7 @@ const WorkManagement = () => {
       pendingReason: task.pendingReason || '',
       remarks: '',
       followUpDate: task.nextFollowUpDate ? new Date(task.nextFollowUpDate).toISOString().split('T')[0] : '',
-      followUpMode: task.followUpMode || 'Call',
-      outputFile: null
+      followUpMode: task.followUpMode || 'Call'
     });
     setIsUpdateModalOpen(true);
   };
@@ -2277,7 +2267,7 @@ const WorkManagement = () => {
         </div>
       )}
 
-      {/* 🔴 MODAL: UPDATE TASK (Employee View & Basic Status Update) */}
+      {/* 🔴 MODAL: UPDATE TASK (Fixed Payload) */}
       {isUpdateModalOpen && taskToUpdate && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
@@ -2318,7 +2308,6 @@ const WorkManagement = () => {
                     </>
                   ) : (
                     <>
-                      {/* 🔴 NEW OPTION "Started" FOR EMPLOYEES */}
                       <option value="Not Started">Not Started</option>
                       <option value="Started">🟢 Started</option>
                       <option value="In Progress">▶️ In Progress</option>
@@ -2371,18 +2360,6 @@ const WorkManagement = () => {
                       </select>
                     </div>
                   </div>
-                </div>
-              )}
-
-              {/* 🔴 Output Upload Input Fixed with onChange */}
-              {!isAdmin && (updateForm.status === 'Completed' || updateForm.status === 'Under Review') && (
-                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 animate-in slide-in-from-top-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800 mb-1.5 flex items-center gap-1"><UploadCloud size={14}/> Upload Final Output/Acknowledgement</label>
-                  <input 
-                    type="file" 
-                    onChange={(e) => setUpdateForm({...updateForm, outputFile: e.target.files[0]})}
-                    className="w-full text-sm font-medium border border-emerald-200 rounded-lg p-2.5 bg-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-emerald-100 file:text-emerald-700 hover:file:bg-emerald-200" 
-                  />
                 </div>
               )}
 

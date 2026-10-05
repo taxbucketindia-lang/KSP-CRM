@@ -5,7 +5,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { 
   Briefcase, Search, Plus, X, FileText, CheckCircle2, AlertCircle, 
   RefreshCw, Eye, Building2, Calendar, FileDigit, UploadCloud, Users, 
-  Settings, CheckSquare, Pencil, Trash2, Loader2, Link
+  Settings, CheckSquare, Pencil, Trash2, Loader2, Link, MessageSquare 
 } from 'lucide-react';
 
 const AuditWorkspace = () => {
@@ -37,6 +37,9 @@ const AuditWorkspace = () => {
   
   const [isEditEngagementModalOpen, setIsEditEngagementModalOpen] = useState(false);
   const [isEditClientModalOpen, setIsEditClientModalOpen] = useState(false); 
+
+  // 🔴 NAYA STATE: Quick Remarks History Modal ke liye
+  const [quickRemarksModal, setQuickRemarksModal] = useState({ open: false, audit: null, newRemark: '' });
 
   const [editingIds, setEditingIds] = useState({ auditor: null, udin: null, filing: null, checklist: null });
 
@@ -71,6 +74,8 @@ const AuditWorkspace = () => {
   });
 
   const [editEngagementForm, setEditEngagementForm] = useState({
+    audit_type: '', financial_year: '', assessment_year: '', books_period_from: '', books_period_to: '',
+    applicability_reason: '', due_date: '', engagement_status: '',
     turnover_gross_receipts: '', audit_fee: '', fee_status: 'Pending',
     engagement_letter_date: '', data_received_date: '', audit_start_date: '', 
     draft_report_date: '', report_signing_date: '', remarks: ''
@@ -127,6 +132,48 @@ const AuditWorkspace = () => {
     setActiveTab('engagement');
   };
 
+  // 🔴 NAYA FUNCTION: Quick Remarks History Setup
+  const openQuickRemarks = (audit) => {
+    setQuickRemarksModal({
+      open: true,
+      audit: audit,
+      newRemark: '' // Khaali box naye remark ke liye
+    });
+  };
+
+  const handleSaveQuickRemarks = async (e) => {
+    e.preventDefault();
+    if (!quickRemarksModal.newRemark.trim()) return;
+
+    // Format: 05-Oct-2026 | 12:15 PM
+    const timestamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const empName = user.name || 'User';
+    const empRole = user.role === 'Admin' ? 'Admin' : 'Staff';
+    
+    // Naye remark ka structure
+    const formattedNewRemark = `➤ ${empName} (${empRole}) - [${timestamp}]\n${quickRemarksModal.newRemark.trim()}`;
+    
+    const existingRemarks = quickRemarksModal.audit.remarks || '';
+    
+    // Naye remark ko existing history ke upar append karna hai
+    const finalRemarksString = existingRemarks 
+      ? `${formattedNewRemark}\n\n-------------------------\n\n${existingRemarks}`
+      : formattedNewRemark;
+
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.put(`${import.meta.env.VITE_API_URL}/audit/engagements/${quickRemarksModal.audit._id}`, 
+        { remarks: finalRemarksString }, 
+        { headers }
+      );
+      toast.success("Remark added to history successfully!");
+      setQuickRemarksModal({ open: false, audit: null, newRemark: '' });
+      fetchInitialData(); 
+    } catch (error) {
+      toast.error("Failed to update remarks history");
+    }
+  };
+
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setAuditForm(prev => ({ ...prev, pan: val, client_id: '' })); 
@@ -147,9 +194,6 @@ const AuditWorkspace = () => {
     setShowSuggestions(false); toast.success("✅ Client Data Auto-Filled!");
   };
 
-  // ==========================================
-  // HANDLERS (Create & Edit)
-  // ==========================================
   const formatDateForInput = (dateStr) => dateStr ? new Date(dateStr).toISOString().split('T')[0] : '';
 
   const handleCreateAudit = async (e) => {
@@ -182,32 +226,63 @@ const AuditWorkspace = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       const payload = { ...editEngagementForm };
-      if (payload.turnover_gross_receipts === '') delete payload.turnover_gross_receipts;
-      if (payload.audit_fee === '') delete payload.audit_fee;
+      
+      Object.keys(payload).forEach(key => {
+        if (payload[key] === '') payload[key] = null;
+      });
 
       const res = await axios.put(`${import.meta.env.VITE_API_URL}/audit/engagements/${viewingAudit._id}`, payload, { headers });
-      toast.success("Engagement details updated!");
-      setViewingAudit(res.data); 
+      toast.success("Engagement details updated permanently!");
+      
+      const updatedData = res.data?.data || res.data;
+      const mergedAudit = { ...viewingAudit, ...updatedData, client_id: viewingAudit.client_id };
+      
+      setViewingAudit(mergedAudit); 
       setIsEditEngagementModalOpen(false);
       fetchInitialData();
-    } catch (error) { toast.error("Failed to update engagement details"); }
+    } catch (error) { 
+      console.error(error);
+      toast.error("Failed to update engagement details"); 
+    }
   };
 
   const handleUpdateClient = async (e) => {
     e.preventDefault();
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.put(`${import.meta.env.VITE_API_URL}/audit/clients/${viewingAudit.client_id._id}`, editClientForm, { headers });
-      toast.success("Client details updated in Master!");
-      const updatedAudit = { ...viewingAudit, client_id: res.data };
+      
+      const payload = { ...editClientForm };
+      
+      Object.keys(payload).forEach(key => {
+        if (payload[key] === '') payload[key] = null;
+      });
+
+      const res = await axios.put(`${import.meta.env.VITE_API_URL}/audit/clients/${viewingAudit.client_id._id}`, payload, { headers });
+      
+      toast.success("Client details successfully saved in Database!");
+      
+      const updatedClientData = res.data?.data || res.data || payload;
+      const updatedAudit = { ...viewingAudit, client_id: { ...viewingAudit.client_id, ...updatedClientData } };
+      
       setViewingAudit(updatedAudit);
       setIsEditClientModalOpen(false);
-      fetchInitialData();
-    } catch (error) { toast.error("Failed to update client details"); }
+      fetchInitialData(); 
+    } catch (error) { 
+      console.error("Client Update Error:", error);
+      toast.error(error.response?.data?.message || "Failed to save client details"); 
+    }
   };
 
   const handleOpenEditEngagement = () => {
     setEditEngagementForm({
+      audit_type: viewingAudit.audit_type || '',
+      financial_year: viewingAudit.financial_year || '',
+      assessment_year: viewingAudit.assessment_year || '',
+      books_period_from: formatDateForInput(viewingAudit.books_period_from),
+      books_period_to: formatDateForInput(viewingAudit.books_period_to),
+      applicability_reason: viewingAudit.applicability_reason || '',
+      due_date: formatDateForInput(viewingAudit.due_date),
+      engagement_status: viewingAudit.engagement_status || 'Data pending',
       turnover_gross_receipts: viewingAudit.turnover_gross_receipts?.$numberDecimal || viewingAudit.turnover_gross_receipts || '',
       audit_fee: viewingAudit.audit_fee?.$numberDecimal || viewingAudit.audit_fee || '',
       fee_status: viewingAudit.fee_status || 'Pending',
@@ -272,7 +347,6 @@ const AuditWorkspace = () => {
   };
 
   const handleLinkAuditor = (e) => { e.preventDefault(); saveChildRecord('links', { ...auditorForm, audit_id: viewingAudit._id }, !!editingIds.auditor, editingIds.auditor, 'auditors', setIsAuditorModalOpen, setAuditorForm, initialAuditorForm); };
-  
   const handleAddUdin = (e) => { 
     e.preventDefault(); 
     if (!editingIds.udin) {
@@ -282,7 +356,6 @@ const AuditWorkspace = () => {
     }
     saveChildRecord('udins', { ...udinForm, audit_id: viewingAudit._id }, !!editingIds.udin, editingIds.udin, 'udins', setIsUdinModalOpen, setUdinForm, initialUdinForm); 
   };
-  
   const handleAddFiling = (e) => { e.preventDefault(); saveChildRecord('filings', { ...filingForm, audit_id: viewingAudit._id }, !!editingIds.filing, editingIds.filing, 'filings', setIsFilingModalOpen, setFilingForm, initialFilingForm); };
   const handleAddChecklist = (e) => { e.preventDefault(); saveChildRecord('checklists', { ...checklistForm, audit_id: viewingAudit._id }, !!editingIds.checklist, editingIds.checklist, 'checklists', setIsChecklistModalOpen, setChecklistForm, initialChecklistForm); };
 
@@ -327,12 +400,6 @@ const AuditWorkspace = () => {
       return (clientName.toLowerCase().includes(searchStr) || (a.client_id?.clientId || '').toLowerCase().includes(searchStr)) && (statusFilter === 'ALL' || a.engagement_status === statusFilter);
     });
   }, [audits, searchQuery, statusFilter]);
-
-  const stats = useMemo(() => ({
-    total: audits.length,
-    inProgress: audits.filter(a => a.engagement_status === 'Audit in progress').length,
-    completed: audits.filter(a => ['Filed', 'Closed'].includes(a.engagement_status)).length,
-  }), [audits]);
 
   const getStatusBadge = (status) => {
     if (status === 'Closed' || status === 'Filed') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
@@ -386,11 +453,17 @@ const AuditWorkspace = () => {
                         <div className="flex flex-col">
                           <span className="font-bold text-slate-800 text-base">{a.client_id?.name || 'Unknown Client'}</span>
                           <div className="flex flex-wrap items-center gap-2 mt-1">
-                            {/* 🔴 SIRF CLIENT ID DIKHEGI AB */}
                             <span className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded tracking-wider" title="Client ID">
                               {a.client_id?.clientId || a.client_id?.pan || 'NO ID'}
                             </span>
                             <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{a.audit_type}</span>
+                            
+                            {/* Short Preview of Remarks */}
+                            {a.remarks && (
+                                <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 truncate max-w-[120px]" title="Latest Remark">
+                                  {a.remarks.split('\n')[0]} 
+                                </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -404,9 +477,16 @@ const AuditWorkspace = () => {
                     </td>
                     <td className="py-4 px-5 flex-1 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex">
+                        
+                        {/* 🔴 NAYA BUTTON: QUICK REMARKS */}
+                        <button onClick={() => openQuickRemarks(a)} className="p-2 text-amber-500 hover:bg-amber-50 border border-transparent hover:border-amber-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Update Quick Remarks">
+                          <MessageSquare size={16} strokeWidth={2.5}/>
+                        </button>
+                        
+                        <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Delete Audit">
                           <Trash2 size={16} strokeWidth={2.5}/>
                         </button>
+
                         <button onClick={() => handleOpenView(a)} className="px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl transition-colors border border-blue-200 text-xs font-bold flex items-center gap-2 shadow-sm inline-flex">
                           <Eye size={16} strokeWidth={2.5}/> Open Workspace
                         </button>
@@ -420,7 +500,60 @@ const AuditWorkspace = () => {
         </div>
       </div>
 
-      {/* 🔴 MODAL: ADD AUDIT ENGAGEMENT */}
+      {/* 🔴 NAYA MODAL: QUICK REMARKS HISTORY MODAL */}
+      {quickRemarksModal.open && quickRemarksModal.audit && (
+        <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[85vh]">
+            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50 shrink-0">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <MessageSquare size={18} className="text-amber-500"/> Update Internal Remarks
+              </h2>
+              <button onClick={() => setQuickRemarksModal({open: false, audit: null, newRemark: ''})} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 custom-scrollbar flex flex-col gap-4">
+              <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl shrink-0">
+                <p className="text-[10px] font-bold text-slate-500 uppercase">Selected Client</p>
+                <div className="flex justify-between items-start mt-1">
+                  <p className="font-bold text-slate-800">{quickRemarksModal.audit.client_id?.name || 'N/A'}</p>
+                  <p className="text-[10px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200 uppercase tracking-wider">{quickRemarksModal.audit.engagement_status}</p>
+                </div>
+              </div>
+              
+              {/* PAST REMARKS HISTORY (Read-only) */}
+              <div className="flex-1 flex flex-col gap-1 min-h-[150px]">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 mb-1">Previous Remarks History</label>
+                <div className="bg-slate-100/50 border border-slate-200 p-4 rounded-xl flex-1 overflow-y-auto custom-scrollbar whitespace-pre-wrap text-sm text-slate-700 font-medium">
+                  {quickRemarksModal.audit.remarks || <span className="text-slate-400 italic font-normal">No previous remarks found. Be the first to add one!</span>}
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveQuickRemarks} className="p-5 border-t border-slate-100 bg-white shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)] z-10">
+              <div className="space-y-2 mb-4">
+                <label className="block text-xs font-bold text-slate-500">Add New Remark</label>
+                <textarea 
+                  rows="3" 
+                  maxLength="500" 
+                  required
+                  value={quickRemarksModal.newRemark} 
+                  onChange={(e) => setQuickRemarksModal({...quickRemarksModal, newRemark: e.target.value})} 
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm resize-none focus:ring-2 focus:ring-amber-500/20 outline-none shadow-inner bg-amber-50/20" 
+                  placeholder="Type your new note, update, or reason here..." 
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setQuickRemarksModal({open: false, audit: null, newRemark: ''})} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-bold transition-colors">Cancel</button>
+                <button type="submit" className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold shadow-md shadow-amber-500/20 transition-all flex items-center gap-2">
+                  <CheckCircle2 size={16}/> Save to History
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD AUDIT ENGAGEMENT */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
@@ -516,7 +649,6 @@ const AuditWorkspace = () => {
                     </span>
                   </h2>
                   <div className="flex items-center gap-3 mt-1.5 text-xs text-blue-100 font-medium font-mono">
-                    {/* 🔴 SIRF CLIENT ID DIKHEGI AB */}
                     <span title="Client ID from Master" className="bg-indigo-500/40 px-2 py-0.5 rounded-full border border-indigo-400">
                       ID: {viewingAudit.client_id?.clientId || viewingAudit.client_id?.pan || 'NO ID'}
                     </span> | 
@@ -567,7 +699,7 @@ const AuditWorkspace = () => {
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Audit Type</p><p className="font-bold text-slate-800">{viewingAudit.audit_type}</p></div>
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Financial Year</p><p className="font-mono font-bold text-blue-700">{viewingAudit.financial_year}</p></div>
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Assessment Year</p><p className="font-mono font-bold text-slate-800">{viewingAudit.assessment_year}</p></div>
-                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Books Period</p><p className="font-bold text-slate-800">{new Date(viewingAudit.books_period_from).toLocaleDateString()} to {new Date(viewingAudit.books_period_to).toLocaleDateString()}</p></div>
+                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Books Period</p><p className="font-bold text-slate-800">{viewingAudit.books_period_from ? new Date(viewingAudit.books_period_from).toLocaleDateString() : 'N/A'} to {viewingAudit.books_period_to ? new Date(viewingAudit.books_period_to).toLocaleDateString() : 'N/A'}</p></div>
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Applicability Reason</p><p className="font-bold text-slate-800">{viewingAudit.applicability_reason}</p></div>
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Due Date (A7)</p><p className="font-bold text-rose-600">{viewingAudit.due_date ? new Date(viewingAudit.due_date).toLocaleDateString() : 'Pending verification'}</p></div>
                     
@@ -581,12 +713,6 @@ const AuditWorkspace = () => {
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Draft Report Date</p><p className="font-bold text-slate-800">{viewingAudit.draft_report_date ? new Date(viewingAudit.draft_report_date).toLocaleDateString() : 'N/A'}</p></div>
                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Report Signing Date</p><p className="font-bold text-slate-800">{viewingAudit.report_signing_date ? new Date(viewingAudit.report_signing_date).toLocaleDateString() : 'N/A'}</p></div>
                   </div>
-                  {viewingAudit.remarks && (
-                    <div className="mt-5 pt-4 border-t border-slate-100">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Internal Remarks</p>
-                      <p className="text-sm bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-700">{viewingAudit.remarks}</p>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -755,7 +881,51 @@ const AuditWorkspace = () => {
               <button onClick={() => setIsEditEngagementModalOpen(false)}><X size={18} /></button>
             </div>
             <form onSubmit={handleUpdateEngagement} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              
+              <h3 className="text-[10px] font-black uppercase text-blue-600 tracking-wider mb-2 border-b pb-1">Core Audit Info</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Audit Type</label>
+                  <select value={editEngagementForm.audit_type} onChange={(e) => setEditEngagementForm({...editEngagementForm, audit_type: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm font-semibold bg-white shadow-sm focus:ring-2 focus:ring-blue-500/20">
+                    <option value="Tax Audit">Tax Audit</option><option value="Statutory Audit">Statutory Audit</option><option value="LLP Audit">LLP Audit</option><option value="GST Audit / Reconciliation">GST Audit / Reconciliation</option><option value="Internal Audit">Internal Audit</option><option value="Stock Audit">Stock Audit</option><option value="Concurrent Audit">Concurrent Audit</option><option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Financial Year</label>
+                  <input type="text" value={editEngagementForm.financial_year} onChange={(e) => setEditEngagementForm({...editEngagementForm, financial_year: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Assessment Year</label>
+                  <input type="text" value={editEngagementForm.assessment_year} onChange={(e) => setEditEngagementForm({...editEngagementForm, assessment_year: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Applicability Reason</label>
+                  <select value={editEngagementForm.applicability_reason} onChange={(e) => setEditEngagementForm({...editEngagementForm, applicability_reason: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm bg-white shadow-sm focus:ring-2 focus:ring-blue-500/20">
+                    <option value="Turnover above limit">Turnover above limit</option><option value="Profit below presumptive limit">Profit below presumptive limit</option><option value="Companies Act requirement">Companies Act requirement</option><option value="LLP Act requirement">LLP Act requirement</option><option value="Trust / Society requirement">Trust / Society requirement</option><option value="Voluntary">Voluntary</option><option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Books Period From</label>
+                  <input type="date" value={editEngagementForm.books_period_from} onChange={(e) => setEditEngagementForm({...editEngagementForm, books_period_from: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Books Period To</label>
+                  <input type="date" value={editEngagementForm.books_period_to} onChange={(e) => setEditEngagementForm({...editEngagementForm, books_period_to: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Due Date</label>
+                  <input type="date" value={editEngagementForm.due_date} onChange={(e) => setEditEngagementForm({...editEngagementForm, due_date: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Engagement Status</label>
+                  <select value={editEngagementForm.engagement_status} onChange={(e) => setEditEngagementForm({...editEngagementForm, engagement_status: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm font-bold text-slate-700">
+                    <option value="Data pending">Data pending</option><option value="Audit in progress">Audit in progress</option><option value="Client approved">Client approved</option><option value="Filed">Filed</option><option value="Closed">Closed</option>
+                  </select>
+                </div>
+              </div>
+
+              <h3 className="text-[10px] font-black uppercase text-blue-600 tracking-wider mb-2 border-b pb-1 mt-4">Fees & Timeline</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Turnover (₹)</label>
                   <input type="number" step="0.01" value={editEngagementForm.turnover_gross_receipts} onChange={(e) => setEditEngagementForm({...editEngagementForm, turnover_gross_receipts: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
@@ -788,11 +958,6 @@ const AuditWorkspace = () => {
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Report Signing Date</label>
                   <input type="date" value={editEngagementForm.report_signing_date} onChange={(e) => setEditEngagementForm({...editEngagementForm, report_signing_date: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm" />
-                </div>
-
-                <div className="col-span-2 md:col-span-3">
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Remarks</label>
-                  <textarea rows="2" maxLength="1000" value={editEngagementForm.remarks} onChange={(e) => setEditEngagementForm({...editEngagementForm, remarks: e.target.value})} className="w-full p-2.5 border rounded-xl text-sm resize-none" placeholder="Any internal notes..." />
                 </div>
               </div>
               <div className="flex justify-end pt-4"><button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Update Details</button></div>
