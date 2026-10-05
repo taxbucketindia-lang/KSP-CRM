@@ -58,7 +58,7 @@ const ItrReturns = () => {
     assesseeName: '', pan: '', dob: '', mobile: '', email: '', 
     district: '', state: '', pinCode: '',
     leadSource: 'Google', referredByBA: '', referenceName: '', otherSourceName: '',
-    itrFiledUpToAY: 'AY 2025-26', filingDate: '', nextReminderDate: '',
+    itrFiledUpToAY: 'AY 2026-27', filingDate: '', nextReminderDate: '',
     feeStatus: 'Paid', feeAmount: '', amountReceived: '',
     itrStatus: 'Documents Pending', portalPassword: '',
     totalIncome: '', incomeTax: '', tds: '', tcs: '', selfAdvTax: '', refund: '',
@@ -372,7 +372,7 @@ const ItrReturns = () => {
           state: getVal(row, ['State', 'state']),
           pinCode: getVal(row, ['Pin Code', 'Pincode', 'pinCode', 'pincode', 'Zip']),
           itrStatus: normalizeItrStatus(getVal(row, ['ITR Status', 'itrStatus'])),
-          itrFiledUpToAY: getVal(row, ['ITR AY', 'itrFiledUpToAY', 'AY']) || 'AY 2025-26',
+          itrFiledUpToAY: getVal(row, ['ITR AY', 'itrFiledUpToAY', 'AY']) || 'AY 2026-27',
           returnType: normalizeReturnType(getVal(row, ['Return Type', 'returnType', 'Type'])), 
           acknowledgementNo: String(getVal(row, ['Acknowledgement No', 'Ack No', 'acknowledgementNo', 'Ack Number']) || ''), 
           filingDate: parseDate(getVal(row, ['Filing Date', 'filingDate'])),
@@ -515,7 +515,7 @@ const ItrReturns = () => {
         referredByBA: client.referredByBA ? (client.referredByBA._id || client.referredByBA) : '',
         referenceName: client.referenceName || '',
         otherSourceName: client.otherSourceName || '',
-        itrFiledUpToAY: client.itrFiledUpToAY || 'AY 2025-26',
+        itrFiledUpToAY: client.itrFiledUpToAY || 'AY 2026-27',
         filingDate: parseDate(client.filingDate),
         nextReminderDate: parseDate(client.nextReminderDate),
         itrStatus: client.itrStatus || 'Documents Pending',
@@ -558,7 +558,7 @@ const ItrReturns = () => {
       referredByBA: client.referredByBA ? (client.referredByBA._id || client.referredByBA) : '',
       referenceName: client.referenceName || '',
       otherSourceName: client.otherSourceName || '',
-      itrFiledUpToAY: client.itrFiledUpToAY || 'AY 2025-26',
+      itrFiledUpToAY: client.itrFiledUpToAY || 'AY 2026-27',
       returnType: client.returnType || 'Original', 
       acknowledgementNo: client.acknowledgementNo || '',
       filingDate: parseDate(client.filingDate),
@@ -928,7 +928,7 @@ const ItrReturns = () => {
                       <td className="py-4 pl-6">
                         <div className="flex flex-col gap-1.5 text-[11px] font-semibold">
                           <span className="text-slate-800 font-bold mb-0.5 flex items-center gap-2">
-                            {client.itrFiledUpToAY || 'AY 2025-26'}
+                            {client.itrFiledUpToAY || 'AY 2026-27'}
                               <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase ${getReturnTypeStyle(client.returnType)}`}>
                               {client.returnType || 'Original'}
                             </span>
@@ -1020,7 +1020,7 @@ const ItrReturns = () => {
                       <Hash size={12} className="opacity-70"/> {clientToView.pan || 'N/A'}
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <FileText size={14} className="opacity-70"/> {clientToView.itrFiledUpToAY || 'AY 2025-26'}
+                      <FileText size={14} className="opacity-70"/> {clientToView.itrFiledUpToAY || 'AY 2026-27'}
                     </span>
                     <span className="flex items-center gap-1.5">
                       <Phone size={14} className="opacity-70"/> {clientToView.mobile}
@@ -1529,6 +1529,8 @@ const ItrReturns = () => {
                       <div>
                         <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Assessment Year</label>
                         <select name="itrFiledUpToAY" value={formData.itrFiledUpToAY} onChange={handleChange} className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 bg-white">
+                           <option value="AY 2027-28">AY 2027-28</option>
+                            <option value="AY 2026-27">AY 2026-27</option>
                           <option value="AY 2025-26">AY 2025-26</option>
                           <option value="AY 2024-25">AY 2024-25</option>
                           <option value="AY 2023-24">AY 2023-24</option>

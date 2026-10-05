@@ -13,7 +13,7 @@ const shareholderSchema = new mongoose.Schema({
   remarks: { type: String }
 });
 
-// 🔴 NAYA: Director structure (Seedha Workspace ke andar save karne ke liye)
+// Director structure
 const directorSubSchema = new mongoose.Schema({
   name: { type: String, required: true },
   dinOrDpin: { type: String },
@@ -26,6 +26,17 @@ const directorSubSchema = new mongoose.Schema({
   dscStatus: { type: String, enum: ['Valid', 'Expired', 'Not Available'], default: 'Not Available' },
   dscValidUpto: { type: Date }
 });
+
+// 🔴 NAYA: Compliance & Form Filings Structure
+const complianceFilingSchema = new mongoose.Schema({
+  formName: { type: String, required: true },
+  dueDate: { type: Date },
+  filingDate: { type: Date },
+  normalFee: { type: Number, default: 0 },
+  additionalFee: { type: Number, default: 0 },
+  authorName: { type: String }
+});
+
 
 const rocWorkspaceSchema = new mongoose.Schema({
   clientMasterId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientMaster', required: true, unique: true },
@@ -62,11 +73,12 @@ const rocWorkspaceSchema = new mongoose.Schema({
     status: { type: String, enum: ['Active', 'Expired', 'N/A'], default: 'N/A' }
   },
 
-  // List of Shareholders
+  // Arrays (Sub-documents)
   shareholders: [shareholderSchema],
-  
-  // 🔴 NAYA FIELD: List of Directors (Frontend se direct save hoga)
   directors: [directorSubSchema],
+  
+  // 🔴 NAYA FIELD: Form Filings Tracking Array
+  complianceFilings: [complianceFilingSchema],
 
   relationshipManager: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   status: { type: String, enum: ['Active', 'Strike Off', 'Under Process'], default: 'Active' }

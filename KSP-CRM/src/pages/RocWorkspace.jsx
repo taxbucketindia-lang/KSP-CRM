@@ -47,6 +47,7 @@ const RocWorkspace = () => {
     startupIndia: { isRegistered: false, dpiitNumber: '', recognitionDate: '', certificateNo: '', status: 'N/A' },
     shareholders: [], 
     directors: [], 
+    complianceFilings: [], // 🔴 NAYA: COMPLIANCE FILINGS ARRAY
     status: 'Active'
   };
   
@@ -105,6 +106,7 @@ const RocWorkspace = () => {
     toast.success("✅ Existing Client Selected! Data Auto-Filled.");
   };
 
+  // SHAREHOLDERS HANDLERS
   const handleAddShareholder = () => {
     setFormData(prev => ({ ...prev, shareholders: [...prev.shareholders, { name: '', address: '', state: '', pinCode: '', sharePercentage: '', faceValue: '', noOfShares: '', totalValue: '', remarks: '' }] }));
   };
@@ -122,6 +124,7 @@ const RocWorkspace = () => {
     });
   };
 
+  // DIRECTORS HANDLERS
   const handleAddDirector = () => {
     setFormData(prev => ({ ...prev, directors: [...prev.directors, { name: '', dinOrDpin: '', pan: '', dob: '', mobile: '', email: '', appointmentDate: '', resigningDate: '', dscStatus: 'Not Available', dscValidUpto: '' }] }));
   };
@@ -133,6 +136,24 @@ const RocWorkspace = () => {
       const updated = [...prev.directors];
       updated[index][field] = value;
       return { ...prev, directors: updated };
+    });
+  };
+
+  // 🔴 NAYA: COMPLIANCE FILINGS HANDLERS
+  const handleAddCompliance = () => {
+    setFormData(prev => ({ 
+      ...prev, 
+      complianceFilings: [...prev.complianceFilings, { formName: 'AOC-4', dueDate: '', filingDate: '', normalFee: '', additionalFee: '', authorName: '' }] 
+    }));
+  };
+  const handleRemoveCompliance = (index) => {
+    setFormData(prev => ({ ...prev, complianceFilings: prev.complianceFilings.filter((_, i) => i !== index) }));
+  };
+  const handleComplianceChange = (index, field, value) => {
+    setFormData(prev => {
+      const updated = [...prev.complianceFilings];
+      updated[index][field] = value;
+      return { ...prev, complianceFilings: updated };
     });
   };
 
@@ -189,7 +210,8 @@ const RocWorkspace = () => {
       { header: 'DPIIT Number', key: 'dpiitNumber', width: 20 },
       { header: 'Startup Cert No', key: 'certificateNo', width: 15 },
       { header: 'Startup Rec. Date', key: 'recognitionDate', width: 15 },
-      { header: 'Startup Status', key: 'startupStatus', width: 15 }
+      { header: 'Startup Status', key: 'startupStatus', width: 15 },
+      { header: 'Total Compliance Forms', key: 'complianceCount', width: 20 }
     ];
 
     for(let i = 1; i <= 5; i++) {
@@ -253,6 +275,7 @@ const RocWorkspace = () => {
         certificateNo: ws.startupIndia?.certificateNo || '',
         recognitionDate: ws.startupIndia?.recognitionDate ? new Date(ws.startupIndia.recognitionDate).toLocaleDateString('en-IN') : '',
         startupStatus: ws.startupIndia?.status || '',
+        complianceCount: ws.complianceFilings?.length || 0,
         status: ws.status || 'Active'
       };
 
@@ -472,6 +495,13 @@ const RocWorkspace = () => {
       dscValidUpto: parseDate(dir.dscValidUpto)
     }));
 
+    // Parse existing compliance filings if they exist
+    const formattedCompliance = (ws.complianceFilings || []).map(f => ({
+      ...f,
+      dueDate: parseDate(f.dueDate),
+      filingDate: parseDate(f.filingDate)
+    }));
+
     setFormData({
       pan: ws.pan || ws.clientMasterId?.pan || '',
       name: ws.companyName || ws.clientMasterId?.name || '',
@@ -498,6 +528,7 @@ const RocWorkspace = () => {
       },
       shareholders: ws.shareholders || [],
       directors: formattedDirectors,
+      complianceFilings: formattedCompliance, // 🔴 NAYA: Load existing filings
       status: ws.status || 'Active'
     });
     setIsModalOpen(true);
@@ -547,7 +578,7 @@ const RocWorkspace = () => {
             <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
               <Building2 size={28} className="text-indigo-600" /> ROC Client Workspace
             </h1>
-            <p className="text-sm text-slate-500 mt-1 font-medium">Manage Corporate Entities, CIN, Capital, Shareholders, Directors, and Startup India profiles.</p>
+            <p className="text-sm text-slate-500 mt-1 font-medium">Manage Corporate Entities, CIN, Capital, Shareholders, Directors, and Compliance Filings.</p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={handleExportExcel} className="inline-flex items-center gap-2 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 text-sm font-bold px-4 py-2.5 rounded-xl transition-colors shadow-sm">
@@ -632,7 +663,7 @@ const RocWorkspace = () => {
             </div>
           </div>
 
-          {/* 🔴 SMART TOOLBAR FOR SELECTED ROWS */}
+          {/* SMART TOOLBAR FOR SELECTED ROWS */}
           {selectedIds.length > 0 && (
             <div className="bg-indigo-50 border-b border-indigo-100 p-3 px-6 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
               <span className="text-sm font-bold text-indigo-800 flex items-center gap-2">
@@ -677,10 +708,8 @@ const RocWorkspace = () => {
                 filteredWorkspaces.map((ws) => {
                   const client = ws.clientMasterId || {};
                   const isSelected = selectedIds.includes(ws._id);
-                  // 🔴 SECURE SNAPSHOT DISPLAY
                   const displayName = ws.companyName || client.name || 'Unknown Entity';
                   const displayPan = ws.pan || client.pan || 'NO PAN';
-                  const displayType = ws.clientType || client.clientType || 'Private Limited';
                   const displayId = client.clientId || '';
 
                   return (
@@ -697,16 +726,13 @@ const RocWorkspace = () => {
                             {displayName ? displayName.charAt(0).toUpperCase() : 'C'}
                           </div>
                           <div className="flex flex-col">
-                            {/* 🔴 Fixed Name Display */}
                             <span className="font-bold text-slate-800 text-base">{displayName}</span>
                             <div className="flex flex-wrap items-center gap-2 mt-1">
-                              {/* 🔴 Fixed Client ID Display */}
                               {displayId && (
                                 <span className="text-[10px] font-black uppercase bg-slate-200/70 text-slate-600 px-1.5 py-0.5 rounded border border-slate-300 tracking-wider">
                                   ID: {displayId}
                                 </span>
                               )}
-                              {/* 🔴 Fixed PAN Display */}
                               <span className="text-[10px] font-black uppercase bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 tracking-wider">
                                 {displayPan}
                               </span>
@@ -748,7 +774,6 @@ const RocWorkspace = () => {
                           <button onClick={() => handleOpenView(ws)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent" title="View Workspace">
                             <Eye size={16}/>
                           </button>
-                          {/* 🔴 ONLY ADMIN CAN DELETE WORKSPACE */}
                           {isAdmin && (
                             <button onClick={() => setDeleteModal({ open: true, client: ws })} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Workspace">
                               <Trash2 size={16}/>
@@ -795,7 +820,7 @@ const RocWorkspace = () => {
                       type="text" required maxLength="10" value={formData.pan} 
                       onChange={handlePanChange} onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                       autoComplete="off" 
-                      disabled={editingId && !isAdmin} // 🔴 ONLY ADMIN CAN EDIT IF EXISTING
+                      disabled={editingId && !isAdmin} // ONLY ADMIN CAN EDIT IF EXISTING
                       placeholder="ABCDE1234F" 
                       className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-black text-slate-800 uppercase tracking-widest bg-white focus:ring-2 focus:ring-indigo-500/20 outline-none disabled:bg-slate-100 disabled:text-slate-400 relative z-10"
                     />
@@ -817,7 +842,7 @@ const RocWorkspace = () => {
                     <input 
                       type="text" required value={formData.name} 
                       onChange={(e) => setFormData({...formData, name: e.target.value})} 
-                      disabled={editingId && !isAdmin} // 🔴 ONLY ADMIN CAN EDIT IF EXISTING
+                      disabled={editingId && !isAdmin}
                       placeholder="e.g. Taxbucket Tech Pvt Ltd" 
                       className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-indigo-500/20"
                     />
@@ -827,7 +852,6 @@ const RocWorkspace = () => {
                     <select 
                       value={formData.clientType} 
                       onChange={(e) => setFormData({...formData, clientType: e.target.value})} 
-                      // 🔴 ANYONE CAN EDIT ENTITY TYPE
                       className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20"
                     >
                       <option value="Private Limited">Private Limited</option>
@@ -1066,6 +1090,76 @@ const RocWorkspace = () => {
                 )}
               </div>
 
+              {/* 🔴 NEW: SECTION 6: COMPLIANCE & FORM FILINGS */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <FileText size={16} className="text-indigo-600"/> Compliance & Form Filings
+                  </h3>
+                  <button type="button" onClick={handleAddCompliance} className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-indigo-100 transition-colors">
+                    <Plus size={14}/> Add Form Filing
+                  </button>
+                </div>
+
+                {formData.complianceFilings.length === 0 ? (
+                  <div className="text-center py-6 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
+                    <p className="text-xs font-bold text-slate-400">No compliance forms added yet. Track AOC-4, MGT-7A, ADT-1 etc. here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {formData.complianceFilings.map((filing, index) => (
+                      <div key={index} className="bg-slate-50 border border-slate-200 rounded-xl p-4 relative group">
+                        <div className="absolute -top-3 -left-3 h-6 w-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-xs font-bold border-2 border-white shadow-sm">
+                          {index + 1}
+                        </div>
+                        <button type="button" onClick={() => handleRemoveCompliance(index)} className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 transition-colors" title="Remove Form">
+                          <Trash2 size={16}/>
+                        </button>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mt-2">
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Form / Compliance Name *</label>
+                            <select required value={filing.formName} onChange={(e) => handleComplianceChange(index, 'formName', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500/20">
+                              <option value="AOC-4">AOC-4</option>
+                              <option value="MGT-7 / MGT-7A">MGT-7 / MGT-7A</option>
+                              <option value="ADT-1">ADT-1</option>
+                              <option value="ADT-3">ADT-3</option>
+                              <option value="DIR-3 KYC">DIR-3 KYC</option>
+                              <option value="LLP Form 3">LLP Form 3</option>
+                              <option value="LLP Form 8">LLP Form 8</option>
+                              <option value="LLP Form 11">LLP Form 11</option>
+                              <option value="DIN Status">DIN Status</option>
+                              <option value="MCA Master Data">MCA Master Data</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Due Date</label>
+                            <input type="date" value={filing.dueDate} onChange={(e) => handleComplianceChange(index, 'dueDate', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-xs font-semibold text-rose-600 focus:ring-2 focus:ring-indigo-500/20"/>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Date of Filing</label>
+                            <input type="date" value={filing.filingDate} onChange={(e) => handleComplianceChange(index, 'filingDate', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-xs font-semibold text-emerald-600 focus:ring-2 focus:ring-indigo-500/20"/>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Normal Fee (₹)</label>
+                            <input type="number" value={filing.normalFee} onChange={(e) => handleComplianceChange(index, 'normalFee', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500/20"/>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Additional / Late Fee (₹)</label>
+                            <input type="number" value={filing.additionalFee} onChange={(e) => handleComplianceChange(index, 'additionalFee', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold text-rose-600 focus:ring-2 focus:ring-indigo-500/20"/>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Author / Signatory Name</label>
+                            <input type="text" value={filing.authorName} onChange={(e) => handleComplianceChange(index, 'authorName', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500/20"/>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Startup India Recognition */}
               <div className="bg-orange-50/30 p-5 rounded-2xl border border-orange-100">
                  <div className="flex justify-between items-center border-b border-orange-200/50 pb-2 mb-4">
@@ -1124,7 +1218,6 @@ const RocWorkspace = () => {
                   <Building2 size={32} className="text-white" />
                 </div>
                 <div>
-                  {/* 🔴 FIXED VIEW MODAL HEADER */}
                   <h2 className="text-2xl font-black tracking-tight">{viewingData.companyName || viewingData.clientMasterId?.name || 'Unknown Entity'}</h2>
                   <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-indigo-100 font-medium">
                     {viewingData.clientMasterId?.clientId && (
@@ -1144,7 +1237,7 @@ const RocWorkspace = () => {
                   </div>
                 </div>
               </div>
-              <button onClick={() => setIsViewModalOpen(false)} className="z-10 p-2 rounded-full bg-black/10 hover:bg-black/30 text-white transition-colors"><X size={20} strokeWidth={2.5} /></button>
+              <button onClick={() => setIsViewModalOpen(false)} className="z-10 p-2 rounded-full bg-black/10 hover:bg-black/30 text-white transition-colors shrink-0"><X size={20} strokeWidth={2.5} /></button>
             </div>
             
             <div className="overflow-y-auto p-6 md:p-8 space-y-6 custom-scrollbar">
@@ -1229,7 +1322,46 @@ const RocWorkspace = () => {
 
               </div>
 
-              {/* 🔴 VIEW DIRECTORS */}
+              {/* 🔴 VIEW COMPLIANCE FILINGS */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 mb-4 flex items-center gap-2">
+                  <FileText size={16} className="text-indigo-600"/> Compliance & Form Filings Tracker
+                </h3>
+                {viewingData.complianceFilings && viewingData.complianceFilings.length > 0 ? (
+                  <div className="overflow-x-auto custom-scrollbar">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                          <th className="py-2 px-3">Form Name</th>
+                          <th className="py-2 px-3">Due Date</th>
+                          <th className="py-2 px-3">Filing Date</th>
+                          <th className="py-2 px-3">Normal Fee</th>
+                          <th className="py-2 px-3">Addl. Fee</th>
+                          <th className="py-2 px-3">Author/Signatory</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                        {viewingData.complianceFilings.map((filing, index) => (
+                          <tr key={index} className="hover:bg-slate-50/50">
+                            <td className="py-2 px-3 font-bold text-indigo-700">{filing.formName}</td>
+                            <td className="py-2 px-3 text-rose-600 font-bold">{filing.dueDate ? new Date(filing.dueDate).toLocaleDateString('en-IN') : '-'}</td>
+                            <td className="py-2 px-3 text-emerald-600 font-bold">{filing.filingDate ? new Date(filing.filingDate).toLocaleDateString('en-IN') : 'Pending'}</td>
+                            <td className="py-2 px-3">₹{filing.normalFee || '0'}</td>
+                            <td className="py-2 px-3 text-rose-500">₹{filing.additionalFee || '0'}</td>
+                            <td className="py-2 px-3 text-[10px] italic text-slate-500">{filing.authorName || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-4 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
+                    <p className="text-xs font-bold text-slate-400">No compliance forms documented for this entity.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* VIEW DIRECTORS */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 mb-4 flex items-center gap-2">
                   <UserCheck size={16} className="text-indigo-600"/> Register of Directors
@@ -1283,7 +1415,7 @@ const RocWorkspace = () => {
                 )}
               </div>
 
-              {/* 🔴 VIEW SHAREHOLDERS */}
+              {/* VIEW SHAREHOLDERS */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 mb-4 flex items-center gap-2">
                   <Users size={16} className="text-indigo-600"/> Register of Shareholders
@@ -1343,16 +1475,10 @@ const RocWorkspace = () => {
                 </div>
               )}
 
-              <div className="bg-slate-100/50 border border-slate-200 border-dashed rounded-2xl p-6 text-center">
-                 <h4 className="text-sm font-bold text-slate-600">Compliance Form Filings</h4>
-                 <p className="text-xs text-slate-400 mt-1">Form Filings (AOC-4, MGT-7, ADT-1) will be managed inside their respective dedicated tabs for this workspace.</p>
-              </div>
-
             </div>
             
             <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
               <div>
-                {/* 🔴 ONLY ADMIN CAN DELETE WORKSPACE */}
                 {isAdmin && (
                   <button 
                     onClick={() => { setIsViewModalOpen(false); setDeleteModal({ open: true, client: viewingData }); }} 
@@ -1406,5 +1532,3 @@ const RocWorkspace = () => {
 };
 
 export default RocWorkspace;
-
-
