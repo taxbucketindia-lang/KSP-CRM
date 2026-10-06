@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useLocation } from 'react-router-dom'; // 🔴 NAYA IMPORT ROUTING KE LIYE
+import { useLocation } from 'react-router-dom';
 import { Printer, FileText, Plus, Trash2, History, Save, Edit, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing, Search, UserCircle  } from 'lucide-react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -27,10 +27,9 @@ const numberToWords = (num) => {
 
 const InvoiceGenerator = () => {
   const { user } = useContext(AuthContext); 
-  const location = useLocation(); // 🔴 URL STATE PADHNE KE LIYE
+  const location = useLocation(); 
   const isAdmin = user?.role === 'Admin';
 
-  // 🔴 NAYA STATE: View toggle karne ke liye (Generator vs History Page)
   const [viewMode, setViewMode] = useState('generator');
 
   const defaultCompany = {
@@ -57,6 +56,13 @@ const InvoiceGenerator = () => {
   const [isProforma, setIsProforma] = useState(false); 
   const [isGstEnabled, setIsGstEnabled] = useState(true); 
   
+  // 🔴 NAYA STATE: GST Checkboxes Configuration
+  const [taxes, setTaxes] = useState({
+    igst: true,  // Default IGST @ 18% checked
+    cgst: false, // CGST @ 9%
+    sgst: false  // SGST @ 9%
+  });
+  
   const [companyDetails, setCompanyDetails] = useState(defaultCompany);
   const [showQr, setShowQr] = useState(true); 
   
@@ -65,11 +71,11 @@ const InvoiceGenerator = () => {
   const [stampImage, setStampImage] = useState(null);
 
   const [customer, setCustomer] = useState({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
-  const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
+  const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0 }]);
   const [bank, setBank] = useState(axisBankPreset);
 
   const [historyList, setHistoryList] = useState([]);
-  const [searchHistory, setSearchHistory] = useState(""); // 🔴 For History Filter
+  const [searchHistory, setSearchHistory] = useState(""); 
   const [loading, setLoading] = useState(false);
 
   const [fetchingPan, setFetchingPan] = useState(false);
@@ -83,7 +89,6 @@ const InvoiceGenerator = () => {
   const [paymentModal, setPaymentModal] = useState({ open: false, invoice: null, amountReceived: '', mode: 'UPI/Online' });
   const [processingPayment, setProcessingPayment] = useState(false);
 
-  // 🔴 SMART ROUTING: Agar CEO dashboard ya client master se aye hain
   useEffect(() => {
     if (location.state?.openHistory) {
       setViewMode('history');
@@ -138,13 +143,23 @@ const InvoiceGenerator = () => {
     toast.success("✅ Client Data Auto-Filled!");
   };
 
+  // 🔴 DYNAMIC TAX CALCULATIONS (Based on Checkboxes)
   const taxableAmount = items.reduce((acc, item) => acc + (Number(item.qty || 0) * Number(item.rate || 0)), 0);
-  const totalGstAmount = isGstEnabled ? items.reduce((acc, item) => acc + ((Number(item.qty || 0) * Number(item.rate || 0) * Number(item.gstRate || 0)) / 100), 0) : 0;
+  
+  const igstAmount = (isGstEnabled && taxes.igst) ? (taxableAmount * 18) / 100 : 0;
+  const cgstAmount = (isGstEnabled && taxes.cgst) ? (taxableAmount * 9) / 100 : 0;
+  const sgstAmount = (isGstEnabled && taxes.sgst) ? (taxableAmount * 9) / 100 : 0;
+  
+  const totalGstAmount = igstAmount + cgstAmount + sgstAmount;
   const totalAmountAfterTax = taxableAmount + totalGstAmount;
+  
+  // Total % display for the table row
+  const globalGstPercent = (taxes.igst ? 18 : 0) + (taxes.cgst ? 9 : 0) + (taxes.sgst ? 9 : 0);
+
   const upiLink = `upi://pay?pa=${bank.upiId}&pn=${companyDetails.name || 'Business'}&am=${totalAmountAfterTax}&cu=INR`;
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(upiLink)}`;
 
-  const addItem = () => setItems([...items, { description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
+  const addItem = () => setItems([...items, { description: '', hsn: '', qty: 1, rate: 0 }]);
   const removeItem = (index) => { const list = [...items]; list.splice(index, 1); setItems(list); };
 
   const handlePrint = () => window.print();
@@ -162,14 +177,13 @@ const InvoiceGenerator = () => {
     }
   };
 
-  // 🔴 NAYA: DELETE INVOICE LOGIC
   const handleDeleteInvoice = async (id) => {
     if (!window.confirm("Are you sure you want to PERMANENTLY delete this invoice? This cannot be undone.")) return;
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       await axios.delete(`${import.meta.env.VITE_API_URL}/invoices/${id}`, { headers });
       toast.success("Invoice deleted permanently!");
-      fetchHistory(); // Table refresh
+      fetchHistory(); 
     } catch (error) {
       toast.error("Failed to delete invoice");
     }
@@ -233,7 +247,7 @@ const InvoiceGenerator = () => {
       setLoading(true);
       const headers = { Authorization: `Bearer ${user.token}` };
       const payload = {
-        invoiceNo, invoiceDate, companyDetails, isTaxbucket, isProforma, isGstEnabled, showQr, customer, items, bank,
+        invoiceNo, invoiceDate, companyDetails, isTaxbucket, isProforma, isGstEnabled, taxes, showQr, customer, items, bank,
         taxableAmount, totalGstAmount, totalAmountAfterTax, logoImage, stampImage, customQrImage 
       };
 
@@ -260,22 +274,23 @@ const InvoiceGenerator = () => {
     setIsTaxbucket(inv.isTaxbucket !== undefined ? inv.isTaxbucket : true);
     setIsProforma(inv.isProforma || false); 
     setIsGstEnabled(inv.isGstEnabled !== undefined ? inv.isGstEnabled : true);
+    if (inv.taxes) setTaxes(inv.taxes); else setTaxes({ igst: true, cgst: false, sgst: false });
     setShowQr(inv.showQr !== undefined ? inv.showQr : true); 
     setCustomer(inv.customer || {});
-    setItems(inv.items && inv.items.length > 0 ? inv.items : [{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]);
+    setItems(inv.items && inv.items.length > 0 ? inv.items : [{ description: '', hsn: '', qty: 1, rate: 0 }]);
     setBank(inv.bank || {});
     setLogoImage(inv.logoImage || null); setStampImage(inv.stampImage || null); setCustomQrImage(inv.customQrImage || null);
     
-    // Switch to generator view so they can edit it
     setViewMode('generator');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleNewInvoice = () => {
     setInvoiceId(null); setInvoiceNo(""); setInvoiceDate(""); setIsTaxbucket(true); setIsProforma(false);
-    setIsGstEnabled(true); setCompanyDetails(defaultCompany); setShowQr(true);
+    setIsGstEnabled(true); setTaxes({ igst: true, cgst: false, sgst: false });
+    setCompanyDetails(defaultCompany); setShowQr(true);
     setCustomer({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
-    setItems([{ description: '', hsn: '', qty: 1, rate: 0, gstRate: 18 }]); setBank(axisBankPreset); 
+    setItems([{ description: '', hsn: '', qty: 1, rate: 0 }]); setBank(axisBankPreset); 
     setLogoImage(null); setStampImage(null); setCustomQrImage(null);
   };
 
@@ -295,8 +310,6 @@ const InvoiceGenerator = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
       const element = document.getElementById('invoice-printable');
       
-      // 🔴 FIX: Black Patti & Cut-off issue
-      // Hum temporarily margin hatayenge aur strict width set karenge
       const originalMargin = element.style.margin;
       const originalWidth = element.style.width;
       const originalMaxWidth = element.style.maxWidth;
@@ -305,10 +318,8 @@ const InvoiceGenerator = () => {
       element.style.width = '800px';
       element.style.maxWidth = '800px';
 
-      // Browser ko naya layout render karne ke liye 100ms ka time dena
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // 🔴 'backgroundColor: #ffffff' lagana bahut zaroori hai taaki transparent area black na ho
       const imgData = await toJpeg(element, { 
         quality: 1, 
         pixelRatio: 2,
@@ -317,7 +328,6 @@ const InvoiceGenerator = () => {
         height: element.offsetHeight
       });
 
-      // PDF banne ke turant baad wapas pehle jaisa design kar do
       element.style.margin = originalMargin;
       element.style.width = originalWidth;
       element.style.maxWidth = originalMaxWidth;
@@ -391,7 +401,6 @@ const InvoiceGenerator = () => {
         }
       `}} />
 
-      {/* 🔴 HEADER: TAB CONTROLS (Generator vs Full Page History) */}
       <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-sm print:hidden gap-4">
         <h1 className="text-xl font-black text-slate-800 flex items-center gap-2">
            <FileText className="text-blue-600"/> Invoice Management
@@ -402,9 +411,6 @@ const InvoiceGenerator = () => {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* VIEW 1: GENERATOR TAB */}
-      {/* ========================================================================= */}
       {viewMode === 'generator' && (
         <>
           <div className="print:hidden bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in">
@@ -457,6 +463,24 @@ const InvoiceGenerator = () => {
                 </div>
               </div>
             </div>
+
+            {/* 🔴 NAYA: GST CONFIGURATION CHECKBOXES (Visible only if GST is enabled) */}
+            {isGstEnabled && (
+              <div className="grid grid-cols-3 gap-4 bg-blue-50/50 p-4 rounded-xl border border-blue-200 animate-in fade-in zoom-in-95">
+                 <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 text-sm hover:text-blue-700 transition-colors">
+                   <input type="checkbox" checked={taxes.igst} onChange={(e) => setTaxes({...taxes, igst: e.target.checked})} className="w-4 h-4 cursor-pointer text-blue-600 rounded"/>
+                   Apply IGST @ 18%
+                 </label>
+                 <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 text-sm hover:text-blue-700 transition-colors">
+                   <input type="checkbox" checked={taxes.cgst} onChange={(e) => setTaxes({...taxes, cgst: e.target.checked})} className="w-4 h-4 cursor-pointer text-blue-600 rounded"/>
+                   Apply CGST @ 9%
+                 </label>
+                 <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 text-sm hover:text-blue-700 transition-colors">
+                   <input type="checkbox" checked={taxes.sgst} onChange={(e) => setTaxes({...taxes, sgst: e.target.checked})} className="w-4 h-4 cursor-pointer text-blue-600 rounded"/>
+                   Apply SGST @ 9%
+                 </label>
+              </div>
+            )}
 
             {!isTaxbucket && (
               <div className="animate-in slide-in-from-top-4">
@@ -546,7 +570,7 @@ const InvoiceGenerator = () => {
                  <div className="md:col-span-2">HSN / SAC</div>
                  <div className="md:col-span-1">Quantity</div>
                  <div className="md:col-span-2">Rate (₹)</div>
-                 {isGstEnabled && <div className="md:col-span-2">GST %</div>}
+                 {isGstEnabled && <div className="md:col-span-2">GST Calculated</div>}
                  <div className="md:col-span-1 text-right">Action</div>
               </div>
               {items.map((item, index) => (
@@ -563,9 +587,10 @@ const InvoiceGenerator = () => {
                   <div className="md:col-span-2">
                     <input type="number" placeholder="Rate (₹)" value={item.rate} onChange={(e) => { const list = [...items]; list[index].rate = Number(e.target.value); setItems(list); }} className="w-full p-2 border rounded text-xs"/>
                   </div>
+                  {/* 🔴 ITEM LEVEL GST READONLY - Driven by Global Checkboxes */}
                   {isGstEnabled && (
-                    <div className="md:col-span-2">
-                      <input type="number" placeholder="GST %" value={item.gstRate} onChange={(e) => { const list = [...items]; list[index].gstRate = Number(e.target.value); setItems(list); }} className="w-full p-2 border rounded text-xs"/>
+                    <div className="md:col-span-2 flex items-center h-full">
+                      <span className="w-full text-center text-xs font-bold text-slate-500 bg-slate-200 border border-slate-300 rounded p-2">{globalGstPercent}% GST</span>
                     </div>
                   )}
                   <div className="md:col-span-1 text-right">
@@ -674,8 +699,8 @@ const InvoiceGenerator = () => {
               <tbody>
                 {items.map((item, idx) => {
                   const taxable = Number(item.qty || 0) * Number(item.rate || 0);
-                  const gstAmt = (taxable * Number(item.gstRate || 0)) / 100;
-                  const total = taxable + (isGstEnabled ? gstAmt : 0);
+                  const gstAmt = isGstEnabled ? (taxable * globalGstPercent) / 100 : 0;
+                  const total = taxable + gstAmt;
                   return (
                     <tr key={idx} className="text-center align-top">
                       <td className="border border-blue-900 p-2">{idx + 1}</td>
@@ -686,7 +711,7 @@ const InvoiceGenerator = () => {
                       {isGstEnabled ? (
                         <>
                           <td className="border border-blue-900 p-2 text-right">{taxable.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                          <td className="border border-blue-900 p-2">{item.gstRate}.00</td>
+                          <td className="border border-blue-900 p-2">{globalGstPercent}.00</td>
                           <td className="border border-blue-900 p-2 text-right">{gstAmt.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
                           <td className="border border-blue-900 p-2 text-right font-bold">{total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
                         </>
@@ -729,9 +754,10 @@ const InvoiceGenerator = () => {
                 <div className="col-span-5 space-y-1 text-slate-700 pl-2 p-2">
                   {isGstEnabled ? (
                     <>
-                      <div className="flex justify-between"><span>Add : IGST @ 18%</span> <span className="font-mono">{totalGstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
-                      <div className="flex justify-between"><span>Add : CGST @ 9%</span> <span className="font-mono">0.00</span></div>
-                      <div className="flex justify-between"><span>Add : SGST @ 9%</span> <span className="font-mono">0.00</span></div>
+                      {taxes.igst && <div className="flex justify-between"><span>Add : IGST @ 18%</span> <span className="font-mono">{igstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>}
+                      {taxes.cgst && <div className="flex justify-between"><span>Add : CGST @ 9%</span> <span className="font-mono">{cgstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>}
+                      {taxes.sgst && <div className="flex justify-between"><span>Add : SGST @ 9%</span> <span className="font-mono">{sgstAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>}
+                      {(!taxes.igst && !taxes.cgst && !taxes.sgst) && <div className="flex justify-between text-slate-400"><span>No GST Selected</span> <span className="font-mono">0.00</span></div>}
                     </>
                   ) : (
                     <div className="flex justify-between font-bold"><span>Total Amount</span> <span className="font-mono">{taxableAmount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></div>
@@ -804,14 +830,13 @@ const InvoiceGenerator = () => {
               <p>1. Subject to Local Jurisdiction.</p>
               <p>2. This {isProforma ? 'estimate' : 'invoice'} is generated by {companyDetails.name || "us"}.</p>
               <p>3. Payment made to us within 15/45 days as per MSME Act.</p>
-              <p>4. Powered By TaxBucket</p>
             </div>
           </div>
         </>
       )}
 
       {/* ========================================================================= */}
-      {/* 🔴 VIEW 2: FULL PAGE HISTORY & LEDGER TAB */}
+      {/* VIEW 2: FULL PAGE HISTORY & LEDGER TAB */}
       {/* ========================================================================= */}
       {viewMode === 'history' && (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 animate-in fade-in zoom-in-95 print:hidden">
@@ -889,7 +914,7 @@ const InvoiceGenerator = () => {
                       )}
                     </div>
 
-                    {/* 🔴 PAYMENT TRACKER UI */}
+                    {/* PAYMENT TRACKER UI */}
                     <div className="flex items-center gap-5 lg:border-l lg:border-slate-200 lg:pl-6 w-full lg:w-auto">
                       <div className="flex flex-col items-end gap-2 w-full lg:w-56">
                         
@@ -946,7 +971,6 @@ const InvoiceGenerator = () => {
                          <button onClick={() => loadInvoiceForEdit(inv)} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg text-[10px] font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5">
                            <Edit size={12}/> Edit
                          </button>
-                         {/* 🔴 NEW: DELETE BUTTON (Admin Only if you want, or anyone. Keeping it for anyone currently) */}
                          {isAdmin && (
                            <button onClick={() => handleDeleteInvoice(inv._id)} className="flex-1 bg-rose-100 hover:bg-rose-200 text-rose-700 px-3 py-2 rounded-lg text-[10px] font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5">
                              <Trash2 size={12}/> Delete
@@ -962,9 +986,7 @@ const InvoiceGenerator = () => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODALS (Shared across both views) */}
-      {/* ========================================================================= */}
+      {/* MODALS */}
 
       {/* MODAL: SEND INVOICE VIA WHATSAPP/EMAIL */}
       {showSendModal && (
