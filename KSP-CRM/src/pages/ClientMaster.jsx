@@ -932,7 +932,7 @@
 
 
 
-import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -1034,7 +1034,6 @@ const ClientMaster = () => {
     });
   }, [clients, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
 
-  // 🔴 UPDATED: Total Billed ab Opening Balance ko bhi ginega taaki calculation theek dikhe
   const globalFinances = useMemo(() => {
     let billed = 0;
     let received = 0;
@@ -1054,7 +1053,6 @@ const ClientMaster = () => {
       received += invReceived;
     });
     
-    // Ab Billed = Invoice Amount + Purana Opeing Balance
     const finalBilled = billed + totalOpeningBalance;
     const finalDue = finalBilled - received;
 
@@ -1086,7 +1084,6 @@ const ClientMaster = () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Client Master');
 
-    // Define columns
     worksheet.columns = [
       { header: 'Client ID', key: 'clientId', width: 15 },
       { header: 'PAN', key: 'pan', width: 15 },
@@ -1262,22 +1259,21 @@ const ClientMaster = () => {
       : 'bg-rose-50 text-rose-700 border-rose-200';
   };
 
+  // 🔴 NAYA FUNCTION: EXACT BANK STATEMENT CHRONOLOGICAL LOGIC
   const generateLedger = () => {
-    let ledger = [];
-    let runningBalance = 0;
+    let transactions = [];
 
+    // 1. Opening Balance
     const openingBal = Number(clientToView?.openingBalance || 0);
     if (openingBal > 0) {
-       runningBalance += openingBal;
-       ledger.push({
+       transactions.push({
          id: 'opening-bal',
-         date: clientToView.createdAt, 
+         date: '1970-01-01T00:00:00.000Z', // Fake date taaki hamesha top par rahe
+         displayDate: clientToView.createdAt, 
          type: 'Opening',
          particulars: 'Opening Balance Carried Forward',
          debit: openingBal,
-         credit: 0,
-         balance: runningBalance,
-         status: 'Pending'
+         credit: 0
        });
     }
 
@@ -1287,39 +1283,65 @@ const ClientMaster = () => {
       (inv.customer?.name?.toLowerCase() === clientToView?.name?.toLowerCase())
     );
 
-    const sortedInvoices = [...clientInvoices].sort((a, b) => new Date(a.invoiceDate) - new Date(b.invoiceDate));
-
-    sortedInvoices.forEach(inv => {
+    clientInvoices.forEach(inv => {
       const billedAmount = inv.totalAmountAfterTax || 0;
-      runningBalance += billedAmount;
       
-      ledger.push({
+      // Invoice Record
+      transactions.push({
         id: `inv-${inv._id}`,
-        date: inv.invoiceDate,
+        date: inv.invoiceDate || inv.createdAt,
         type: 'Invoice / Work',
         particulars: `Invoice Raised (${inv.invoiceNo}) for ${inv.items?.[0]?.description || 'Professional Services'}`,
         debit: billedAmount,
-        credit: 0,
-        balance: runningBalance,
-        status: 'Billed'
+        credit: 0
       });
 
-      let actualReceived = Number(inv.amountReceived || 0);
-      if (inv.paymentStatus === 'Paid' && actualReceived === 0) actualReceived = billedAmount;
-
-      if (actualReceived > 0) {
-        runningBalance -= actualReceived;
-        ledger.push({
-          id: `pay-${inv._id}`,
-          date: inv.paymentDate || inv.updatedAt || inv.invoiceDate, 
-          type: 'Payment',
-          particulars: `Payment Received against Invoice ${inv.invoiceNo}`,
-          debit: 0,
-          credit: actualReceived,
-          balance: runningBalance,
-          status: 'Received'
+      // 🔴 NAYA LOGIC: Payment Array se alag-alag payments nikalna
+      if (inv.paymentHistory && inv.paymentHistory.length > 0) {
+        inv.paymentHistory.forEach((ph, idx) => {
+          transactions.push({
+            id: `pay-${inv._id}-${idx}`,
+            date: ph.date || inv.paymentDate || inv.updatedAt,
+            type: 'Payment',
+            particulars: `Part Payment Received against Invoice ${inv.invoiceNo}`,
+            debit: 0,
+            credit: Number(ph.amount || 0)
+          });
         });
+      } else {
+        // Fallback (Agar purane invoices me history array nahi hai toh)
+        let actualReceived = Number(inv.amountReceived || 0);
+        if (inv.paymentStatus === 'Paid' && actualReceived === 0) actualReceived = billedAmount;
+
+        if (actualReceived > 0) {
+          const pDate = inv.paymentDate || inv.updatedAt || inv.invoiceDate;
+          transactions.push({
+            id: `pay-${inv._id}`,
+            date: pDate,
+            type: 'Payment',
+            particulars: `Payment Received against Invoice ${inv.invoiceNo}`,
+            debit: 0,
+            credit: actualReceived
+          });
+        }
       }
+    });
+
+    // 3. SORT ALL TRANSACTIONS PURELY BY DATE (Old to New)
+    transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // 4. Calculate Final Running Balance sequentially
+    let runningBalance = 0;
+    let ledger = [];
+    
+    transactions.forEach(t => {
+       runningBalance += t.debit;
+       runningBalance -= t.credit;
+       
+       ledger.push({
+         ...t,
+         balance: runningBalance
+       });
     });
 
     return ledger;
@@ -1842,7 +1864,10 @@ const ClientMaster = () => {
                             {clientLedger.map((entry, index) => (
                               <tr key={entry.id} className="hover:bg-slate-50">
                                 <td className="py-3 px-4 font-semibold text-slate-600 whitespace-nowrap">
-                                  {entry.date ? new Date(entry.date).toLocaleDateString('en-IN') : '---'}
+                                  {entry.type === 'Opening' 
+                                    ? 'Opening' 
+                                    : (entry.date ? new Date(entry.date).toLocaleDateString('en-IN') : '---')
+                                  }
                                 </td>
                                 <td className="py-3 px-4">
                                   <div className="flex items-center gap-2">
@@ -2157,7 +2182,6 @@ const ClientMaster = () => {
                         <option value="Inactive">Inactive</option>
                       </select>
                     </div>
-                    {/* 🔴 NEW FIELD: OPENING BALANCE */}
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Opening Balance (₹)</label>
                       <input 

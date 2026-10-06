@@ -14,6 +14,8 @@ router.route('/me').get(protect, getMe);
 // Fetch all employees
 router.route('/employees').get(protect, authorize('Admin'), getEmployees);
 
+router.route('/all-developers').get(protect, getEmployees);
+
 // Add new employee
 router.route('/create-employee').post(protect, authorize('Admin'), createEmployee);
 

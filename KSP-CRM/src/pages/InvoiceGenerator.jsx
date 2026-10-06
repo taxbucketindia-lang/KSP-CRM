@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Printer, FileText, Plus, Trash2, History, Save, Edit, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing, Search, UserCircle  } from 'lucide-react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
+import { useLocation } from 'react-router-dom'; 
+import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail,Edit , MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing, Search, UserCircle, CalendarDays } from 'lucide-react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -56,11 +56,8 @@ const InvoiceGenerator = () => {
   const [isProforma, setIsProforma] = useState(false); 
   const [isGstEnabled, setIsGstEnabled] = useState(true); 
   
-  // 🔴 NAYA STATE: GST Checkboxes Configuration
   const [taxes, setTaxes] = useState({
-    igst: true,  // Default IGST @ 18% checked
-    cgst: false, // CGST @ 9%
-    sgst: false  // SGST @ 9%
+    igst: true, cgst: false, sgst: false 
   });
   
   const [companyDetails, setCompanyDetails] = useState(defaultCompany);
@@ -75,7 +72,12 @@ const InvoiceGenerator = () => {
   const [bank, setBank] = useState(axisBankPreset);
 
   const [historyList, setHistoryList] = useState([]);
+  
+  // 🔴 NAYA FILTERS STATES FOR HISTORY
   const [searchHistory, setSearchHistory] = useState(""); 
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('All');
+  const [historyDateFilter, setHistoryDateFilter] = useState({ start: '', end: '' });
+
   const [loading, setLoading] = useState(false);
 
   const [fetchingPan, setFetchingPan] = useState(false);
@@ -86,7 +88,12 @@ const InvoiceGenerator = () => {
   const [sendMethod, setSendMethod] = useState('whatsapp'); 
   const [sendContact, setSendContact] = useState('');
 
-  const [paymentModal, setPaymentModal] = useState({ open: false, invoice: null, amountReceived: '', mode: 'UPI/Online' });
+  // 🔴 UPDATED PAYMENT MODAL WITH DATE
+  const [paymentModal, setPaymentModal] = useState({ 
+    open: false, invoice: null, amountReceived: '', 
+    paymentDate: new Date().toISOString().split('T')[0], 
+    mode: 'UPI/Online' 
+  });
   const [processingPayment, setProcessingPayment] = useState(false);
 
   useEffect(() => {
@@ -98,12 +105,10 @@ const InvoiceGenerator = () => {
 
   const handleCompanyToggle = () => {
     if (isTaxbucket) {
-      setIsTaxbucket(false);
-      setCompanyDetails(emptyCompany);
+      setIsTaxbucket(false); setCompanyDetails(emptyCompany);
       setLogoImage(null); setStampImage(null); setCustomQrImage(null);
     } else {
-      setIsTaxbucket(true);
-      setCompanyDetails(defaultCompany);
+      setIsTaxbucket(true); setCompanyDetails(defaultCompany);
       setLogoImage(null); setStampImage(null); setCustomQrImage(null);
     }
   };
@@ -143,19 +148,13 @@ const InvoiceGenerator = () => {
     toast.success("✅ Client Data Auto-Filled!");
   };
 
-  // 🔴 DYNAMIC TAX CALCULATIONS (Based on Checkboxes)
   const taxableAmount = items.reduce((acc, item) => acc + (Number(item.qty || 0) * Number(item.rate || 0)), 0);
-  
   const igstAmount = (isGstEnabled && taxes.igst) ? (taxableAmount * 18) / 100 : 0;
   const cgstAmount = (isGstEnabled && taxes.cgst) ? (taxableAmount * 9) / 100 : 0;
   const sgstAmount = (isGstEnabled && taxes.sgst) ? (taxableAmount * 9) / 100 : 0;
-  
   const totalGstAmount = igstAmount + cgstAmount + sgstAmount;
   const totalAmountAfterTax = taxableAmount + totalGstAmount;
-  
-  // Total % display for the table row
   const globalGstPercent = (taxes.igst ? 18 : 0) + (taxes.cgst ? 9 : 0) + (taxes.sgst ? 9 : 0);
-
   const upiLink = `upi://pay?pa=${bank.upiId}&pn=${companyDetails.name || 'Business'}&am=${totalAmountAfterTax}&cu=INR`;
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(upiLink)}`;
 
@@ -184,11 +183,10 @@ const InvoiceGenerator = () => {
       await axios.delete(`${import.meta.env.VITE_API_URL}/invoices/${id}`, { headers });
       toast.success("Invoice deleted permanently!");
       fetchHistory(); 
-    } catch (error) {
-      toast.error("Failed to delete invoice");
-    }
+    } catch (error) { toast.error("Failed to delete invoice"); }
   };
 
+  // 🔴 UPDATED RECORD PAYMENT API WITH DATE
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     setProcessingPayment(true);
@@ -203,12 +201,25 @@ const InvoiceGenerator = () => {
       if (updatedTotalReceived >= invoiceTotal) newStatus = 'Paid';
       else if (updatedTotalReceived > 0) newStatus = 'Partially Paid';
 
+      const finalPaymentDate = new Date(paymentModal.paymentDate).toISOString();
+
+      // 🔴 NAYA LOGIC: Purani payments ko safe rakh ke nayi payment add karna
+      const currentHistory = paymentModal.invoice.paymentHistory || [];
+      const updatedHistory = [...currentHistory, {
+         date: finalPaymentDate,
+         amount: newAmountToAdd,
+         mode: 'UPI/Online'
+      }];
+
       await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${paymentModal.invoice._id}`, { 
-        amountReceived: updatedTotalReceived, paymentStatus: newStatus 
+        amountReceived: updatedTotalReceived, 
+        paymentStatus: newStatus,
+        paymentDate: finalPaymentDate, 
+        paymentHistory: updatedHistory // 🔴 Array backend me save hoga
       }, { headers });
 
       toast.success(`Payment recorded!`);
-      setPaymentModal({ open: false, invoice: null, amountReceived: '', mode: 'UPI' });
+      setPaymentModal({ open: false, invoice: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI' });
       fetchHistory(); 
     } catch (error) { toast.error("Failed to record payment."); } 
     finally { setProcessingPayment(false); }
@@ -310,6 +321,7 @@ const InvoiceGenerator = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
       const element = document.getElementById('invoice-printable');
       
+      // PDF Fix for responsive bugs
       const originalMargin = element.style.margin;
       const originalWidth = element.style.width;
       const originalMaxWidth = element.style.maxWidth;
@@ -338,15 +350,7 @@ const InvoiceGenerator = () => {
       
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
 
-      let payload = { 
-        invoiceId: currentInvId, 
-        method: sendMethod, 
-        contact: sendContact, 
-        customerName: customer.name, 
-        amount: totalAmountAfterTax, 
-        isProforma, 
-        invoiceNo 
-      };
+      let payload = { invoiceId: currentInvId, method: sendMethod, contact: sendContact, customerName: customer.name, amount: totalAmountAfterTax, isProforma, invoiceNo };
 
       if (sendMethod === 'email') {
         payload.pdfBase64 = pdf.output('datauristring').split(',')[1];
@@ -355,17 +359,12 @@ const InvoiceGenerator = () => {
       } else if (sendMethod === 'whatsapp') {
         pdf.save(`${invoiceNo.replace(/\//g, '-')}.pdf`);
         await axios.post(`${import.meta.env.VITE_API_URL}/invoices/${currentInvId}/send`, payload, { headers });
-        const text = `Hello ${customer.name},\n\nPlease find attached your ${isProforma ? 'Proforma Invoice' : 'Tax Invoice'} (${invoiceNo}) for Rs. ${totalAmountAfterTax.toLocaleString('en-IN')}.\n\nThank you,\n${companyDetails.name}`;
+        const text = `Dear ${customer.name},\n\nPlease find attached your ${isProforma ? 'Proforma Invoice' : 'Tax Invoice'} (${invoiceNo}) for Rs. ${totalAmountAfterTax.toLocaleString('en-IN')}.\n\nThank you,\nAccounts Team | TaxBucket`;
         window.open(`https://wa.me/91${sendContact.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
         toast.success(`PDF Downloaded! Attach it in WhatsApp.`);
       }
       setShowSendModal(false);
-    } catch (error) { 
-      console.error("PDF Generation Error:", error);
-      toast.error("Failed to send or generate PDF."); 
-    } finally { 
-      setLoading(false); 
-    }
+    } catch (error) { toast.error("Failed to send."); } finally { setLoading(false); }
   };
 
   const handleBankSelect = (e) => {
@@ -375,11 +374,39 @@ const InvoiceGenerator = () => {
     else if (val === 'custom') setBank(emptyBankPreset);
   };
 
-  const filteredHistory = historyList.filter(inv => {
-    if (!searchHistory) return true;
-    const s = searchHistory.toLowerCase();
-    return (inv.invoiceNo?.toLowerCase().includes(s) || inv.customer?.name?.toLowerCase().includes(s));
-  });
+  // 🔴 NAYA: ADVANCED HISTORY FILTERING & SORTING
+  const filteredHistory = useMemo(() => {
+    let list = [...historyList];
+
+    // 1. Sort by Date Descending (LATEST ALWAYS AT TOP)
+    list.sort((a, b) => new Date(b.invoiceDate || b.createdAt) - new Date(a.invoiceDate || a.createdAt));
+
+    // 2. Search Keyword Filter
+    if (searchHistory) {
+      const s = searchHistory.toLowerCase();
+      list = list.filter(inv => inv.invoiceNo?.toLowerCase().includes(s) || inv.customer?.name?.toLowerCase().includes(s));
+    }
+
+    // 3. Status Filter (Paid vs Pending)
+    if (historyStatusFilter === 'Paid') {
+      list = list.filter(inv => inv.paymentStatus === 'Paid');
+    } else if (historyStatusFilter === 'Pending') {
+      list = list.filter(inv => inv.paymentStatus !== 'Paid');
+    }
+
+    // 4. Date Range Filter
+    if (historyDateFilter.start) {
+      const start = new Date(historyDateFilter.start).getTime();
+      list = list.filter(inv => new Date(inv.invoiceDate || inv.createdAt).getTime() >= start);
+    }
+    if (historyDateFilter.end) {
+      const end = new Date(historyDateFilter.end);
+      end.setHours(23, 59, 59, 999);
+      list = list.filter(inv => new Date(inv.invoiceDate || inv.createdAt).getTime() <= end.getTime());
+    }
+
+    return list;
+  }, [historyList, searchHistory, historyStatusFilter, historyDateFilter]);
 
   const defaultLogo = "/taxbucket-logo.webp";
   const defaultStamp = "/taxbucket-stamp.png";
@@ -464,7 +491,6 @@ const InvoiceGenerator = () => {
               </div>
             </div>
 
-            {/* 🔴 NAYA: GST CONFIGURATION CHECKBOXES (Visible only if GST is enabled) */}
             {isGstEnabled && (
               <div className="grid grid-cols-3 gap-4 bg-blue-50/50 p-4 rounded-xl border border-blue-200 animate-in fade-in zoom-in-95">
                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 text-sm hover:text-blue-700 transition-colors">
@@ -587,7 +613,6 @@ const InvoiceGenerator = () => {
                   <div className="md:col-span-2">
                     <input type="number" placeholder="Rate (₹)" value={item.rate} onChange={(e) => { const list = [...items]; list[index].rate = Number(e.target.value); setItems(list); }} className="w-full p-2 border rounded text-xs"/>
                   </div>
-                  {/* 🔴 ITEM LEVEL GST READONLY - Driven by Global Checkboxes */}
                   {isGstEnabled && (
                     <div className="md:col-span-2 flex items-center h-full">
                       <span className="w-full text-center text-xs font-bold text-slate-500 bg-slate-200 border border-slate-300 rounded p-2">{globalGstPercent}% GST</span>
@@ -603,9 +628,6 @@ const InvoiceGenerator = () => {
             </div>
           </div>
           
-          {/* ========================================================= */}
-          {/* THE PRINTABLE DIV STAY IN GENERATOR TAB */}
-          {/* ========================================================= */}
           <div id="invoice-printable" className="bg-white p-8 border-2 border-blue-900 rounded-none shadow-xl max-w-[800px] mx-auto text-slate-900 font-sans relative">
             <div className="flex justify-between items-start border-b-2 border-blue-900 pb-4 mb-4">
               <div className="w-48">
@@ -839,7 +861,7 @@ const InvoiceGenerator = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* VIEW 2: FULL PAGE HISTORY & LEDGER TAB */}
+      {/* 🔴 VIEW 2: FULL PAGE HISTORY & LEDGER TAB */}
       {/* ========================================================================= */}
       {viewMode === 'history' && (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 animate-in fade-in zoom-in-95 print:hidden">
@@ -852,15 +874,21 @@ const InvoiceGenerator = () => {
               <p className="text-xs text-slate-500 font-medium mt-1">Track all generated invoices, record payments, and manage dues.</p>
             </div>
             
-            <div className="relative w-full md:w-1/3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search Invoice No or Client Name..." 
-                value={searchHistory} 
-                onChange={(e) => setSearchHistory(e.target.value)} 
-                className="w-full pl-9 pr-4 py-2 text-sm font-semibold border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 shadow-sm" 
-              />
+            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input type="text" placeholder="Search Invoice No or Client Name..." value={searchHistory} onChange={(e) => setSearchHistory(e.target.value)} className="w-full pl-9 pr-4 py-2 text-sm font-semibold border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 shadow-sm" />
+              </div>
+              <select value={historyStatusFilter} onChange={(e) => setHistoryStatusFilter(e.target.value)} className="text-sm font-bold border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 text-slate-700 outline-none">
+                <option value="All">All Statuses</option>
+                <option value="Paid">Fully Paid</option>
+                <option value="Pending">Dues Pending</option>
+              </select>
+              <div className="flex items-center gap-2">
+                 <input type="date" value={historyDateFilter.start} onChange={(e) => setHistoryDateFilter({...historyDateFilter, start: e.target.value})} className="p-2 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg outline-none"/>
+                 <span className="text-slate-400 font-bold text-xs">to</span>
+                 <input type="date" value={historyDateFilter.end} onChange={(e) => setHistoryDateFilter({...historyDateFilter, end: e.target.value})} className="p-2 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg outline-none"/>
+              </div>
             </div>
           </div>
           
@@ -956,7 +984,7 @@ const InvoiceGenerator = () => {
                     <div className="flex flex-row lg:flex-col items-center justify-end gap-2 w-full lg:w-auto border-t lg:border-t-0 pt-4 lg:pt-0 border-slate-200">
                        {percentPaid < 100 && (
                          <button 
-                           onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, mode: 'UPI' })} 
+                           onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI' })} 
                            className="w-full text-[10px] font-black uppercase tracking-wider bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-1.5"
                          >
                            <IndianRupee size={12}/> Record Pay
@@ -1054,7 +1082,7 @@ const InvoiceGenerator = () => {
               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                 <IndianRupee className="text-emerald-600" size={20}/> Record Payment
               </h3>
-              <button onClick={() => setPaymentModal({open: false, invoice: null, amountReceived: '', mode: 'UPI'})} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
+              <button onClick={() => setPaymentModal({open: false, invoice: null, amountReceived: '', paymentDate: '', mode: 'UPI'})} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
                 <X size={16}/>
               </button>
             </div>
@@ -1087,7 +1115,18 @@ const InvoiceGenerator = () => {
                   value={paymentModal.amountReceived}
                   onChange={(e) => setPaymentModal({...paymentModal, amountReceived: e.target.value})}
                   placeholder="Enter amount"
-                  className="w-full text-lg font-bold border border-emerald-200 bg-emerald-50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-emerald-800 transition-all shadow-sm"
+                  className="w-full text-lg font-bold border border-emerald-200 bg-emerald-50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-emerald-800 transition-all shadow-sm mb-3"
+                />
+
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5 flex items-center gap-1">
+                  <CalendarDays size={12}/> Payment Received Date
+                </label>
+                <input 
+                  type="date"
+                  required
+                  value={paymentModal.paymentDate}
+                  onChange={(e) => setPaymentModal({...paymentModal, paymentDate: e.target.value})}
+                  className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-700 transition-all shadow-sm"
                 />
               </div>
 
@@ -1104,5 +1143,3 @@ const InvoiceGenerator = () => {
 };
 
 export default InvoiceGenerator;
-
-

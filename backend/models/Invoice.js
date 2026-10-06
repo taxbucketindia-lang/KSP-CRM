@@ -49,6 +49,16 @@ paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], defa
   totalAmountAfterTax: { type: Number, required: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
+  paymentDate: {     // <---- 🔴 NAYA FIELD ADD KAREIN
+    type: Date
+  },
+
+  paymentHistory: [{
+    date: { type: Date },
+    amount: { type: Number },
+    mode: { type: String, default: 'Online' }
+  }],
+
   isGstEnabled: {
     type: Boolean,
     default: true 

@@ -854,12 +854,12 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
   TrendingUp, Users, Wallet, AlertOctagon, Trophy, 
   Target, Activity, ArrowUpRight, PieChart, Briefcase, 
   UserCheck, PhoneCall, CheckCircle2, History, ClipboardList,
-  FileText, Image, IndianRupee, Banknote,
+  FileText, Image, IndianRupee, Banknote, Edit,
   Plus, X, BellRing, CalendarDays, Circle, Trash2, ListTodo, CheckSquare, Loader2, AlertCircle
 } from 'lucide-react';
 
@@ -870,13 +870,20 @@ const CeoDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
     clients: [], leads: [], tasks: [], itr: [], gst: [], employees: [], invoices: [], attendance: [], 
-    clientMaster: [] // 🔴 NAYA: Client Master Data Array
+    clientMaster: []
   });
 
+  // ==========================================
   // SUCCESS LIST (TODO) STATES
+  // ==========================================
   const [ceoTodos, setCeoTodos] = useState([]);
   const [isTodoModalOpen, setIsTodoModalOpen] = useState(false);
   const [todoSaving, setTodoSaving] = useState(false);
+  
+  // 🔴 NAYE STATES: View All & Edit/Reschedule ke liye
+  const [isViewAllTodosOpen, setIsViewAllTodosOpen] = useState(false);
+  const [editingTodoId, setEditingTodoId] = useState(null);
+  const [popupDateFilter, setPopupDateFilter] = useState({ start: '', end: '' });
   
   const [todoTab, setTodoTab] = useState('Pending'); 
 
@@ -891,7 +898,6 @@ const CeoDashboard = () => {
     const fetchCeoData = async () => {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        // 🔴 NAYA: Added Client Master API Endpoint
         const [clientsRes, leadsRes, tasksRes, itrRes, gstRes, empRes, invoiceRes, attRes, todosRes, clientMasterRes] = await Promise.all([
           axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
@@ -914,7 +920,7 @@ const CeoDashboard = () => {
           employees: Array.isArray(empRes.data) ? empRes.data : [],
           invoices: Array.isArray(invoiceRes.data) ? invoiceRes.data : (invoiceRes.data?.data || invoiceRes.data?.invoices || []),
           attendance: Array.isArray(attRes.data) ? attRes.data : [],
-          clientMaster: Array.isArray(clientMasterRes.data?.data) ? clientMasterRes.data.data : (clientMasterRes.data || []) // 🔴 Data set kara
+          clientMaster: Array.isArray(clientMasterRes.data?.data) ? clientMasterRes.data.data : (clientMasterRes.data || [])
         });
 
         setCeoTodos(Array.isArray(todosRes.data) ? todosRes.data : []);
@@ -932,18 +938,49 @@ const CeoDashboard = () => {
   // ==========================================
   const handleTodoChange = (e) => setTodoForm({ ...todoForm, [e.target.name]: e.target.value });
 
+  const openNewTodo = () => {
+    setEditingTodoId(null);
+    setTodoForm({
+      title: '', description: '', 
+      dueDate: new Date().toISOString().split('T')[0],
+      endDate: new Date().toISOString().split('T')[0],
+      priority: 'High'
+    });
+    setIsTodoModalOpen(true);
+  };
+
+  const openEditTodo = (todo) => {
+    setEditingTodoId(todo._id);
+    setTodoForm({
+      title: todo.title,
+      description: todo.description || '',
+      dueDate: todo.dueDate ? new Date(todo.dueDate).toISOString().split('T')[0] : '',
+      endDate: todo.endDate ? new Date(todo.endDate).toISOString().split('T')[0] : '',
+      priority: todo.priority || 'Medium'
+    });
+    setIsTodoModalOpen(true);
+  };
+
   const handleTodoSave = async (e) => {
     e.preventDefault();
     if (!todoForm.title || !todoForm.endDate) return toast.error("Title and End Date are mandatory!");
     setTodoSaving(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.post(`${import.meta.env.VITE_API_URL}/todos`, todoForm, { headers });
-      toast.success("Task added to Success List! Reminder Active.");
-      setCeoTodos([...ceoTodos, res.data]);
+      
+      if (editingTodoId) {
+        // UPDATE EXISTING TASK (Reschedule)
+        const res = await axios.put(`${import.meta.env.VITE_API_URL}/todos/${editingTodoId}`, todoForm, { headers });
+        toast.success("Task Rescheduled/Updated Successfully!");
+        setCeoTodos(prev => prev.map(t => t._id === editingTodoId ? res.data : t));
+      } else {
+        // CREATE NEW TASK
+        const res = await axios.post(`${import.meta.env.VITE_API_URL}/todos`, todoForm, { headers });
+        toast.success("Task added to Success List! Reminder Active.");
+        setCeoTodos([...ceoTodos, res.data]);
+        setTodoTab('Pending');
+      }
       setIsTodoModalOpen(false);
-      setTodoTab('Pending');
-      setTodoForm({ title: '', description: '', dueDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], priority: 'High' });
     } catch (error) {
       toast.error("Error saving task");
     } finally { setTodoSaving(false); }
@@ -982,6 +1019,7 @@ const CeoDashboard = () => {
     return 'text-emerald-600 bg-emerald-50 border-emerald-200';
   };
 
+  // 1. Regular Filtered Todos for Slider
   const filteredCeoTodos = useMemo(() => {
     let filtered = ceoTodos;
     if (todoTab !== 'All') {
@@ -994,6 +1032,28 @@ const CeoDashboard = () => {
     });
   }, [ceoTodos, todoTab]);
 
+  // 2. 🔴 NAYA: Modal View with Date Filters
+  const modalFilteredTodos = useMemo(() => {
+    let filtered = ceoTodos;
+    if (todoTab !== 'All') {
+      filtered = filtered.filter(t => t.status === todoTab);
+    }
+    if (popupDateFilter.start) {
+      const start = new Date(popupDateFilter.start).getTime();
+      filtered = filtered.filter(t => new Date(t.dueDate).getTime() >= start || new Date(t.endDate).getTime() >= start);
+    }
+    if (popupDateFilter.end) {
+      const end = new Date(popupDateFilter.end);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(t => new Date(t.endDate).getTime() <= end.getTime());
+    }
+    return filtered.sort((a, b) => {
+      if (a.status === 'Completed' && b.status !== 'Completed') return 1;
+      if (a.status !== 'Completed' && b.status === 'Completed') return -1;
+      return new Date(a.endDate || a.dueDate) - new Date(b.endDate || b.dueDate);
+    });
+  }, [ceoTodos, todoTab, popupDateFilter]);
+
 
   // ==========================================
   // CEO Level Analytics Calculation
@@ -1001,13 +1061,11 @@ const CeoDashboard = () => {
   const analytics = useMemo(() => {
     const { clients, leads, tasks, itr, gst, employees, invoices, attendance, clientMaster } = data;
     
-    // 1. FINANCES (Now pulling from both Invoices and Client Master)
     let totalRevenue = 0;
     let totalCollected = 0;
-    let totalOpeningBalance = 0; // 🔴 NEW VARIABLE
+    let totalOpeningBalance = 0; 
     const totalInvoicesGenerated = Array.isArray(invoices) ? invoices.length : 0;
 
-    // 🔴 Calculate Opening Balances first
     if (Array.isArray(clientMaster)) {
       clientMaster.forEach(client => {
         totalOpeningBalance += Number(client.openingBalance || 0);
@@ -1028,17 +1086,14 @@ const CeoDashboard = () => {
       });
     }
     
-    // 🔴 Total Expected Revenue ab Opening Balance ko bhi ginega
     const finalTotalRevenue = totalRevenue + totalOpeningBalance;
     const outstanding = finalTotalRevenue - totalCollected;
     const collectionRate = finalTotalRevenue > 0 ? Math.round((totalCollected / finalTotalRevenue) * 100) : 0;
 
-    // Latest 5 Invoices
     const latestInvoices = Array.isArray(invoices) 
       ? [...invoices].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5) 
       : [];
 
-    // 2. Sales & Leads Funnel
     const totalLeads = leads?.length || 0;
     const newLeads = Array.isArray(leads) ? leads.filter(l => l.status === 'New').length : 0;
     const inTalksLeads = Array.isArray(leads) ? leads.filter(l => l.status === 'Follow-up').length : 0;
@@ -1061,13 +1116,11 @@ const CeoDashboard = () => {
       });
     }
 
-    // 3. Operations
     const overdueTasks = Array.isArray(tasks) ? tasks.filter(t => t.isOverdue && t.currentStatus !== 'Completed').length : 0;
     const defectiveItr = Array.isArray(itr) ? itr.filter(i => i.itrProcessedStatus === 'Defective').length : 0;
     const gstErrors = Array.isArray(gst) ? gst.filter(g => g.gstStatus === 'Error/Mismatch').length : 0;
     const totalCriticalIssues = defectiveItr + gstErrors;
 
-    // 4. EMPLOYEE PERFORMANCE LEADERBOARD
     const employeeStats = [];
     if (Array.isArray(employees) && Array.isArray(tasks)) {
       employees.forEach(emp => {
@@ -1090,7 +1143,6 @@ const CeoDashboard = () => {
       employeeStats.sort((a,b) => b.score - a.score);
     }
 
-    // 5. GENERAL LIVE TEAM ACTIVITY LOG
     let allActivities = [];
 
     if (Array.isArray(leads)) {
@@ -1144,7 +1196,6 @@ const CeoDashboard = () => {
     allActivities.sort((a, b) => b.time - a.time);
     const recentActivities = allActivities.slice(0, 25);
 
-    // 6. BILLING LOG (SIRF INVOICES)
     let billingLogs = [];
 
     if (Array.isArray(invoices)) {
@@ -1166,7 +1217,6 @@ const CeoDashboard = () => {
     billingLogs.sort((a,b) => b.time - a.time);
     const recentBillingLogs = billingLogs.slice(0, 20); 
 
-    // 7. HR / ATTENDANCE TODAY
     const offset = new Date().getTimezoneOffset() * 60000;
     const localToday = new Date(Date.now() - offset).toISOString().split('T')[0];
 
@@ -1225,7 +1275,7 @@ const CeoDashboard = () => {
                             : 0;
 
     return {
-      totalRevenue: finalTotalRevenue, // 🔴 UPDATED
+      totalRevenue: finalTotalRevenue, 
       totalCollected, 
       outstanding, 
       collectionRate, 
@@ -1264,7 +1314,7 @@ const CeoDashboard = () => {
         </div>
       </div>
 
-      {/* CEO SUCCESS LIST */}
+      {/* 🔴 CEO SUCCESS LIST WIDGET */}
       <div className="mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
           <h2 className="text-sm font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
@@ -1272,6 +1322,7 @@ const CeoDashboard = () => {
           </h2>
           
           <div className="flex items-center gap-3 w-full sm:w-auto">
+            {/* TABS AB BAHAR HAIN */}
             <div className="flex bg-slate-100 p-1 rounded-xl">
               {['All', 'Pending', 'Completed'].map(tab => (
                 <button 
@@ -1284,7 +1335,11 @@ const CeoDashboard = () => {
               ))}
             </div>
             
-            <button onClick={() => setIsTodoModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all ml-auto">
+            {/* VIEW ALL & ADD TASK BUTTONS */}
+            <button onClick={() => setIsViewAllTodosOpen(true)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ml-auto sm:ml-0 border border-indigo-200">
+              View All
+            </button>
+            <button onClick={openNewTodo} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
               <Plus size={14}/> Add Task
             </button>
           </div>
@@ -1310,7 +1365,9 @@ const CeoDashboard = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className={`text-sm font-bold truncate ${isCompleted ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={todo.title}>{todo.title}</h3>
-                          <button onClick={() => deleteTodo(todo._id)} className="text-slate-300 hover:text-rose-500 ml-auto"><Trash2 size={14}/></button>
+                          {/* 🔴 RESCHEDULE / EDIT BUTTON */}
+                          <button onClick={() => openEditTodo(todo)} className="text-slate-400 hover:text-indigo-600 ml-auto bg-slate-50 hover:bg-indigo-50 p-1.5 rounded transition-colors" title="Reschedule / Edit"><Edit size={14}/></button>
+                          <button onClick={() => deleteTodo(todo._id)} className="text-slate-400 hover:text-rose-600 ml-1 bg-slate-50 hover:bg-rose-50 p-1.5 rounded transition-colors" title="Delete"><Trash2 size={14}/></button>
                         </div>
                         {!isCompleted && (
                           <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getPriorityColor(todo.priority)}`}>
@@ -1338,10 +1395,9 @@ const CeoDashboard = () => {
         </div>
       </div>
 
-      {/* TIER 1: FINANCIAL HEALTH (Invoice + Opening Balances) */}
+      {/* TIER 1: FINANCIAL HEALTH */}
       <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2 mt-4">1. Business Health</h2>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-        
         <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 p-4 opacity-20"><Wallet size={80} /></div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Total Expected Revenue (Inv + O.B.)</p>
@@ -1427,8 +1483,6 @@ const CeoDashboard = () => {
 
       {/* TIER 3: DEEP LEAD ANALYTICS & BOTTLENECKS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
-        
-        {/* LEAD FUNNEL */}
         <div>
           <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">3. Sales Pipeline & Conversions</h2>
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm h-full flex flex-col">
@@ -1481,13 +1535,11 @@ const CeoDashboard = () => {
                   </div>
                 </div>
             </div>
-
           </div>
         </div>
 
         {/* RED FLAGS & NEW ATTENDANCE BLOCK */}
         <div className="flex flex-col gap-6 h-full">
-          
           <div className="bg-rose-50 border border-rose-100 p-5 rounded-3xl shadow-sm">
             <h2 className="text-xs font-black uppercase tracking-widest text-rose-500 mb-3 flex items-center gap-2"><AlertOctagon size={16}/> 4. Operational Red Flags</h2>
             <div className="grid grid-cols-2 gap-4">
@@ -1547,7 +1599,6 @@ const CeoDashboard = () => {
                 </div>
              </div>
           </div>
-
         </div>
       </div>
 
@@ -1618,7 +1669,6 @@ const CeoDashboard = () => {
 
       {/* TIER 5: EMPLOYEE LEADERBOARD */}
       <div className="pt-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
           <div className="lg:col-span-2">
               <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> 7. Team Performance Leaderboard</h2>
               <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden h-[400px] flex flex-col">
@@ -1714,13 +1764,105 @@ const CeoDashboard = () => {
           </div>
       </div>
 
-      {/* NEW TASK MODAL FOR CEO */}
+      {/* 🔴 NEW MODAL: VIEW ALL SUCCESS LIST (Full Filter View) */}
+      {isViewAllTodosOpen && (
+        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-slate-50 rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
+            
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
+              <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                <ListTodo className="text-indigo-600" size={24}/> All Success List Tasks
+              </h2>
+              <button onClick={() => setIsViewAllTodosOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"><X size={20} /></button>
+            </div>
+
+            <div className="p-4 bg-white border-b border-slate-100 flex flex-col sm:flex-row gap-4 justify-between items-center shrink-0">
+               {/* TABS IN MODAL */}
+               <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+                 {['All', 'Pending', 'Completed'].map(tab => (
+                   <button 
+                     key={tab} 
+                     onClick={() => setTodoTab(tab)}
+                     className={`flex-1 px-4 py-2 text-xs font-bold rounded-lg transition-all ${todoTab === tab ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                   >
+                     {tab}
+                   </button>
+                 ))}
+               </div>
+
+               {/* DATE FILTER IN MODAL */}
+               <div className="flex items-center gap-2 w-full sm:w-auto">
+                 <input type="date" value={popupDateFilter.start} onChange={(e) => setPopupDateFilter({...popupDateFilter, start: e.target.value})} className="p-2 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none w-full"/>
+                 <span className="text-slate-400 font-bold text-xs">to</span>
+                 <input type="date" value={popupDateFilter.end} onChange={(e) => setPopupDateFilter({...popupDateFilter, end: e.target.value})} className="p-2 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none w-full"/>
+                 {(popupDateFilter.start || popupDateFilter.end) && (
+                   <button onClick={() => setPopupDateFilter({start:'', end:''})} className="p-2 bg-rose-50 text-rose-500 rounded-lg hover:bg-rose-100 transition-colors" title="Clear Dates"><X size={14}/></button>
+                 )}
+               </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 {modalFilteredTodos.length === 0 ? (
+                    <div className="col-span-1 md:col-span-2 text-center py-16 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">
+                      <CheckSquare size={48} className="mx-auto mb-3 opacity-50 text-slate-300"/>
+                      <p className="font-bold text-slate-600">No tasks found.</p>
+                      <p className="text-xs">Adjust your date filters or add a new task.</p>
+                    </div>
+                 ) : (
+                    modalFilteredTodos.map(todo => {
+                      const isCompleted = todo.status === 'Completed';
+                      const overdue = isTodoOverdue(todo);
+                      return (
+                        <div key={todo._id} className={`bg-white p-4 rounded-2xl border flex flex-col ${isCompleted ? 'border-slate-200 opacity-60 grayscale-[50%]' : overdue ? 'border-rose-200 shadow-sm bg-rose-50/10' : 'border-slate-200 shadow-sm hover:shadow-md'} transition-all`}>
+                          <div className="flex items-start gap-3">
+                            <button onClick={() => toggleTodoStatus(todo)} className={`mt-0.5 transition-colors ${isCompleted ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}>
+                              {isCompleted ? <CheckCircle2 size={20} className="fill-emerald-50"/> : <Circle size={20} />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className={`text-sm font-bold truncate ${isCompleted ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={todo.title}>{todo.title}</h3>
+                                {/* 🔴 RESCHEDULE / EDIT BUTTON */}
+                                <button onClick={() => openEditTodo(todo)} className="text-slate-400 hover:text-indigo-600 ml-auto bg-slate-50 hover:bg-indigo-50 p-1.5 rounded transition-colors" title="Reschedule / Edit"><Edit size={14}/></button>
+                                <button onClick={() => deleteTodo(todo._id)} className="text-slate-400 hover:text-rose-600 ml-1 bg-slate-50 hover:bg-rose-50 p-1.5 rounded transition-colors"><Trash2 size={14}/></button>
+                              </div>
+                              {!isCompleted && (
+                                <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${getPriorityColor(todo.priority)}`}>
+                                  {todo.priority}
+                                </span>
+                              )}
+                              {overdue && !isCompleted && (
+                                <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border bg-rose-100 text-rose-700 border-rose-200 inline-flex items-center gap-1 animate-pulse ml-2">
+                                  <AlertCircle size={10}/> Overdue
+                                </span>
+                              )}
+                              {todo.description && (
+                                <p className={`text-xs mt-2 line-clamp-2 leading-relaxed ${isCompleted ? 'text-slate-400' : 'text-slate-500'}`}>{todo.description}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className={`mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] font-bold uppercase ${isCompleted ? 'text-slate-300' : 'text-slate-400'}`}>
+                            <span className="flex items-center gap-1"><CalendarDays size={12}/> {new Date(todo.dueDate).toLocaleDateString('en-IN', {day:'numeric', month:'short'})}</span>
+                            <span className={`flex items-center gap-1 ${!isCompleted ? 'text-rose-500' : ''}`}>End: {new Date(todo.endDate).toLocaleDateString('en-IN', {day:'numeric', month:'short'})}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                 )}
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      )}
+
+      {/* NEW TASK / EDIT TASK MODAL */}
       {isTodoModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
               <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                <BellRing className="text-indigo-600" size={20}/> Add CEO Task
+                <BellRing className="text-indigo-600" size={20}/> {editingTodoId ? 'Reschedule / Edit Task' : 'Add CEO Task'}
               </h2>
               <button onClick={() => setIsTodoModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
             </div>
@@ -1759,7 +1901,7 @@ const CeoDashboard = () => {
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsTodoModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
                 <button type="submit" disabled={todoSaving} className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md transition-all flex items-center gap-2">
-                  {todoSaving ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16} />} Save Task
+                  {todoSaving ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16} />} {editingTodoId ? 'Save Changes' : 'Add Task'}
                 </button>
               </div>
             </form>
