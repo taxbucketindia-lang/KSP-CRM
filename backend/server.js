@@ -29,6 +29,7 @@ import fssaiRoutes from './routes/fssaiRoutes.js';
 import expenseRoutes from './routes/expenseRoutes.js';
 import todoRoutes from './routes/todoRoutes.js';
 import birthdayRoutes from './routes/birthdayRoutes.js';
+import devTaskRoutes from './routes/devTaskRoutes.js';
 
 
 dotenv.config();
@@ -66,6 +67,7 @@ app.use('/api/fssai', fssaiRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/todos', todoRoutes);
 app.use('/api/birthdays', birthdayRoutes);
+app.use('/api/devtasks', devTaskRoutes);
 
 // ==========================================
 // CRON JOB FOR DAILY FOLLOW-UP REMINDERS

@@ -698,7 +698,7 @@ const Layout = () => {
       category: 'IT Department',
       icon: Laptop,
       items: [
-        { path: '/it/development', name: 'Development Tasks P', icon: Code },
+        { path: '/it/dev-task', name: 'Development Tasks', icon: Code },
         { path: '/it/crm-issues', name: 'CRM Issues P', icon: Wrench },
         { path: '/it/website', name: 'Website P', icon: Globe },
         { path: '/it/automation', name: 'Automation P', icon: Zap }

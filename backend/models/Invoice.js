@@ -53,6 +53,12 @@ paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], defa
     type: Boolean,
     default: true 
   },
+
+  taxes: {
+    igst: { type: Boolean, default: true },
+    cgst: { type: Boolean, default: false },
+    sgst: { type: Boolean, default: false }
+  },
   
   // 🔴 NEW: Logs history for sent invoices
   sendLogs: [{
