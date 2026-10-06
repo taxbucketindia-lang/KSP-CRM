@@ -783,7 +783,9 @@ const InvoiceGenerator = () => {
                     <p><strong>Branch</strong> : {bank.branch}</p>
                     <p><strong>Acc. Number</strong> : {bank.accNo}</p>
                     <p><strong>IFSC</strong> : {bank.ifsc}</p>
-                    <p><strong>UPI ID</strong> : {bank.upiId[0]}</p>
+                    {bank.bankName !== "Axis Bank Ltd" && (
+    <p><strong>UPI ID</strong> : {bank.upiId}</p>
+  )}
                   </div>
                 </div>
                 
