@@ -5,7 +5,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { 
   Users, Search, Plus, X, Briefcase, Mail, Phone, 
   IndianRupee, Calendar, CheckCircle2, Edit, AlertCircle, RefreshCw, 
-  KeyRound, ShieldCheck, Trash2, AlertTriangle, Clock, CreditCard, Eye, UserMinus,Store,
+  KeyRound, ShieldCheck, Trash2, AlertTriangle, Clock, CreditCard, Eye, UserMinus, Award
 } from 'lucide-react';
 
 const EmployeeMaster = () => {
@@ -36,6 +36,7 @@ const EmployeeMaster = () => {
     employmentType: 'Full Time', joiningDate: '', probationPeriod: '', confirmationDate: '',
     shiftStartTime: '09:30',
     salaryType: 'Salary', basic: 0, hra: 0, otherAllowance: 0,
+    paidLeaveBalance: 0, // 🔴 NAYA: Initial Balance Field
     pan: '', uanEsi: '', 
     bankName: '', accountNo: '', ifscCode: '', upiId: '',
     status: 'Active', remarks: '',
@@ -82,6 +83,7 @@ const EmployeeMaster = () => {
         ...formData,
         role: formData.role,
         companyName: 'SkyEdge Taxbucket India', 
+        paidLeaveBalance: Number(formData.paidLeaveBalance || 0), // 🔴 NAYA: Save Leave Balance
         salaryStructure: {
           basic: Number(formData.basic),
           hra: Number(formData.hra),
@@ -110,6 +112,8 @@ const EmployeeMaster = () => {
 
   const handleEdit = (emp) => {
     setEditingId(emp._id);
+    const parseDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
+
     setFormData({
       empId: emp.empId || '', 
       name: emp.name || '', mobile: emp.mobile || '', email: emp.email || '',
@@ -125,6 +129,7 @@ const EmployeeMaster = () => {
       basic: emp.salaryStructure?.basic || 0,
       hra: emp.salaryStructure?.hra || 0,
       otherAllowance: emp.salaryStructure?.otherAllowance || 0,
+      paidLeaveBalance: emp.paidLeaveBalance || 0, // 🔴 NAYA: Load Leave Balance
       pan: emp.pan || '', uanEsi: emp.uanEsi || '',
       bankName: emp.bankName || '', accountNo: emp.accountNo || '', ifscCode: emp.ifscCode || '', upiId: emp.upiId || '',
       status: emp.status || 'Active', remarks: emp.remarks || '',
@@ -205,7 +210,7 @@ const EmployeeMaster = () => {
           <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
             <Users size={28} className="text-blue-600" /> Employee Master
           </h1>
-          <p className="text-sm text-slate-500 mt-1 font-medium">Manage HR details, portal access, and offboarding for your team.</p>
+          <p className="text-sm text-slate-500 mt-1 font-medium">Manage HR details, portal access, and leave carry forward balance.</p>
         </div>
         <button onClick={openNewModal} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all">
           <Plus size={18} strokeWidth={2.5} /> Onboard New Employee
@@ -241,15 +246,16 @@ const EmployeeMaster = () => {
                 <th className="py-4 px-5">Department & Role</th>
                 <th className="py-4 px-5">Contact & Login</th>
                 <th className="py-4 px-5">Gross Salary</th>
+                <th className="py-4 px-5 text-center">Leave Balance</th> {/* 🔴 NAYA: Leave Balance Header */}
                 <th className="py-4 px-5">Status & Exit Info</th>
                 <th className="py-4 px-5 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {loading ? (
-                <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Employees...</td></tr>
+                <tr><td colSpan="7" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Employees...</td></tr>
               ) : filteredEmployees.length === 0 ? (
-                <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No employees found.</td></tr>
+                <tr><td colSpan="7" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No employees found.</td></tr>
               ) : (
                 filteredEmployees.map((emp) => {
                   const isCurrentUser = emp.userId?._id === user._id || emp.email === user.email;
@@ -276,7 +282,6 @@ const EmployeeMaster = () => {
                       </p>
                     </td>
 
-                    {/* 🔴 NAYA: HOVER TO UNBLUR CONTACT DETAILS */}
                     <td className="py-3 px-5">
                       <div className="group/blur cursor-pointer" title="Hover to view details">
                         <div className="blur-[5px] group-hover/blur:blur-none transition-all duration-300 select-none group-hover/blur:select-auto">
@@ -286,7 +291,6 @@ const EmployeeMaster = () => {
                       </div>
                     </td>
 
-                    {/* 🔴 NAYA: HOVER TO UNBLUR GROSS SALARY */}
                     <td className="py-3 px-5">
                       <div className="group/blur cursor-pointer inline-block" title="Hover to view salary">
                         <div className="blur-[5px] group-hover/blur:blur-none transition-all duration-300 select-none group-hover/blur:select-auto">
@@ -298,6 +302,13 @@ const EmployeeMaster = () => {
                       </div>
                     </td>
                     
+                    {/* 🔴 NAYA: LEAVE BALANCE COLUMN */}
+                    <td className="py-3 px-5 text-center">
+                       <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg text-xs font-black shadow-sm">
+                         <Award size={12}/> {emp.paidLeaveBalance || 0} Days
+                       </span>
+                    </td>
+
                     <td className="py-3 px-5">
                       <div className="flex flex-col items-start gap-1">
                         <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusBadge(emp.status)}`}>
@@ -351,7 +362,6 @@ const EmployeeMaster = () => {
       {isViewModalOpen && viewingEmployee && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
-            
             <div className="flex justify-between items-center px-8 py-5 border-b border-slate-100 bg-slate-50/80">
               <div className="flex items-center gap-4">
                 <div className="h-14 w-14 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-black text-xl shadow-inner border border-blue-200">
@@ -409,9 +419,10 @@ const EmployeeMaster = () => {
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Shift Time</p>
                       <p className="text-sm font-bold text-purple-700 flex items-center gap-1"><Clock size={12}/> {viewingEmployee.shiftStartTime || 'N/A'}</p>
                     </div>
+                    {/* 🔴 NAYA: LEAVE BALANCE IN PROFILE VIEW */}
                     <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Employment</p>
-                      <p className="text-sm font-semibold text-slate-800">{viewingEmployee.employmentType || 'N/A'}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Carry Forward Leaves</p>
+                      <p className="text-sm font-black text-amber-700 flex items-center gap-1"><Award size={14}/> {viewingEmployee.paidLeaveBalance || 0} Days</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Joining Date</p>
@@ -565,7 +576,7 @@ const EmployeeMaster = () => {
               
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 
-                {/* Portal Login & Access Control */}
+                {/* Portal Login Credentials */}
                 <div className="md:col-span-4 bg-blue-50/40 p-5 rounded-2xl border border-blue-100">
                   <h3 className="text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-blue-200/50 pb-2 mb-4 flex items-center gap-2">
                     <ShieldCheck size={14}/> Portal Login Credentials
@@ -603,10 +614,9 @@ const EmployeeMaster = () => {
                       </select>
                     </div>
                   </div>
-                  {editingId && <p className="text-[10px] text-blue-500 mt-2 font-medium italic">* To reset password, use the Key icon in the employee table list.</p>}
                 </div>
 
-                {/* SECTION 1: Personal & Job Details */}
+                {/* Job Details */}
                 <div className="md:col-span-4 mt-2">
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b pb-2 mb-4 flex items-center gap-2"><Briefcase size={14}/> Job Details</h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -630,6 +640,11 @@ const EmployeeMaster = () => {
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-purple-600 mb-1 flex items-center gap-1"><Clock size={12}/> Shift Time (In)</label>
                       <input type="time" value={formData.shiftStartTime} onChange={(e) => setFormData({...formData, shiftStartTime: e.target.value})} className="w-full p-2.5 border border-purple-200 bg-purple-50/50 rounded-xl text-sm font-bold text-purple-700"/>
+                    </div>
+                    {/* 🔴 NAYA: OPENING LEAVE BALANCE INPUT */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-amber-700 mb-1 flex items-center gap-1"><Award size={12}/> Opening Leave Balance</label>
+                      <input type="number" min="0" value={formData.paidLeaveBalance} onChange={(e) => setFormData({...formData, paidLeaveBalance: e.target.value})} className="w-full p-2.5 border border-amber-200 bg-amber-50/50 rounded-xl text-sm font-bold text-amber-800"/>
                     </div>
 
                     <div>
@@ -721,7 +736,7 @@ const EmployeeMaster = () => {
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">UAN / ESI No.</label>
                       <input type="text" value={formData.uanEsi} onChange={(e) => setFormData({...formData, uanEsi: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold uppercase"/>
                     </div>
-                    <div>
+                    <div className="col-span-2">
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Internal Remarks</label>
                       <input type="text" placeholder="General notes" value={formData.remarks} onChange={(e) => setFormData({...formData, remarks: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold"/>
                     </div>
@@ -777,7 +792,7 @@ const EmployeeMaster = () => {
 
               <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">Cancel</button>
-                <button type="submit" className="px-8 py-2.5 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2">
+                <button type="submit" className="px-8 py-2.5 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-all flex items-center gap-2">
                   <CheckCircle2 size={18} /> {editingId ? 'Update Employee' : 'Onboard Employee'}
                 </button>
               </div>

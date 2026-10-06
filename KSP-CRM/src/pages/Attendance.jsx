@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   CalendarDays, Search, Building2, UserCircle, Save, 
-  Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle, UserMinus
+  Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle, UserMinus, Award
 } from 'lucide-react';
 
 const Attendance = () => {
@@ -307,6 +307,8 @@ const Attendance = () => {
     }
   };
 
+  const activeEmployeeData = employees.find(e => e._id === selectedEmployee);
+
   const summary = useMemo(() => {
     let totalDays = sheetData.length;
     let present = 0, absent = 0, halfDay = 0, leave = 0, wfh = 0, holiday = 0, weeklyOff = 0;
@@ -326,9 +328,21 @@ const Attendance = () => {
 
     const paidDays = present + wfh + holiday + weeklyOff + (halfDay * 0.5);
     const lopDays = absent + leave + (halfDay * 0.5); 
+    
+    // 🔴 FETCH LIVE LEAVE BALANCE FROM EMPLOYEE
+    const dbLeaveBalance = activeEmployeeData?.paidLeaveBalance || 0;
+    
+    // 🔴 FIX: ONLY deduct explicitly marked "Leave" statuses
+    const explicitLeavesTaken = leave; 
+    const leavesUsed = Math.min(dbLeaveBalance + 1, explicitLeavesTaken); // Max they can use is what they have + 1 earned this month
+    const remainingLeaveBalance = Math.max(0, dbLeaveBalance + 1 - leavesUsed);
 
-    return { totalDays, present, absent, halfDay, leave, wfh, holiday, weeklyOff, paidDays, lopDays, totalLateMarks };
-  }, [sheetData]);
+    return { 
+      totalDays, present, absent, halfDay, leave, wfh, holiday, weeklyOff, 
+      paidDays, lopDays, totalLateMarks, 
+      remainingLeaveBalance, dbLeaveBalance, leavesUsed 
+    };
+  }, [sheetData, activeEmployeeData]);
 
   const teamTodayStats = useMemo(() => {
     let present = [];
@@ -380,8 +394,6 @@ const Attendance = () => {
       </div>
     );
   };
-
-  const activeEmployeeData = employees.find(e => e._id === selectedEmployee);
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6 pb-0 relative">
@@ -454,7 +466,7 @@ const Attendance = () => {
           </div>
       </div>
 
-      {/* 3. STICKY COMMAND CENTER (Sticks to top of screen on page scroll) */}
+      {/* 3. STICKY COMMAND CENTER */}
       <div className="sticky -top-6 z-40 px-6 -mx-6 space-y-4">
         
         {/* Controls */}
@@ -508,9 +520,9 @@ const Attendance = () => {
           </div>
         )}
 
-        {/* Summary Cards */}
+        {/* 🔴 SUMMARY CARDS WITH PAID LEAVE COUNTER */}
         {sheetData.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
             <div className="bg-slate-800 text-white p-3 rounded-2xl shadow-sm border border-slate-700">
               <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Total Days</p>
               <h3 className="text-xl font-black mt-1">{summary.totalDays}</h3>
@@ -522,6 +534,14 @@ const Attendance = () => {
             <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-rose-500">
               <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Absent/Leave</p>
               <h3 className="text-xl font-black text-rose-700 mt-1">{summary.absent + summary.leave}</h3>
+            </div>
+            {/* 🔴 NAYA: LIVE UPDATING PAID LEAVES AVAILABLE CARD */}
+            <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200 shadow-sm border-l-4 border-l-indigo-500">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1" title="Remaining / Total in Database"><Award size={10}/> Leaves Available</p>
+              <h3 className="text-xl font-black text-indigo-700 mt-1">
+                 {summary.remainingLeaveBalance} <span className="text-[10px] text-indigo-500 font-medium">/ {summary.dbLeaveBalance + 1} Total</span>
+              </h3>
+              <div className="text-[8px] font-bold text-indigo-400 uppercase mt-0.5">Used: {summary.leavesUsed}</div>
             </div>
             <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 shadow-sm">
               <p className="text-[9px] font-bold uppercase tracking-wider text-amber-600">Late Entries</p>
@@ -542,7 +562,6 @@ const Attendance = () => {
       {/* 4. TABLE SECTION */}
       <div className="sticky z-40 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
         
-        {/* 🔴 LINE 1 (Title): Yeh bahar hai, isliye hamesha table ke upar fixed rahegi */}
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center z-20 shadow-sm ">
            <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
              Monthly Time & Location Sheet 
@@ -555,11 +574,9 @@ const Attendance = () => {
            </button>
         </div>
 
-        {/* 🔴 INTERNAL SCROLL CONTAINER: Isme max-height hai, taaki dates scroll hon par heding nahi */}
         <div className="overflow-auto custom-scrollbar max-h-[48vh]">
           <table className="w-full text-left border-collapse min-w-[1000px] relative">
             
-            {/* 🔴 LINE 2 (Headers): Sticky Top */}
             <thead className="sticky top-0 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-wider">
                 <th className="py-3 px-4 w-28 bg-slate-100">Date</th>

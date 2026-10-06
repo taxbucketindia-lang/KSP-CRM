@@ -32,6 +32,11 @@ const employeeSchema = new mongoose.Schema({
     gross: { type: Number, default: 0 }
   },
 
+  paidLeaveBalance: { 
+    type: Number, 
+    default: 0 
+  },
+
   pan: { type: String },
   uanEsi: { type: String },
   
