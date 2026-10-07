@@ -99,19 +99,75 @@ export const createTask = async (req, res) => {
 
 // @desc    Update Task Status (With Activity Logging)
 // @route   PUT /api/tasks/:id/status
+// export const updateTaskStatus = async (req, res) => {
+//   try {
+//     const { currentStatus, pendingReason, nextFollowUpDate, remarks } = req.body;
+    
+//     const task = await Task.findById(req.params.id);
+//     if (!task) return res.status(404).json({ message: 'Task not found' });
+
+//     // --- RULE #3 LOGIC ---
+//     if (currentStatus === 'Completed' && task.reviewer) {
+//       // Agar Reviewer assigned hai, toh Employee direct Completed nahi kar sakta
+//       if (req.user.role !== 'Admin' && req.user._id.toString() !== task.reviewer.toString()) {
+//         return res.status(403).json({ 
+//           message: "Review is mandatory! Please change status to 'Under Review'. Only the assigned reviewer or Admin can mark this as Completed." 
+//         });
+//       }
+//     }
+
+//     const oldStatus = task.currentStatus;
+
+//     task.currentStatus = currentStatus;
+//     task.pendingReason = pendingReason || task.pendingReason;
+//     task.nextFollowUpDate = nextFollowUpDate || task.nextFollowUpDate;
+    
+//     // Output File Upload Handle (Agar form data ya S3 URL pass hua hai)
+//     if (req.body.outputFileUrl) {
+//       task.outputFileUrl = req.body.outputFileUrl;
+//       task.outputRequired = 'Yes';
+//     } else if (req.file) { 
+//       task.outputFileUrl = req.file.path;
+//       task.outputRequired = 'Yes';
+//     }
+
+//     if (remarks) {
+//       const dateStamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' });
+//       task.remarks = `${task.remarks || ''}\n\n📅 ${dateStamp} | 👤 ${req.user.name}\n💬 ${remarks}`;
+//     }
+
+//     const updatedTask = await task.save();
+
+//     if (oldStatus !== currentStatus) {
+//       await TaskActivity.create({
+//         task: updatedTask._id,
+//         user: req.user._id,
+//         oldStatus: oldStatus,
+//         newStatus: currentStatus,
+//         remark: remarks || `Status changed to ${currentStatus}`
+//       });
+//     }
+
+//     res.json(updatedTask);
+//   } catch (error) {
+//     res.status(400).json({ message: error.message });
+//   }
+// };
+// @desc    Update Task Status (With Activity Logging)
+// @route   PUT /api/tasks/:id/status
 export const updateTaskStatus = async (req, res) => {
   try {
-    const { currentStatus, pendingReason, nextFollowUpDate, remarks } = req.body;
+    // 🔴 1. Yahan destructuring mein 'govStatus' add karein
+    const { currentStatus, govStatus, pendingReason, nextFollowUpDate, remarks } = req.body; 
     
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
     // --- RULE #3 LOGIC ---
     if (currentStatus === 'Completed' && task.reviewer) {
-      // Agar Reviewer assigned hai, toh Employee direct Completed nahi kar sakta
       if (req.user.role !== 'Admin' && req.user._id.toString() !== task.reviewer.toString()) {
         return res.status(403).json({ 
-          message: "Review is mandatory! Please change status to 'Under Review'. Only the assigned reviewer or Admin can mark this as Completed." 
+          message: "Review is mandatory! Please change status to 'Under Review'." 
         });
       }
     }
@@ -119,6 +175,12 @@ export const updateTaskStatus = async (req, res) => {
     const oldStatus = task.currentStatus;
 
     task.currentStatus = currentStatus;
+    
+    // 🔴 2. YAHAN NAYI LINE ADD KAREIN taaki database me save ho
+    if (govStatus !== undefined) {
+      task.govStatus = govStatus;
+    }
+    
     task.pendingReason = pendingReason || task.pendingReason;
     task.nextFollowUpDate = nextFollowUpDate || task.nextFollowUpDate;
     

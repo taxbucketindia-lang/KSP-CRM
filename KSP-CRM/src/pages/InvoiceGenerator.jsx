@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useLocation } from 'react-router-dom'; 
-import { Printer, FileText, Plus, Trash2, History, Save, Building2, ToggleLeft, ToggleRight, Send, Mail,Edit , MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing, Search, UserCircle, CalendarDays } from 'lucide-react';
+import { Printer, FileText, Plus, Trash2, History, Save, Edit, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing, Search, UserCircle, CalendarDays, Wallet } from 'lucide-react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -67,16 +67,20 @@ const InvoiceGenerator = () => {
   const [customQrImage, setCustomQrImage] = useState(null);
   const [stampImage, setStampImage] = useState(null);
 
-  const [customer, setCustomer] = useState({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
+  // 🔴 UPDATED: tradeName added here so it correctly ties to the input
+  const [customer, setCustomer] = useState({ name: "", tradeName: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
   const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0 }]);
   const [bank, setBank] = useState(axisBankPreset);
 
   const [historyList, setHistoryList] = useState([]);
   
-  // 🔴 NAYA FILTERS STATES FOR HISTORY
   const [searchHistory, setSearchHistory] = useState(""); 
   const [historyStatusFilter, setHistoryStatusFilter] = useState('All');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('All'); 
   const [historyDateFilter, setHistoryDateFilter] = useState({ start: '', end: '' });
+
+  const [historyPage, setHistoryPage] = useState(1);
+  const itemsPerHistoryPage = 8;
 
   const [loading, setLoading] = useState(false);
 
@@ -88,11 +92,11 @@ const InvoiceGenerator = () => {
   const [sendMethod, setSendMethod] = useState('whatsapp'); 
   const [sendContact, setSendContact] = useState('');
 
-  // 🔴 UPDATED PAYMENT MODAL WITH DATE
   const [paymentModal, setPaymentModal] = useState({ 
     open: false, invoice: null, amountReceived: '', 
     paymentDate: new Date().toISOString().split('T')[0], 
-    mode: 'UPI/Online' 
+    mode: 'UPI / Online', 
+    discount: ''
   });
   const [processingPayment, setProcessingPayment] = useState(false);
 
@@ -140,9 +144,15 @@ const InvoiceGenerator = () => {
 
   const handleSelectSuggestion = (client) => {
     setCustomer(prev => ({
-      ...prev, pan: client.pan, name: client.name || prev.name, phone: client.mobile || prev.phone,
-      email: client.email || prev.email, address: [client.address, client.district, client.pinCode].filter(Boolean).join(', ') || prev.address,
-      gstin: client.gstin || prev.gstin, placeOfSupply: client.state || prev.placeOfSupply
+      ...prev, 
+      pan: client.pan, 
+      name: client.name || prev.name, 
+      tradeName: client.tradeName || prev.tradeName, // 🔴 NAYA: Fetch Trade Name 
+      phone: client.mobile || prev.phone,
+      email: client.email || prev.email, 
+      address: [client.address, client.district, client.pinCode].filter(Boolean).join(', ') || prev.address,
+      gstin: client.gstin || prev.gstin, 
+      placeOfSupply: client.state || prev.placeOfSupply
     }));
     setShowSuggestions(false);
     toast.success("✅ Client Data Auto-Filled!");
@@ -186,16 +196,20 @@ const InvoiceGenerator = () => {
     } catch (error) { toast.error("Failed to delete invoice"); }
   };
 
-  // 🔴 UPDATED RECORD PAYMENT API WITH DATE
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     setProcessingPayment(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
+      
       const currentReceived = Number(paymentModal.invoice.amountReceived || 0);
       const newAmountToAdd = Number(paymentModal.amountReceived);
+      const discountAmt = Number(paymentModal.discount || 0);
+      
       const invoiceTotal = Number(paymentModal.invoice.totalAmountAfterTax);
-      const updatedTotalReceived = currentReceived + newAmountToAdd;
+      
+      const totalCreditNow = newAmountToAdd + discountAmt;
+      const updatedTotalReceived = currentReceived + totalCreditNow; 
       
       let newStatus = 'Pending';
       if (updatedTotalReceived >= invoiceTotal) newStatus = 'Paid';
@@ -203,23 +217,23 @@ const InvoiceGenerator = () => {
 
       const finalPaymentDate = new Date(paymentModal.paymentDate).toISOString();
 
-      // 🔴 NAYA LOGIC: Purani payments ko safe rakh ke nayi payment add karna
       const currentHistory = paymentModal.invoice.paymentHistory || [];
       const updatedHistory = [...currentHistory, {
          date: finalPaymentDate,
          amount: newAmountToAdd,
-         mode: 'UPI/Online'
+         mode: paymentModal.mode,
+         discount: discountAmt 
       }];
 
       await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${paymentModal.invoice._id}`, { 
         amountReceived: updatedTotalReceived, 
         paymentStatus: newStatus,
         paymentDate: finalPaymentDate, 
-        paymentHistory: updatedHistory // 🔴 Array backend me save hoga
+        paymentHistory: updatedHistory 
       }, { headers });
 
-      toast.success(`Payment recorded!`);
-      setPaymentModal({ open: false, invoice: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI' });
+      toast.success(`Payment & Adjustments recorded!`);
+      setPaymentModal({ open: false, invoice: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '' });
       fetchHistory(); 
     } catch (error) { toast.error("Failed to record payment."); } 
     finally { setProcessingPayment(false); }
@@ -300,7 +314,8 @@ const InvoiceGenerator = () => {
     setInvoiceId(null); setInvoiceNo(""); setInvoiceDate(""); setIsTaxbucket(true); setIsProforma(false);
     setIsGstEnabled(true); setTaxes({ igst: true, cgst: false, sgst: false });
     setCompanyDetails(defaultCompany); setShowQr(true);
-    setCustomer({ name: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
+    // 🔴 UPDATED: tradeName cleared properly
+    setCustomer({ name: "", tradeName: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
     setItems([{ description: '', hsn: '', qty: 1, rate: 0 }]); setBank(axisBankPreset); 
     setLogoImage(null); setStampImage(null); setCustomQrImage(null);
   };
@@ -321,7 +336,6 @@ const InvoiceGenerator = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
       const element = document.getElementById('invoice-printable');
       
-      // PDF Fix for responsive bugs
       const originalMargin = element.style.margin;
       const originalWidth = element.style.width;
       const originalMaxWidth = element.style.maxWidth;
@@ -374,27 +388,30 @@ const InvoiceGenerator = () => {
     else if (val === 'custom') setBank(emptyBankPreset);
   };
 
-  // 🔴 NAYA: ADVANCED HISTORY FILTERING & SORTING
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [searchHistory, historyStatusFilter, historyTypeFilter, historyDateFilter]);
+
   const filteredHistory = useMemo(() => {
     let list = [...historyList];
-
-    // 1. Sort by Date Descending (LATEST ALWAYS AT TOP)
     list.sort((a, b) => new Date(b.invoiceDate || b.createdAt) - new Date(a.invoiceDate || a.createdAt));
 
-    // 2. Search Keyword Filter
     if (searchHistory) {
       const s = searchHistory.toLowerCase();
       list = list.filter(inv => inv.invoiceNo?.toLowerCase().includes(s) || inv.customer?.name?.toLowerCase().includes(s));
     }
-
-    // 3. Status Filter (Paid vs Pending)
     if (historyStatusFilter === 'Paid') {
       list = list.filter(inv => inv.paymentStatus === 'Paid');
     } else if (historyStatusFilter === 'Pending') {
       list = list.filter(inv => inv.paymentStatus !== 'Paid');
     }
 
-    // 4. Date Range Filter
+    if (historyTypeFilter === 'Proforma') {
+      list = list.filter(inv => inv.isProforma === true);
+    } else if (historyTypeFilter === 'Invoice') {
+      list = list.filter(inv => !inv.isProforma);
+    }
+
     if (historyDateFilter.start) {
       const start = new Date(historyDateFilter.start).getTime();
       list = list.filter(inv => new Date(inv.invoiceDate || inv.createdAt).getTime() >= start);
@@ -404,9 +421,15 @@ const InvoiceGenerator = () => {
       end.setHours(23, 59, 59, 999);
       list = list.filter(inv => new Date(inv.invoiceDate || inv.createdAt).getTime() <= end.getTime());
     }
-
     return list;
-  }, [historyList, searchHistory, historyStatusFilter, historyDateFilter]);
+  }, [historyList, searchHistory, historyStatusFilter, historyTypeFilter, historyDateFilter]);
+
+  const paginatedHistory = useMemo(() => {
+    const startIndex = (historyPage - 1) * itemsPerHistoryPage;
+    return filteredHistory.slice(startIndex, startIndex + itemsPerHistoryPage);
+  }, [filteredHistory, historyPage]);
+
+  const totalHistoryPages = Math.ceil(filteredHistory.length / itemsPerHistoryPage);
 
   const defaultLogo = "/taxbucket-logo.webp";
   const defaultStamp = "/taxbucket-stamp.png";
@@ -554,8 +577,11 @@ const InvoiceGenerator = () => {
               </div>
               <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Invoice Number *</label><input type="text" placeholder="e.g. INV-001" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
               <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Invoice Date</label><input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
-              <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer Name / M/S *</label><input type="text" placeholder="Enter client name" value={customer.name} onChange={(e) => setCustomer({...customer, name: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
-              <div className="md:col-span-2"><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer Address</label><input type="text" placeholder="Enter full address" value={customer.address} onChange={(e) => setCustomer({...customer, address: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
+              <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer Name *</label><input type="text" placeholder="Enter client name" value={customer.name} onChange={(e) => setCustomer({...customer, name: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
+              
+              <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Firm / Trade Name</label><input type="text" placeholder="Optional" value={customer.tradeName} onChange={(e) => setCustomer({...customer, tradeName: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
+              
+              <div className="md:col-span-3"><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer Address</label><input type="text" placeholder="Enter full address" value={customer.address} onChange={(e) => setCustomer({...customer, address: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
               <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer Phone</label><input type="text" placeholder="Mobile number" value={customer.phone} onChange={(e) => setCustomer({...customer, phone: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
               <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer Email</label><input type="text" placeholder="Email address" value={customer.email} onChange={(e) => setCustomer({...customer, email: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
               <div><label className="block text-xs font-bold uppercase text-slate-500 mb-1">Customer GSTIN</label><input type="text" placeholder="GSTIN number" value={customer.gstin} onChange={(e) => setCustomer({...customer, gstin: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm font-semibold"/></div>
@@ -670,7 +696,8 @@ const InvoiceGenerator = () => {
             <div className="grid grid-cols-12 border border-blue-900 text-xs mb-4">
               <div className="col-span-7 p-3 border-r border-blue-900 space-y-1">
                 <p className="font-bold text-blue-900 border-b border-blue-100 pb-1 mb-1">Customer Detail</p>
-                <p><strong>M/S</strong> : <span className="font-bold">{customer.name || '---'}</span></p>
+                {/* 🔴 NAYA: PRINT VIEW MEIN FIRM NAME DIKHEGA */}
+                <p><strong>M/S</strong> : <span className="font-bold">{customer.name || '---'} {customer.tradeName ? `(${customer.tradeName})` : ''}</span></p>
                 <p><strong>Address</strong> : {customer.address || '---'}</p>
                 <p><strong>Phone</strong> : {customer.phone ? `-${customer.phone}` : '---'}</p>
                 <p><strong>Email</strong> : {customer.email || '---'}</p>
@@ -877,17 +904,34 @@ const InvoiceGenerator = () => {
             <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input type="text" placeholder="Search Invoice No or Client Name..." value={searchHistory} onChange={(e) => setSearchHistory(e.target.value)} className="w-full pl-9 pr-4 py-2 text-sm font-semibold border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 shadow-sm" />
+                <input 
+                  type="text" 
+                  placeholder="Search Invoice No or Client Name..." 
+                  value={searchHistory} 
+                  onChange={(e) => setSearchHistory(e.target.value)} 
+                  className="w-full pl-9 pr-4 py-2 text-sm font-semibold border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 shadow-sm" 
+                />
               </div>
+              
+              <select value={historyTypeFilter} onChange={(e) => setHistoryTypeFilter(e.target.value)} className="text-sm font-bold border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 text-slate-700 outline-none">
+                <option value="All">All Types</option>
+                <option value="Invoice">Tax Invoice</option>
+                <option value="Proforma">Proforma</option>
+              </select>
+
               <select value={historyStatusFilter} onChange={(e) => setHistoryStatusFilter(e.target.value)} className="text-sm font-bold border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 text-slate-700 outline-none">
                 <option value="All">All Statuses</option>
                 <option value="Paid">Fully Paid</option>
                 <option value="Pending">Dues Pending</option>
               </select>
-              <div className="flex items-center gap-2">
-                 <input type="date" value={historyDateFilter.start} onChange={(e) => setHistoryDateFilter({...historyDateFilter, start: e.target.value})} className="p-2 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg outline-none"/>
+              
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                 <input type="date" value={historyDateFilter.start} onChange={(e) => setHistoryDateFilter({...historyDateFilter, start: e.target.value})} className="p-2 text-xs font-bold text-slate-600 bg-transparent outline-none cursor-pointer"/>
                  <span className="text-slate-400 font-bold text-xs">to</span>
-                 <input type="date" value={historyDateFilter.end} onChange={(e) => setHistoryDateFilter({...historyDateFilter, end: e.target.value})} className="p-2 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg outline-none"/>
+                 <input type="date" value={historyDateFilter.end} onChange={(e) => setHistoryDateFilter({...historyDateFilter, end: e.target.value})} className="p-2 text-xs font-bold text-slate-600 bg-transparent outline-none cursor-pointer"/>
+                 {(historyDateFilter.start || historyDateFilter.end) && (
+                   <button onClick={() => setHistoryDateFilter({start:'', end:''})} className="text-rose-500 hover:text-rose-700 ml-1"><X size={14}/></button>
+                 )}
               </div>
             </div>
           </div>
@@ -897,15 +941,15 @@ const InvoiceGenerator = () => {
                 <Loader2 size={32} className="animate-spin text-purple-500 mb-4" />
                 <p className="font-bold text-sm">Loading Ledger...</p>
              </div>
-          ) : filteredHistory.length === 0 ? (
+          ) : paginatedHistory.length === 0 ? (
             <div className="text-center py-20 text-slate-400 border border-dashed border-slate-200 rounded-2xl bg-slate-50">
                <History size={48} className="mx-auto text-slate-300 mb-3 opacity-50"/>
                <p className="font-bold text-slate-600">No invoices found.</p>
-               <p className="text-xs mt-1">Start generating invoices from the generator tab.</p>
+               <p className="text-xs mt-1">Start generating invoices from the generator tab or adjust filters.</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredHistory.map((inv) => {
+              {paginatedHistory.map((inv) => {
                 const total = Number(inv.totalAmountAfterTax || 0);
                 const received = Number(inv.amountReceived || 0);
                 const due = total - received;
@@ -931,14 +975,15 @@ const InvoiceGenerator = () => {
                          {new Date(inv.invoiceDate || inv.createdAt).toLocaleDateString('en-IN', {day: 'numeric', month:'short', year:'numeric'})}
                       </p>
                       
-                      {inv.sendLogs && inv.sendLogs.length > 0 && (
-                        <div className="mt-3 space-y-1 border-t border-slate-200 pt-2">
-                          {inv.sendLogs.map((log, idx) => (
-                            <p key={idx} className="text-[10px] font-bold text-slate-500 flex flex-wrap items-center gap-1.5 w-fit">
+                      {/* 🔴 NAYA: DETAILED PAYMENT HISTORY VISUAL */}
+                      {inv.paymentHistory && inv.paymentHistory.length > 0 && (
+                        <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
+                          <p className="text-[9px] font-black uppercase tracking-wider text-emerald-700 mb-1">Payment Logs:</p>
+                          {inv.paymentHistory.map((ph, idx) => (
+                            <p key={idx} className="text-[10px] font-bold text-slate-600 flex flex-wrap items-center gap-1.5 w-fit bg-emerald-50/50 px-2 py-1 rounded border border-emerald-100">
                               <CheckCircle2 size={12} className="text-emerald-500"/>
-                              Sent via <span className="uppercase text-slate-700 bg-slate-200 px-1 rounded">{log.method}</span> 
-                              to <span className="text-slate-800 font-mono">{log.contact}</span> 
-                              on {new Date(log.sentAt).toLocaleDateString('en-IN')}
+                              Received <span className="text-emerald-700 font-black">₹{Number(ph.amount).toLocaleString('en-IN')}</span> via {ph.mode} on {new Date(ph.date).toLocaleDateString('en-IN')}
+                              {ph.discount > 0 && <span className="text-rose-500 ml-1 bg-rose-50 px-1 rounded border border-rose-100">(+ ₹{ph.discount} Discount)</span>}
                             </p>
                           ))}
                         </div>
@@ -952,7 +997,7 @@ const InvoiceGenerator = () => {
                         {/* Progress Bar & Amount */}
                         <div className="w-full">
                            <div className="flex justify-between text-[11px] font-black uppercase tracking-wider mb-1.5">
-                             <span className="text-emerald-600 flex items-center gap-0.5"><IndianRupee size={12}/> Paid: {received}</span>
+                             <span className="text-emerald-600 flex items-center gap-0.5"><IndianRupee size={12}/> Cleared: {received}</span>
                              <span className={due > 0 ? "text-rose-500 flex items-center gap-0.5" : "text-slate-400 flex items-center gap-0.5"}><IndianRupee size={12}/> Due: {due}</span>
                            </div>
                            <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
@@ -984,7 +1029,7 @@ const InvoiceGenerator = () => {
                     <div className="flex flex-row lg:flex-col items-center justify-end gap-2 w-full lg:w-auto border-t lg:border-t-0 pt-4 lg:pt-0 border-slate-200">
                        {percentPaid < 100 && (
                          <button 
-                           onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI' })} 
+                           onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '' })} 
                            className="w-full text-[10px] font-black uppercase tracking-wider bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-1.5"
                          >
                            <IndianRupee size={12}/> Record Pay
@@ -1014,6 +1059,35 @@ const InvoiceGenerator = () => {
               })}
             </div>
           )}
+
+          {/* HISTORY PAGINATION CONTROLS */}
+          {totalHistoryPages > 1 && (
+            <div className="flex items-center justify-between mt-6 p-4 bg-slate-50 border border-slate-200 rounded-2xl shadow-sm">
+              <span className="text-xs font-bold text-slate-500">
+                Showing {(historyPage - 1) * itemsPerHistoryPage + 1} to {Math.min(historyPage * itemsPerHistoryPage, filteredHistory.length)} of {filteredHistory.length} Invoices
+              </span>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setHistoryPage(p => Math.max(1, p - 1))} 
+                  disabled={historyPage === 1}
+                  className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
+                >
+                  Previous
+                </button>
+                <span className="text-xs font-bold text-purple-700 bg-purple-50 px-3 py-2 rounded-lg border border-purple-100">
+                  Page {historyPage} of {totalHistoryPages}
+                </span>
+                <button 
+                  onClick={() => setHistoryPage(p => Math.min(totalHistoryPages, p + 1))} 
+                  disabled={historyPage === totalHistoryPages}
+                  className="px-4 py-2 text-xs font-bold bg-purple-600 text-white border border-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
@@ -1082,7 +1156,7 @@ const InvoiceGenerator = () => {
               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                 <IndianRupee className="text-emerald-600" size={20}/> Record Payment
               </h3>
-              <button onClick={() => setPaymentModal({open: false, invoice: null, amountReceived: '', paymentDate: '', mode: 'UPI'})} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
+              <button onClick={() => setPaymentModal({open: false, invoice: null, amountReceived: '', paymentDate: '', mode: 'UPI / Online', discount: ''})} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
                 <X size={16}/>
               </button>
             </div>
@@ -1094,27 +1168,71 @@ const InvoiceGenerator = () => {
                   <span className="text-slate-800 font-mono">₹{paymentModal.invoice.totalAmountAfterTax?.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-xs font-bold text-slate-500">
-                  <span>Already Received:</span>
+                  <span>Already Cleared:</span>
                   <span className="text-emerald-600 font-mono">₹{paymentModal.invoice.amountReceived?.toLocaleString('en-IN') || 0}</span>
                 </div>
                 <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-black text-slate-700">
                   <span>Current Due:</span>
                   <span className="text-rose-600 font-mono">₹{(paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0)).toLocaleString('en-IN')}</span>
                 </div>
+
+                {Number(paymentModal.discount) > 0 && (
+                  <div className="flex justify-between text-xs font-bold text-rose-500 mt-1">
+                    <span>Discount Applying:</span>
+                    <span className="font-mono">- ₹{Number(paymentModal.discount).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+                {Number(paymentModal.discount) > 0 && (
+                  <div className="flex justify-between text-sm font-black text-emerald-700 mt-1">
+                    <span>Net Payable Now:</span>
+                    <span className="font-mono">₹{Math.max(0, (paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0) - Number(paymentModal.discount))).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                    Mode of Payment
+                  </label>
+                  <select 
+                    value={paymentModal.mode}
+                    onChange={(e) => setPaymentModal({...paymentModal, mode: e.target.value})}
+                    className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-700 shadow-sm"
+                  >
+                    <option value="UPI / Online">UPI / Online</option>
+                    <option value="NEFT / RTGS">NEFT / RTGS / IMPS</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Adjust against Adv.">Adjust against Adv.</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                    Discount Given (₹)
+                  </label>
+                  <input 
+                    type="number"
+                    min="0"
+                    value={paymentModal.discount}
+                    onChange={(e) => setPaymentModal({...paymentModal, discount: e.target.value})}
+                    placeholder="e.g. 200"
+                    className="w-full text-sm font-bold border border-rose-200 bg-rose-50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-rose-500/20 text-rose-800 transition-all shadow-sm"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Amount Received Now
+                  Amount Received Now (₹)
                 </label>
                 <input 
                   type="number"
                   required
-                  min="1"
-                  max={paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0)}
+                  min="0"
+                  max={paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0) - Number(paymentModal.discount || 0)}
                   value={paymentModal.amountReceived}
                   onChange={(e) => setPaymentModal({...paymentModal, amountReceived: e.target.value})}
-                  placeholder="Enter amount"
+                  placeholder="Enter amount received"
                   className="w-full text-lg font-bold border border-emerald-200 bg-emerald-50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-emerald-800 transition-all shadow-sm mb-3"
                 />
 

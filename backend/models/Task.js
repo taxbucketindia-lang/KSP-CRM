@@ -111,8 +111,13 @@ const taskSchema = new mongoose.Schema({
   
   currentStatus: { 
     type: String, 
-    enum: ['Not Started', 'In Progress', 'Pending Client', 'Pending Internal', 'Waiting for Documents', 'Under Review', 'Correction Required', 'Approved', 'Completed', 'Cancelled', 'On Hold'],
+    enum: ['Not Started', 'In Progress', 'Pending Client', 'Pending Internal','Pending Government', 'Waiting for Documents', 'Under Review', 'Correction Required', 'Approved', 'Completed', 'Cancelled', 'On Hold'],
     default: 'Not Started' 
+  },
+
+  govStatus: { 
+    type: String, 
+    default: '' 
   },
   
   pendingReason: { type: String, default: '' },

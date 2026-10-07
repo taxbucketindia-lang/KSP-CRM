@@ -25,6 +25,7 @@ paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], defa
     name: { type: String, required: true },
     address: String,
     phone: String,
+    tradeName: String,
     email: String,
     gstin: String,
     pan: String,
@@ -56,7 +57,8 @@ paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], defa
   paymentHistory: [{
     date: { type: Date },
     amount: { type: Number },
-    mode: { type: String, default: 'Online' }
+    mode: { type: String, default: 'Online' },
+    discount: { type: Number, default: 0 }
   }],
 
   isGstEnabled: {
