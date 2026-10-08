@@ -505,7 +505,7 @@ import {
   X, Bell, ChevronRight, ChevronDown, ShieldCheck, PhoneCall, CheckCircle2,
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
   Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo,
-  AlertCircle, BarChart3, TrendingUp, Code, Globe, Zap, Cake
+  AlertCircle, BarChart3, TrendingUp, Code, Globe, Zap, Cake,RotateCwFadingClock
 } from 'lucide-react';
 
 const Layout = () => {
@@ -608,10 +608,11 @@ const Layout = () => {
         { path: '/', name: 'Dashboard', icon: LayoutDashboard },
         ...(user?.role !== 'Admin' ? [
           { path: '/my-portal', name: 'My Portal', icon: CalendarClock },
-          { path: '/todo', name: 'Success List', icon: ListTodo }
+          { path: '/todo', name: 'Success List', icon: ListTodo },
         ] : []),
         // { path: '/custom-dashboards', name: 'Role Dashboards P', icon: BarChart3 },
                 { path: '/work-management', name: 'Work Management', icon: ClipboardList },
+                { path: '/taskhandover', name: 'Task Handover', icon: RotateCwFadingClock },
 
       ]
     },
