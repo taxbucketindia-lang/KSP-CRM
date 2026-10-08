@@ -311,3 +311,81 @@ export const deleteTask = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
+
+// @desc    Get Paginated Tasks (Server-side Pagination)
+// @route   GET /api/tasks/paginated
+export const getPaginatedTasks = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, status, priority, employee, startDate, endDate } = req.query;
+
+    let query = {};
+    // Role based check
+    if (req.user.role !== 'Admin') {
+      query.assignedTo = req.user._id;
+    }
+
+    // Filters
+    if (search) {
+      query.$or = [
+        { taskId: { $regex: search, $options: 'i' } },
+        { taskTitle: { $regex: search, $options: 'i' } },
+        { clientName: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (status && status !== 'ALL') {
+      if (status === 'OVERDUE') {
+         query.dueDate = { $lt: new Date() };
+         query.currentStatus = { $nin: ['Completed', 'Cancelled'] };
+      } else {
+         query.currentStatus = status;
+      }
+    }
+
+    if (priority && priority !== 'ALL') query.priority = priority;
+    if (employee && employee !== 'ALL') query.assignedTo = employee;
+
+    if (startDate || endDate) {
+      query.taskDate = {};
+      if (startDate) query.taskDate.$gte = new Date(startDate);
+      if (endDate) {
+         let ed = new Date(endDate);
+         ed.setHours(23, 59, 59, 999);
+         query.taskDate.$lte = ed;
+      }
+    }
+
+    // Kitne task skip karne hain
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const tasks = await Task.find(query)
+      .populate('assignedTo', 'name empId role')
+      .populate('assignedBy', 'name')
+      .populate('reviewer', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const totalCount = await Task.countDocuments(query);
+
+    // Global Stats (KPI Cards ke liye)
+    let statQuery = req.user.role !== 'Admin' ? { assignedTo: req.user._id } : {};
+    const total = await Task.countDocuments(statQuery);
+    const inProgress = await Task.countDocuments({ ...statQuery, currentStatus: 'In Progress' });
+    const pendingClient = await Task.countDocuments({ ...statQuery, currentStatus: 'Pending Client' });
+    const underReview = await Task.countDocuments({ ...statQuery, currentStatus: 'Under Review' });
+    const completed = await Task.countDocuments({ ...statQuery, currentStatus: 'Completed' });
+
+    res.json({
+      tasks,
+      totalPages: Math.ceil(totalCount / parseInt(limit)),
+      currentPage: parseInt(page),
+      stats: { total, inProgress, pendingClient, underReview, completed }
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

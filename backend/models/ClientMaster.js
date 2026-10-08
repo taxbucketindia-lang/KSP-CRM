@@ -52,6 +52,8 @@ const clientMasterSchema = new mongoose.Schema({
   books_kept_at: { type: String, maxlength: 200 },
   accounting_method: { type: String, enum: ['Mercantile', 'Cash'] },
 
+  tradeName: { type: String, default: '' },
+
 
   openingBalance: { type: Number, default: 0 },
 

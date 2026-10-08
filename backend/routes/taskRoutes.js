@@ -1,11 +1,12 @@
 import express from 'express';
-import { getTasks, createTask, updateTaskStatus, updateTaskDetails, getAllEmployees, submitEod, getEods, deleteTask } from '../controllers/taskController.js';
+import { getTasks, createTask, updateTaskStatus, updateTaskDetails, getAllEmployees, submitEod, getEods, deleteTask, getPaginatedTasks } from '../controllers/taskController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // 🔴 FIX: /employees route pehle hona chahiye, warna /:id se conflict hoga
 router.route('/employees').get(protect, getAllEmployees);
+router.get('/paginated', protect, getPaginatedTasks);
 
 router.route('/:id').put(protect, updateTaskDetails).delete(protect, deleteTask);
 

@@ -20,6 +20,7 @@ const WorkManagement = () => {
 
   const [viewMode, setViewMode] = useState('list'); 
 
+  // Modal & Search States
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [clientSearchTerm, setClientSearchTerm] = useState('');
   const [clientTypeFilter, setClientTypeFilter] = useState('All'); 
@@ -28,13 +29,12 @@ const WorkManagement = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   const [employeeFilter, setEmployeeFilter] = useState('ALL');
-  
-  // 🔴 NAYA STATE: Date Filter ke liye
   const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
 
-  // 🔴 NAYA STATE: Pagination ke liye
+  // SERVER SIDE PAGINATION & STATS STATE
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [totalPages, setTotalPages] = useState(1);
+  const [serverStats, setServerStats] = useState({ total: 0, inProgress: 0, pendingClient: 0, underReview: 0, completed: 0 });
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
@@ -74,23 +74,84 @@ const WorkManagement = () => {
     assignedTo: '', priority: '', dueDate: '', taskDescription: '', reviewer: ''
   });
 
-  const fetchData = async () => {
+  // 1. INITIAL LIGHT LOAD (Employees only)
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        const usersRes = await axios.get(`${import.meta.env.VITE_API_URL}/tasks/employees`, { headers });
+        const team = Array.isArray(usersRes.data) ? usersRes.data : [];
+        setEmployees(team.filter(u => u.role !== 'Client'));
+      } catch (error) { console.error("Initial load failed"); }
+    };
+    fetchInitialData();
+  }, [user.token]);
+
+  // 2. SERVER-SIDE PAGINATED TASK FETCH
+  const fetchTasks = async () => {
     setLoading(true);
-    const headers = { Authorization: `Bearer ${user.token}` };
-    
     try {
-      const [tasksRes, usersRes, eodRes, leadsRes, crmRes, masterRes] = await Promise.all([
-        axios.get(`${import.meta.env.VITE_API_URL}/tasks`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/tasks/employees`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${import.meta.env.VITE_API_URL}/tasks/eod`, { headers }).catch(() => ({ data: [] })), 
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const params = {
+        page: currentPage,
+        limit: viewMode === 'board' ? 500 : 10,
+        search: searchQuery,
+        status: statusFilter,
+        priority: priorityFilter,
+        employee: employeeFilter,
+        startDate: dateFilter.start,
+        endDate: dateFilter.end
+      };
+
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/tasks/paginated`, { headers, params });
+      
+      setTasks(res.data.tasks || []);
+      setTotalPages(res.data.totalPages || 1);
+      setServerStats(res.data.stats || { total: 0, inProgress: 0, pendingClient: 0, underReview: 0, completed: 0 });
+
+    } catch (error) {
+      toast.error("Failed to load tasks");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTasks();
+    // eslint-disable-next-line
+  }, [currentPage, viewMode, searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter]);
+
+  // Reset page when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter, viewMode]);
+
+  // 3. EOD FETCH ONLY WHEN NEEDED
+  useEffect(() => {
+    if (viewMode !== 'eod') return;
+    const fetchEods = async () => {
+      setLoading(true);
+      try {
+        const headers = { Authorization: `Bearer ${user.token}` };
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/tasks/eod`, { headers });
+        setEodReports(res.data || []); 
+      } catch (e) { toast.error("Failed to fetch EODs"); }
+      finally { setLoading(false); }
+    };
+    fetchEods();
+  }, [viewMode, user.token]);
+
+  // 4. LAZY LOAD CLIENTS
+  const fetchClientsForDropdown = async () => {
+    if (clients.length > 0) return; 
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const [leadsRes, crmRes, masterRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })), 
         axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: [] })) 
       ]);
 
-      setTasks(tasksRes.data || []);
-      setEodReports(eodRes.data || []); 
-      
       const rawLeads = Array.isArray(leadsRes.data) ? leadsRes.data : (leadsRes.data?.leads || []);
       const rawCrm = Array.isArray(crmRes.data) ? crmRes.data : (crmRes.data?.clients || []);
       const rawMaster = Array.isArray(masterRes.data) ? masterRes.data : (masterRes.data?.data || []);
@@ -104,20 +165,13 @@ const WorkManagement = () => {
       }));
 
       setClients(combinedData);
-      
-      const team = Array.isArray(usersRes.data) ? usersRes.data : [];
-      setEmployees(team.filter(u => u.role !== 'Client'));
-
-    } catch (error) {
-      toast.error("Failed to load workspace data");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error("Client fetch error"); }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [user.token]);
+  const handleOpenAddModal = () => {
+    setIsAddModalOpen(true);
+    fetchClientsForDropdown(); 
+  };
 
   const filteredClientOptions = useMemo(() => {
     let filtered = clients;
@@ -133,73 +187,6 @@ const WorkManagement = () => {
     }
     return filtered;
   }, [clients, clientSearchTerm, clientTypeFilter]);
-
-  // 🔴 UPDATED: Date Filter Added here
-  const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => {
-      const searchStr = searchQuery.toLowerCase();
-      const clientObj = clients.find(c => c._id === (typeof task.client === 'object' ? task.client?._id : task.client));
-      const customClientId = clientObj ? clientObj.clientId : '';
-
-      const matchesSearch = 
-        (task.taskId?.toLowerCase().includes(searchStr)) || 
-        (task.taskTitle?.toLowerCase().includes(searchStr)) || 
-        ((task.clientName || '').toLowerCase().includes(searchStr)) ||
-        (customClientId.toLowerCase().includes(searchStr));
-
-      const matchesStatus = statusFilter === 'ALL' 
-        ? true 
-        : statusFilter === 'OVERDUE' 
-          ? task.isOverdue 
-          : task.currentStatus === statusFilter;      
-      const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter;
-      const matchesEmployee = employeeFilter === 'ALL' || (task.assignedTo && task.assignedTo._id === employeeFilter);
-
-      // Date Range Match Logic
-      let matchesDate = true;
-      if (dateFilter.start || dateFilter.end) {
-        const taskDate = new Date(task.taskDate || task.createdAt).getTime();
-        if (dateFilter.start && taskDate < new Date(dateFilter.start).setHours(0,0,0,0)) matchesDate = false;
-        if (dateFilter.end && taskDate > new Date(dateFilter.end).setHours(23,59,59,999)) matchesDate = false;
-      }
-
-      return matchesSearch && matchesStatus && matchesPriority && matchesEmployee && matchesDate;
-    });
-  }, [tasks, searchQuery, statusFilter, priorityFilter, employeeFilter, clients, dateFilter]);
-
-  // 🔴 NAYA: Reset Pagination to Page 1 when any filter changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter]);
-
-  // 🔴 NAYA: Chop the array into pages for the List View
-  const paginatedTasks = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredTasks.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredTasks, currentPage]);
-
-  const totalPages = Math.ceil(filteredTasks.length / itemsPerPage);
-
-  const stats = useMemo(() => {
-    return {
-      total: filteredTasks.length,
-      inProgress: filteredTasks.filter(t => t.currentStatus === 'In Progress').length,
-      pendingClient: filteredTasks.filter(t => t.currentStatus === 'Pending Client').length,
-      underReview: filteredTasks.filter(t => t.currentStatus === 'Under Review').length,
-      completed: filteredTasks.filter(t => t.currentStatus === 'Completed').length,
-    };
-  }, [filteredTasks]);
-
-  const employeeEodStats = useMemo(() => {
-    const myTasks = isAdmin ? tasks : tasks.filter(t => t.assignedTo?._id === user._id || t.assignedTo === user._id);
-    return {
-      total: myTasks.length,
-      inProgress: myTasks.filter(t => t.currentStatus === 'In Progress').length,
-      pendingClient: myTasks.filter(t => t.currentStatus === 'Pending Client').length,
-      underReview: myTasks.filter(t => t.currentStatus === 'Under Review').length,
-      completed: myTasks.filter(t => t.currentStatus === 'Completed').length,
-    };
-  }, [tasks, user._id, isAdmin]);
 
   const getStatusStyle = (status) => {
     switch (status) {
@@ -227,6 +214,13 @@ const WorkManagement = () => {
     }
   };
 
+  const isTaskOverdue = (task) => {
+    if (!task?.dueDate) return false;
+    const dueDate = new Date(task.dueDate).getTime();
+    if (Number.isNaN(dueDate)) return false;
+    return dueDate < Date.now() && !['Completed', 'Cancelled'].includes(task.currentStatus);
+  };
+
   const handleCreateTask = async (e) => {
     e.preventDefault();
     if (!formData.taskTitle && !formData.clientId) {
@@ -249,7 +243,7 @@ const WorkManagement = () => {
       toast.success("New task assigned successfully!");
       setFormData(initialForm);
       setIsAddModalOpen(false);
-      fetchData();
+      fetchTasks();
     } catch (error) { toast.error(error.response?.data?.message || "Failed to create task"); }
   };
 
@@ -259,7 +253,7 @@ const WorkManagement = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
       const payload = {
         currentStatus: updateForm.status,
-        govStatus: updateForm.govStatus,
+        govStatus: updateForm.status === 'Pending Government' ? updateForm.govStatus : taskToUpdate.govStatus,
         pendingReason: updateForm.pendingReason,
         remarks: updateForm.remarks,
         nextFollowUpDate: updateForm.followUpDate,
@@ -269,7 +263,7 @@ const WorkManagement = () => {
       toast.success(`Task updated!`);
       setIsUpdateModalOpen(false);
       setUpdateForm({ status: '', govStatus: '', pendingReason: '', remarks: '', followUpDate: '', followUpMode: 'Call' });
-      fetchData();
+      fetchTasks();
     } catch (error) { toast.error("Failed to update status"); }
   };
 
@@ -280,7 +274,7 @@ const WorkManagement = () => {
       await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToEdit._id}`, editForm, { headers });
       toast.success("Task updated & re-assigned successfully!");
       setIsEditModalOpen(false);
-      fetchData();
+      fetchTasks();
     } catch (error) { toast.error("Failed to update task details"); }
   };
 
@@ -290,7 +284,7 @@ const WorkManagement = () => {
         const headers = { Authorization: `Bearer ${user.token}` };
         await axios.delete(`${import.meta.env.VITE_API_URL}/tasks/${taskId}`, { headers });
         toast.success("Task deleted successfully!");
-        fetchData();
+        fetchTasks();
       } catch (error) { toast.error("Failed to delete task"); }
     }
   };
@@ -300,11 +294,11 @@ const WorkManagement = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       const payload = {
-        totalAssigned: employeeEodStats.total,
-        totalCompleted: employeeEodStats.completed,
-        inProgress: employeeEodStats.inProgress,
-        pendingClient: employeeEodStats.pendingClient,
-        underReview: employeeEodStats.underReview,
+        totalAssigned: serverStats.total,
+        totalCompleted: serverStats.completed,
+        inProgress: serverStats.inProgress,
+        pendingClient: serverStats.pendingClient,
+        underReview: serverStats.underReview,
         followUpsDone: parseInt(eodForm.followUpsDone) || 0,
         documentsCollected: parseInt(eodForm.documentsCollected) || 0,
         majorAchievement: eodForm.majorAchievement,
@@ -316,7 +310,10 @@ const WorkManagement = () => {
       toast.success("EOD Report Submitted Successfully!");
       setIsEodModalOpen(false);
       setEodForm({ followUpsDone: '', documentsCollected: '', majorAchievement: '', majorChallenge: '', supportRequired: '', tomorrowPriority: '' });
-      fetchData(); 
+      if (viewMode === 'eod') {
+        const eodRes = await axios.get(`${import.meta.env.VITE_API_URL}/tasks/eod`, { headers });
+        setEodReports(eodRes.data || []);
+      }
     } catch (error) { toast.error("Failed to submit EOD"); }
   };
 
@@ -356,55 +353,78 @@ const WorkManagement = () => {
     setIsEditModalOpen(true);
   };
 
+  const taskViewIsOverdue = isTaskOverdue(taskToView);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
       <Toaster position="top-right" />
 
-      {/* HEADER & TOGGLE TABS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
             <ClipboardList size={28} className="text-blue-600" /> Daily Work Management
           </h1>
-          <p className="text-sm text-slate-500 mt-1 font-medium">Track assigned tasks, monitor deadlines, and submit EOD reports.</p>
+          <p className="text-sm text-slate-500 mt-1 font-medium">
+            Track assigned tasks, monitor deadlines, and submit EOD reports.
+          </p>
         </div>
+
         <div className="flex items-center gap-3">
-          
           <div className="flex bg-slate-200/60 p-1 rounded-xl mr-2">
-            <button onClick={() => setViewMode('list')} className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              <List size={14}/> List
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-all ${
+                viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <List size={14} /> List
             </button>
-            <button onClick={() => setViewMode('board')} className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-all ${viewMode === 'board' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              <LayoutGrid size={14}/> Board
+            <button
+              onClick={() => setViewMode('board')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-all ${
+                viewMode === 'board' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <LayoutGrid size={14} /> Board
             </button>
-            <button onClick={() => setViewMode('eod')} className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-all ${viewMode === 'eod' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              <BarChart3 size={14}/> EOD Reports
+            <button
+              onClick={() => setViewMode('eod')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-all ${
+                viewMode === 'eod' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <BarChart3 size={14} /> EOD Reports
             </button>
           </div>
 
           {!isAdmin && (
-            <button onClick={() => setIsEodModalOpen(true)} className="inline-flex items-center gap-2 bg-white text-emerald-600 border border-emerald-200 hover:bg-emerald-50 text-sm font-bold px-5 py-2.5 rounded-xl shadow-sm transition-all">
+            <button
+              onClick={() => setIsEodModalOpen(true)}
+              className="inline-flex items-center gap-2 bg-white text-emerald-600 border border-emerald-200 hover:bg-emerald-50 text-sm font-bold px-5 py-2.5 rounded-xl shadow-sm transition-all"
+            >
               <Activity size={18} strokeWidth={2.5} /> Fill EOD
             </button>
           )}
 
           {isAdmin && (
-            <button onClick={() => setIsAddModalOpen(true)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all">
+            <button
+              onClick={handleOpenAddModal}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-all"
+            >
               <Plus size={18} strokeWidth={2.5} /> Assign Task
             </button>
           )}
         </div>
       </div>
 
-      {/* ===================== VIEW: EOD REPORTS ===================== */}
       {viewMode === 'eod' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
             <h2 className="text-sm font-bold text-slate-800 tracking-tight flex items-center gap-2">
-              <BarChart3 size={16} className="text-blue-500"/> Submitted EOD Reports
+              <BarChart3 size={16} className="text-blue-500" /> Submitted EOD Reports
             </h2>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -417,16 +437,35 @@ const WorkManagement = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
                 {loading ? (
-                  <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Reports...</td></tr>
+                  <tr>
+                    <td colSpan="6" className="text-center py-16 text-slate-400">
+                      <RefreshCw className="animate-spin inline-block mr-2" size={18} />
+                      Loading Reports...
+                    </td>
+                  </tr>
                 ) : eodReports.length === 0 ? (
-                  <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No EOD Reports found.</td></tr>
+                  <tr>
+                    <td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center">
+                      <AlertCircle size={36} className="mb-3 text-slate-300" />
+                      No EOD Reports found.
+                    </td>
+                  </tr>
                 ) : (
                   eodReports.map((report) => (
                     <tr key={report._id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-4 px-5 whitespace-nowrap align-top">
-                        <span className="font-bold text-slate-800 block">{new Date(report.createdAt).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'})}</span>
-                        <div className="text-[10px] text-slate-500 mt-1">{new Date(report.createdAt).toLocaleTimeString('en-IN')}</div>
+                        <span className="font-bold text-slate-800 block">
+                          {new Date(report.createdAt).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </span>
+                        <div className="text-[10px] text-slate-500 mt-1">
+                          {new Date(report.createdAt).toLocaleTimeString('en-IN')}
+                        </div>
                       </td>
+
                       {isAdmin && (
                         <td className="py-4 px-5 align-top">
                           <div className="flex items-center gap-2">
@@ -434,23 +473,39 @@ const WorkManagement = () => {
                               {report.employee?.name ? report.employee.name.charAt(0).toUpperCase() : 'E'}
                             </div>
                             <div>
-                              <span className="text-xs font-bold text-slate-700 block">{report.employee?.name || 'Unknown'}</span>
+                              <span className="text-xs font-bold text-slate-700 block">
+                                {report.employee?.name || 'Unknown'}
+                              </span>
                               <span className="text-[10px] text-slate-500">{report.employee?.role}</span>
                             </div>
                           </div>
                         </td>
                       )}
+
                       <td className="py-4 px-5 align-top">
                         <div className="grid grid-cols-2 gap-2 text-[10px] min-w-[200px]">
-                          <div className="bg-slate-100 p-1.5 rounded text-slate-600 border border-slate-200">Tasks Done: <strong className="text-slate-800">{report.totalCompleted}/{report.totalAssigned}</strong></div>
-                          <div className="bg-amber-50 p-1.5 rounded text-amber-600 border border-amber-100">Tasks Pend: <strong>{report.pendingClient}</strong></div>
-                          <div className="bg-blue-50 p-1.5 rounded text-blue-600 border border-blue-100 flex items-center gap-1"><Phone size={10}/> Follow-ups: <strong>{report.followUpsDone || 0}</strong></div>
-                          <div className="bg-emerald-50 p-1.5 rounded text-emerald-600 border border-emerald-100 flex items-center gap-1"><FileText size={10}/> Docs Got: <strong>{report.documentsCollected || 0}</strong></div>
+                          <div className="bg-slate-100 p-1.5 rounded text-slate-600 border border-slate-200">
+                            Tasks Done: <strong className="text-slate-800">{report.totalCompleted}/{report.totalAssigned}</strong>
+                          </div>
+                          <div className="bg-amber-50 p-1.5 rounded text-amber-600 border border-amber-100">
+                            Tasks Pend: <strong>{report.pendingClient}</strong>
+                          </div>
+                          <div className="bg-blue-50 p-1.5 rounded text-blue-600 border border-blue-100 flex items-center gap-1">
+                            <Phone size={10} /> Follow-ups: <strong>{report.followUpsDone || 0}</strong>
+                          </div>
+                          <div className="bg-emerald-50 p-1.5 rounded text-emerald-600 border border-emerald-100 flex items-center gap-1">
+                            <FileText size={10} /> Docs Got: <strong>{report.documentsCollected || 0}</strong>
+                          </div>
                         </div>
                       </td>
+
                       <td className="py-4 px-5 text-right align-top">
-                        <button onClick={() => handleOpenEodView(report)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-lg transition-all border border-indigo-200 shadow-sm" title="View Details">
-                          <Eye size={13} strokeWidth={2.5}/> View Details
+                        <button
+                          onClick={() => handleOpenEodView(report)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-lg transition-all border border-indigo-200 shadow-sm"
+                          title="View Details"
+                        >
+                          <Eye size={13} strokeWidth={2.5} /> View Details
                         </button>
                       </td>
                     </tr>
@@ -462,62 +517,79 @@ const WorkManagement = () => {
         </div>
       )}
 
-      {/* ===================== VIEW: LIST OR BOARD ===================== */}
       {(viewMode === 'list' || viewMode === 'board') && (
         <>
-          {/* KPI DASHBOARD CARDS */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between border-l-4 border-l-slate-400">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Assigned</p>
-                <h3 className="text-2xl font-black text-slate-800 mt-1">{stats.total}</h3>
+                <h3 className="text-2xl font-black text-slate-800 mt-1">{serverStats.total}</h3>
               </div>
             </div>
+
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between border-l-4 border-l-blue-500">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">In Progress</p>
-                <h3 className="text-2xl font-black text-blue-600 mt-1">{stats.inProgress}</h3>
+                <h3 className="text-2xl font-black text-blue-600 mt-1">{serverStats.inProgress}</h3>
               </div>
             </div>
+
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between border-l-4 border-l-amber-500">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Pending Client</p>
-                <h3 className="text-2xl font-black text-amber-600 mt-1">{stats.pendingClient}</h3>
+                <h3 className="text-2xl font-black text-amber-600 mt-1">{serverStats.pendingClient}</h3>
               </div>
             </div>
+
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between border-l-4 border-l-purple-500">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Under Review</p>
-                <h3 className="text-2xl font-black text-purple-600 mt-1">{stats.underReview}</h3>
+                <h3 className="text-2xl font-black text-purple-600 mt-1">{serverStats.underReview}</h3>
               </div>
             </div>
+
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between border-l-4 border-l-emerald-500">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Completed</p>
-                <h3 className="text-2xl font-black text-emerald-600 mt-1">{stats.completed}</h3>
+                <h3 className="text-2xl font-black text-emerald-600 mt-1">{serverStats.completed}</h3>
               </div>
             </div>
           </div>
 
-          {/* FILTER ROW */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col xl:flex-row xl:items-center gap-4">
               <div className="relative w-full xl:w-72 shrink-0">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input type="text" placeholder="Search Task ID or Title/Client..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
+                <input
+                  type="text"
+                  placeholder="Search Task ID or Title/Client..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm"
+                />
               </div>
-              
+
               <div className="flex flex-wrap items-center gap-3 w-full">
                 {isAdmin && (
-                  <select value={employeeFilter} onChange={(e) => setEmployeeFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
+                  <select
+                    value={employeeFilter}
+                    onChange={(e) => setEmployeeFilter(e.target.value)}
+                    className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm"
+                  >
                     <option value="ALL">All Employees</option>
-                    {employees.map(emp => (
-                      <option key={emp._id} value={emp._id}>{emp.name}</option>
+                    {employees.map((emp) => (
+                      <option key={emp._id} value={emp._id}>
+                        {emp.name}
+                      </option>
                     ))}
                   </select>
                 )}
 
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm"
+                >
                   <option value="ALL">Status: All</option>
                   <option value="Not Started">Not Started</option>
                   <option value="Started">🟢 Started</option>
@@ -530,7 +602,11 @@ const WorkManagement = () => {
                   <option value="OVERDUE">🚨 Overdue Tasks</option>
                 </select>
 
-                <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm"
+                >
                   <option value="ALL">Priority: All</option>
                   <option value="Urgent">Urgent</option>
                   <option value="High">High</option>
@@ -538,20 +614,34 @@ const WorkManagement = () => {
                   <option value="Low">Low</option>
                 </select>
 
-                {/* 🔴 NAYA: DATE RANGE FILTER */}
                 <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
                   <span className="text-[10px] font-bold uppercase text-slate-500">Filter By Task Date:</span>
-                  <input type="date" value={dateFilter.start} onChange={(e) => setDateFilter({...dateFilter, start: e.target.value})} className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer" />
+                  <input
+                    type="date"
+                    value={dateFilter.start}
+                    onChange={(e) => setDateFilter({ ...dateFilter, start: e.target.value })}
+                    className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
+                  />
                   <span className="text-slate-400 font-bold text-xs">to</span>
-                  <input type="date" value={dateFilter.end} onChange={(e) => setDateFilter({...dateFilter, end: e.target.value})} className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer" />
+                  <input
+                    type="date"
+                    value={dateFilter.end}
+                    onChange={(e) => setDateFilter({ ...dateFilter, end: e.target.value })}
+                    className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
+                  />
                   {(dateFilter.start || dateFilter.end) && (
-                    <button onClick={() => setDateFilter({start:'', end:''})} className="text-rose-500 hover:text-rose-700 ml-1" title="Clear Dates"><X size={14}/></button>
+                    <button
+                      onClick={() => setDateFilter({ start: '', end: '' })}
+                      className="text-rose-500 hover:text-rose-700 ml-1"
+                      title="Clear Dates"
+                    >
+                      <X size={14} />
+                    </button>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* 🔴 LIST VIEW TABLE WITH PAGINATION */}
             {viewMode === 'list' && (
               <div className="flex flex-col">
                 <div className="overflow-x-auto">
@@ -567,114 +657,136 @@ const WorkManagement = () => {
                         <th className="py-4 px-5 text-right">Actions</th>
                       </tr>
                     </thead>
+
                     <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
                       {loading ? (
-                        <tr><td colSpan="7" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Tasks...</td></tr>
-                      ) : paginatedTasks.length === 0 ? (
-                        <tr><td colSpan="7" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No tasks found.</td></tr>
+                        <tr>
+                          <td colSpan="7" className="text-center py-16 text-slate-400">
+                            <RefreshCw className="animate-spin inline-block mr-2" size={18} />
+                            Loading Tasks...
+                          </td>
+                        </tr>
+                      ) : tasks.length === 0 ? (
+                        <tr>
+                          <td colSpan="7" className="text-center py-16 text-slate-400 flex flex-col items-center">
+                            <AlertCircle size={36} className="mb-3 text-slate-300" />
+                            No tasks found.
+                          </td>
+                        </tr>
                       ) : (
-                        paginatedTasks.map((task) => (
-                          <tr key={task._id} className={`hover:bg-slate-50/70 transition-colors group ${task.isOverdue ? 'bg-red-50/40 border-l-4 border-rose-500' : ''}`}>
-                            <td className="py-4 px-5">
-                              <div className="font-bold text-blue-600 font-mono text-xs bg-blue-50 border border-blue-100 px-2 py-0.5 rounded inline-block mb-1">
-                                {task.taskId} 
-                                {task.isOverdue && <span className="ml-2 text-[9px] text-rose-600 bg-rose-100 px-1 rounded-full border border-rose-200">Overdue</span>}
-                              </div>
-                              <div className="text-[11px] font-bold text-slate-800">{task.serviceCategory} <ChevronRight className="inline" size={10}/> {task.subService}</div>
-                            </td>
+                        tasks.map((task) => {
+                          const isOverdue = isTaskOverdue(task);
 
-                            <td className="py-4 px-5">
-                              <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                                <Briefcase size={14} className="text-slate-400"/> 
-                                {task.taskTitle ? task.taskTitle : (task.clientName || 'Internal Task')}
-                              </div>
-                              {task.taskTitle && task.clientName && (
-                                 <div className="text-[10px] text-slate-500 mt-0.5 font-medium">Client: {task.clientName}</div>
-                              )}
-                            </td>
-                            
-                            <td className="py-4 px-5">
-                              <div className="flex items-center gap-2">
-                                <div className="h-7 w-7 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[11px] font-bold shrink-0">
-                                  {task.assignedTo?.name ? task.assignedTo.name.charAt(0).toUpperCase() : 'E'}
+                          return (
+                            <tr
+                              key={task._id}
+                              className={`hover:bg-slate-50/70 transition-colors group ${
+                                isOverdue ? 'bg-red-50/40 border-l-4 border-rose-500' : ''
+                              }`}
+                            >
+                              <td className="py-4 px-5">
+                                <div className="font-bold text-blue-600 font-mono text-xs bg-blue-50 border border-blue-100 px-2 py-0.5 rounded inline-block mb-1">
+                                  {task.taskId} 
+                                  {isOverdue && <span className="ml-2 text-[9px] text-rose-600 bg-rose-100 px-1 rounded-full border border-rose-200">Overdue</span>}
                                 </div>
-                                <span className="text-xs font-bold text-slate-700">{task.assignedTo?.name || 'Unassigned'}</span>
-                              </div>
-                            </td>
+                                <div className="text-[11px] font-bold text-slate-800">{task.serviceCategory} <ChevronRight className="inline" size={10}/> {task.subService}</div>
+                              </td>
 
-                            <td className="py-4 px-5">
-                              <div className="flex flex-col gap-1.5 items-start">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${getPriorityStyle(task.priority)}`}>
-                                  <Flag size={10} className="inline mr-1"/> {task.priority}
-                                </span>
-                                <span className={`text-[11px] font-bold flex items-center gap-1 border px-1.5 py-0.5 rounded ${task.isOverdue ? 'text-rose-700 bg-rose-100 border-rose-200' : 'text-rose-600 bg-rose-50 border-rose-100'}`}>
-                                  <Calendar size={12}/> Due: {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN') : 'N/A'}
-                                </span>
-                              </div>
-                            </td>
-                            
-                            <td className="py-4 px-5">
-                              <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border shadow-sm ${getStatusStyle(task.currentStatus)}`}>
-                                {task.currentStatus}
-                              </span>
-                            </td>
-
-                            <td className="py-4 px-5">
-                              {task.govStatus ? (
-                                 <span className="px-2.5 py-1 rounded-md text-[10px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
-                                   🏛️ {task.govStatus}
-                                 </span>
-                              ) : (
-                                 <span className="text-[10px] text-slate-400 font-medium">N/A</span>
-                              )}
-                            </td>
-
-                            <td className="py-4 px-5 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                {isAdmin && (
-                                  <>
-                                    <button onClick={() => handleOpenEdit(task)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-200" title="Edit / Re-assign Task">
-                                      <Pencil size={15} strokeWidth={2.5}/>
-                                    </button>
-                                    <button onClick={() => handleDeleteTask(task._id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200" title="Delete Task">
-                                      <Trash2 size={15} strokeWidth={2.5}/>
-                                    </button>
-                                  </>
+                              <td className="py-4 px-5">
+                                <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                  <Briefcase size={14} className="text-slate-400"/> 
+                                  {task.taskTitle ? task.taskTitle : (task.clientName || 'Internal Task')}
+                                </div>
+                                {task.taskTitle && task.clientName && (
+                                  <div className="text-[10px] text-slate-500 mt-0.5 font-medium">Client: {task.clientName}</div>
                                 )}
-                                <button onClick={() => handleOpenView(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg transition-all border border-slate-200 shadow-sm" title="View Details">
-                                  <Eye size={13} strokeWidth={2.5}/> View
-                                </button>
-                                <button onClick={() => handleOpenUpdate(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-lg transition-all border border-indigo-200 shadow-sm" title="Update Status">
-                                  <Play size={13} strokeWidth={2.5}/> Update
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+                              
+                              <td className="py-4 px-5">
+                                <div className="flex items-center gap-2">
+                                  <div className="h-7 w-7 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[11px] font-bold shrink-0">
+                                    {task.assignedTo?.name ? task.assignedTo.name.charAt(0).toUpperCase() : 'E'}
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-700">{task.assignedTo?.name || 'Unassigned'}</span>
+                                </div>
+                              </td>
+
+                              <td className="py-4 px-5">
+                                <div className="flex flex-col gap-1.5 items-start">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${getPriorityStyle(task.priority)}`}>
+                                    <Flag size={10} className="inline mr-1"/> {task.priority}
+                                  </span>
+                                  <span className={`text-[11px] font-bold flex items-center gap-1 border px-1.5 py-0.5 rounded ${isOverdue ? 'text-rose-700 bg-rose-100 border-rose-200' : 'text-rose-600 bg-rose-50 border-rose-100'}`}>
+                                    <Calendar size={12}/> Due: {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN') : 'N/A'}
+                                  </span>
+                                </div>
+                              </td>
+                              
+                              <td className="py-4 px-5">
+                                <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border shadow-sm ${getStatusStyle(task.currentStatus)}`}>
+                                  {task.currentStatus}
+                                </span>
+                              </td>
+
+                              <td className="py-4 px-5">
+                                {task.govStatus ? (
+                                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
+                                    🏛️ {task.govStatus}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 font-medium">N/A</span>
+                                )}
+                              </td>
+
+                              <td className="py-4 px-5 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  {isAdmin && (
+                                    <>
+                                      <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(task); }} className="text-slate-400 hover:text-blue-600 hidden group-hover:block" title="Edit / Re-assign Task">
+                                        <Pencil size={12}/>
+                                      </button>
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(task._id); }} className="text-slate-400 hover:text-rose-600 hidden group-hover:block" title="Delete Task">
+                                        <Trash2 size={12}/>
+                                      </button>
+                                    </>
+                                  )}
+                                  <button onClick={() => handleOpenView(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg transition-all border border-slate-200 shadow-sm" title="View Details">
+                                    <Eye size={13} strokeWidth={2.5}/> View
+                                  </button>
+                                  <button onClick={() => handleOpenUpdate(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-lg transition-all border border-indigo-200 shadow-sm" title="Update Status">
+                                    <Play size={13} strokeWidth={2.5}/> Update
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
                 </div>
 
-                {/* 🔴 NAYA: PAGINATION CONTROLS */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
                     <span className="text-xs font-bold text-slate-500">
-                      Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredTasks.length)} of {filteredTasks.length} tasks
+                      Showing {(currentPage - 1) * 10 + 1} to {Math.min(currentPage * 10, serverStats.total)} of {serverStats.total} tasks
                     </span>
+
                     <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                      <button
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                         disabled={currentPage === 1}
                         className="px-3 py-1.5 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
                       >
                         Previous
                       </button>
+
                       <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100">
                         Page {currentPage} of {totalPages}
                       </span>
-                      <button 
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+
+                      <button
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                         disabled={currentPage === totalPages}
                         className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white border border-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
                       >
@@ -685,86 +797,101 @@ const WorkManagement = () => {
                 )}
               </div>
             )}
-          </div>
 
-          {/* 🔴 BOARD VIEW (KANBAN) - Bina Pagination Ke */}
-          {viewMode === 'board' && (
-            <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar items-start">
-              {['Not Started', 'Started', 'In Progress', 'Pending Client', 'Pending Government', 'Under Review', 'Completed'].map(colStatus => {
-                const colTasks = filteredTasks.filter(t => t.currentStatus === colStatus);
-                return (
-                  <div key={colStatus} className="bg-slate-100/50 min-w-[300px] w-[300px] rounded-2xl border border-slate-200 p-4 flex flex-col shrink-0">
-                    <div className="flex items-center justify-between mb-4 border-b border-slate-200 pb-2">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-600">{colStatus}</h3>
-                      <span className="bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-full">{colTasks.length}</span>
-                    </div>
+            {viewMode === 'board' && (
+              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar items-start">
+                {['Not Started', 'Started', 'In Progress', 'Pending Client', 'Pending Government', 'Under Review', 'Completed'].map((colStatus) => {
+                  const colTasks = tasks.filter((t) => t.currentStatus === colStatus);
 
-                    <div className="flex flex-col gap-3">
-                      {colTasks.length === 0 ? (
-                        <div className="text-center p-4 text-xs font-medium text-slate-400 border border-dashed border-slate-300 rounded-xl">No tasks here</div>
-                      ) : (
-                        colTasks.map(task => (
-                          <div key={task._id} className={`bg-white p-4 rounded-xl border shadow-sm hover:shadow-md transition-all relative group ${task.isOverdue ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'}`}>
-                            
-                            <div className="flex justify-between items-start mb-2" onClick={() => handleOpenView(task)}>
-                              <span className="font-bold text-blue-600 font-mono text-[10px] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded cursor-pointer">{task.taskId}</span>
-                              <div className="flex gap-1.5">
-                                {isAdmin && (
-                                  <>
-                                    <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(task); }} className="text-slate-400 hover:text-blue-600 hidden group-hover:block" title="Edit">
-                                      <Pencil size={12}/>
-                                    </button>
-                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(task._id); }} className="text-slate-400 hover:text-rose-600 hidden group-hover:block" title="Delete">
-                                      <Trash2 size={12}/>
-                                    </button>
-                                  </>
-                                )}
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase cursor-pointer ${getPriorityStyle(task.priority)}`}>{task.priority}</span>
-                              </div>
-                            </div>
-                            
-                            <h4 className="text-sm font-bold text-slate-800 leading-tight mb-1 cursor-pointer" onClick={() => handleOpenView(task)}>
-                              {task.taskTitle ? task.taskTitle : (task.clientName || 'Internal Task')}
-                            </h4>
-                            
-                            <p className="text-[11px] text-slate-500 font-medium mb-2 cursor-pointer" onClick={() => handleOpenView(task)}>{task.serviceCategory} • {task.subService}</p>
+                  return (
+                    <div
+                      key={colStatus}
+                      className="bg-slate-100/50 min-w-[300px] w-[300px] rounded-2xl border border-slate-200 p-4 flex flex-col shrink-0"
+                    >
+                      <div className="flex items-center justify-between mb-4 border-b border-slate-200 pb-2">
+                        <h3 className="text-xs font-black uppercase tracking-wider text-slate-600">{colStatus}</h3>
+                        <span className="bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          {colTasks.length}
+                        </span>
+                      </div>
 
-                            {task.govStatus && (
-                               <div className="mb-2">
-                                  <span className="px-2 py-0.5 rounded text-[9px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
-                                    🏛️ {task.govStatus}
-                                  </span>
-                               </div>
-                            )}
-                            
-                            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100" onClick={() => handleOpenView(task)}>
-                              <div className="flex items-center gap-1.5 cursor-pointer" title={task.assignedTo?.name}>
-                                <div className="h-6 w-6 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[10px] font-bold shrink-0">
-                                  {task.assignedTo?.name ? task.assignedTo.name.charAt(0).toUpperCase() : 'E'}
-                                </div>
-                                <span className="text-[10px] font-bold text-slate-600 truncate w-20">{task.assignedTo?.name}</span>
-                              </div>
-                              <span className={`text-[10px] font-bold flex items-center gap-1 cursor-pointer ${task.isOverdue ? 'text-rose-700 bg-rose-100 px-1 rounded' : 'text-rose-500'}`}>
-                                <Calendar size={10}/> {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN', {month:'short', day:'numeric'}) : 'N/A'}
-                              </span>
-                            </div>
-
-                            <button onClick={(e) => { e.stopPropagation(); handleOpenUpdate(task); }} className="w-full mt-3 bg-slate-50 hover:bg-indigo-50 text-indigo-600 text-[10px] font-bold py-1.5 rounded-lg border border-slate-200 hover:border-indigo-200 transition-colors">
-                              Update Status
-                            </button>
+                      <div className="flex flex-col gap-3">
+                        {colTasks.length === 0 ? (
+                          <div className="text-center p-4 text-xs font-medium text-slate-400 border border-dashed border-slate-300 rounded-xl">
+                            No tasks here
                           </div>
-                        ))
-                      )}
+                        ) : (
+                          colTasks.map((task) => {
+                            const isOverdue = isTaskOverdue(task);
+
+                            return (
+                              <div
+                                key={task._id}
+                                className={`bg-white p-4 rounded-xl border shadow-sm hover:shadow-md transition-all relative group ${
+                                  isOverdue ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                                }`}
+                              >
+                                <div className="flex justify-between items-start mb-2" onClick={() => handleOpenView(task)}>
+                                  <span className="font-bold text-blue-600 font-mono text-[10px] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded cursor-pointer">{task.taskId}</span>
+                                  <div className="flex gap-1.5">
+                                    {isAdmin && (
+                                      <>
+                                        <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(task); }} className="text-slate-400 hover:text-blue-600 hidden group-hover:block" title="Edit">
+                                          <Pencil size={12}/>
+                                        </button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(task._id); }} className="text-slate-400 hover:text-rose-600 hidden group-hover:block" title="Delete">
+                                          <Trash2 size={12}/>
+                                        </button>
+                                      </>
+                                    )}
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase cursor-pointer ${getPriorityStyle(task.priority)}`}>{task.priority}</span>
+                                  </div>
+                                </div>
+                                
+                                <h4 className="text-sm font-bold text-slate-800 leading-tight mb-1 cursor-pointer" onClick={() => handleOpenView(task)}>
+                                  {task.taskTitle ? task.taskTitle : (task.clientName || 'Internal Task')}
+                                </h4>
+                                
+                                <p className="text-[11px] text-slate-500 font-medium mb-2 cursor-pointer" onClick={() => handleOpenView(task)}>{task.serviceCategory} • {task.subService}</p>
+
+                                {task.govStatus && (
+                                  <div className="mb-2">
+                                    <span className="px-2 py-0.5 rounded text-[9px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
+                                      🏛️ {task.govStatus}
+                                    </span>
+                                  </div>
+                                )}
+                                
+                                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100" onClick={() => handleOpenView(task)}>
+                                  <div className="flex items-center gap-1.5 cursor-pointer" title={task.assignedTo?.name}>
+                                    <div className="h-6 w-6 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[10px] font-bold shrink-0">
+                                      {task.assignedTo?.name ? task.assignedTo.name.charAt(0).toUpperCase() : 'E'}
+                                    </div>
+                                    <span className="text-[10px] font-bold text-slate-600 truncate w-20">{task.assignedTo?.name}</span>
+                                  </div>
+                                  <span className={`text-[10px] font-bold flex items-center gap-1 cursor-pointer ${isOverdue ? 'text-rose-700 bg-rose-100 px-1 rounded' : 'text-rose-500'}`}>
+                                    <Calendar size={10}/> {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN', {month:'short', day:'numeric'}) : 'N/A'}
+                                  </span>
+                                </div>
+
+                                <button onClick={(e) => { e.stopPropagation(); handleOpenUpdate(task); }} className="w-full mt-3 bg-slate-50 hover:bg-indigo-50 text-indigo-600 text-[10px] font-bold py-1.5 rounded-lg border border-slate-200 hover:border-indigo-200 transition-colors">
+                                  Update Status
+                                </button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </>
       )}
 
-      {/* 🔴 MODAL: CREATE / ASSIGN NEW TASK */}
+      {/* 🔴 MODAL: CREATE / ASSIGN NEW TASK (Lazy Loads Clients Now) */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
@@ -780,7 +907,6 @@ const WorkManagement = () => {
 
             <form onSubmit={handleCreateTask} className="overflow-y-auto p-8 space-y-6 custom-scrollbar relative">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                
                 <div className="md:col-span-1 relative">
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Task Title / Name</label>
                   <input type="text" name="taskTitle" placeholder="e.g. Audit Review, Client Meeting" value={formData.taskTitle} onChange={(e) => setFormData({...formData, taskTitle: e.target.value})} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
@@ -808,10 +934,10 @@ const WorkManagement = () => {
                       <div className="absolute top-[70px] left-0 z-[70] w-full bg-white border border-slate-200 rounded-xl shadow-2xl max-h-72 overflow-hidden flex flex-col animate-in fade-in zoom-in-95">
                         <div className="flex flex-wrap gap-2 px-3 pt-3 pb-2 bg-slate-50 border-b border-slate-100">
                           {['All', 'Lead', 'Registration CRM', 'Client Master'].map((type) => (
-                             <button
-                                key={type} type="button" onClick={(e) => { e.stopPropagation(); setClientTypeFilter(type); }}
-                                className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${clientTypeFilter === type ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
-                             >{type}</button>
+                            <button
+                              key={type} type="button" onClick={(e) => { e.stopPropagation(); setClientTypeFilter(type); }}
+                              className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${clientTypeFilter === type ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                            >{type}</button>
                           ))}
                         </div>
                         <div className="p-3 border-b border-slate-100 bg-slate-50/80 sticky top-0">
@@ -826,29 +952,29 @@ const WorkManagement = () => {
                         </div>
                         <div className="overflow-y-auto custom-scrollbar p-1">
                           {filteredClientOptions.length > 0 ? (
-                              filteredClientOptions.map(c => (
-                                <div 
-                                  key={c._id} 
-                                  onClick={() => { setFormData({...formData, clientId: c._id}); setIsClientDropdownOpen(false); setClientSearchTerm(''); }}
-                                  className={`px-4 py-2.5 cursor-pointer rounded-lg flex justify-between items-center transition-colors ${formData.clientId === c._id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-slate-50 border border-transparent'}`}
-                                >
-                                  <div>
-                                      <p className="text-sm font-bold text-slate-800">{c.name}</p>
-                                      <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1.5">
-                                        <span className={`px-1.5 py-0.5 rounded uppercase tracking-wider ${c.type === 'Lead' ? 'bg-purple-100 text-purple-700' : c.type === 'Registration CRM' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'}`}>{c.type}</span>
-                                        {c.clientId && <span className="font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-100">{c.clientId}</span>}
-                                        {c.mobile && <span><Phone size={10} className="inline mr-0.5"/>{c.mobile}</span>} 
-                                        {c.pan && <span>| PAN/GST: {c.pan}</span>}
-                                      </p>
-                                  </div>
-                                  {formData.clientId === c._id && <CheckCircle2 size={16} className="text-blue-600"/>}
+                            filteredClientOptions.map(c => (
+                              <div 
+                                key={c._id} 
+                                onClick={() => { setFormData({...formData, clientId: c._id}); setIsClientDropdownOpen(false); setClientSearchTerm(''); }}
+                                className={`px-4 py-2.5 cursor-pointer rounded-lg flex justify-between items-center transition-colors ${formData.clientId === c._id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-slate-50 border border-transparent'}`}
+                              >
+                                <div>
+                                  <p className="text-sm font-bold text-slate-800">{c.name}</p>
+                                  <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1.5">
+                                    <span className={`px-1.5 py-0.5 rounded uppercase tracking-wider ${c.type === 'Lead' ? 'bg-purple-100 text-purple-700' : c.type === 'Registration CRM' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'}`}>{c.type}</span>
+                                    {c.clientId && <span className="font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-100">{c.clientId}</span>}
+                                    {c.mobile && <span><Phone size={10} className="inline mr-0.5"/>{c.mobile}</span>}
+                                    {c.pan && <span>| PAN/GST: {c.pan}</span>}
+                                  </p>
                                 </div>
-                              ))
-                          ) : (
-                              <div className="p-6 text-center text-xs font-semibold text-slate-400 flex flex-col items-center">
-                                <AlertCircle size={24} className="mb-2 opacity-50"/>
-                                No matching {clientTypeFilter === 'All' ? 'clients' : clientTypeFilter.toLowerCase()} found
+                                {formData.clientId === c._id && <CheckCircle2 size={16} className="text-blue-600"/>}
                               </div>
+                            ))
+                          ) : (
+                            <div className="p-6 text-center text-xs font-semibold text-slate-400 flex flex-col items-center">
+                              <AlertCircle size={24} className="mb-2 opacity-50"/>
+                              No matching {clientTypeFilter === 'All' ? 'clients' : clientTypeFilter.toLowerCase()} found
+                            </div>
                           )}
                         </div>
                       </div>
@@ -941,19 +1067,19 @@ const WorkManagement = () => {
               <div className="grid grid-cols-4 gap-3 mb-6 bg-slate-50 p-4 rounded-2xl border border-slate-200 shadow-inner">
                 <div className="text-center">
                   <p className="text-[10px] font-bold text-slate-500 uppercase">Assigned</p>
-                  <p className="text-xl font-black text-slate-800">{employeeEodStats.total}</p>
+                  <p className="text-xl font-black text-slate-800">{serverStats.total}</p>
                 </div>
                 <div className="text-center border-l border-slate-200">
                   <p className="text-[10px] font-bold text-emerald-500 uppercase">Completed</p>
-                  <p className="text-xl font-black text-emerald-600">{employeeEodStats.completed}</p>
+                  <p className="text-xl font-black text-emerald-600">{serverStats.completed}</p>
                 </div>
                 <div className="text-center border-l border-slate-200">
                   <p className="text-[10px] font-bold text-amber-500 uppercase">Pending</p>
-                  <p className="text-xl font-black text-amber-600">{employeeEodStats.pendingClient}</p>
+                  <p className="text-xl font-black text-amber-600">{serverStats.pendingClient}</p>
                 </div>
                 <div className="text-center border-l border-slate-200">
                   <p className="text-[10px] font-bold text-purple-500 uppercase">In Review</p>
-                  <p className="text-xl font-black text-purple-600">{employeeEodStats.underReview}</p>
+                  <p className="text-xl font-black text-purple-600">{serverStats.underReview}</p>
                 </div>
               </div>
 
@@ -1233,78 +1359,76 @@ const WorkManagement = () => {
             
             <div className="overflow-y-auto p-6 space-y-6 custom-scrollbar text-sm">
               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                 <div className="col-span-2 md:col-span-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Task Title / Name</p>
-                    <p className="font-bold text-slate-800">{taskToView.taskTitle || taskToView.clientName || 'Internal Task'}</p>
-                 </div>
-                 {taskToView.clientName && (
-                   <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Associated Client</p>
-                      <p className="font-bold text-slate-700">{taskToView.clientName}</p>
-                   </div>
-                 )}
-                 <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Our Status</p>
-                    <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border shadow-sm ${getStatusStyle(taskToView.currentStatus)}`}>{taskToView.currentStatus}</span>
-                 </div>
-                 {/* 🔴 GOVT STATUS DISPLAY */}
-                 {taskToView.govStatus && (
-                   <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Gov. Status</p>
-                      <span className="px-2.5 py-1 rounded-md text-[11px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
-                        🏛️ {taskToView.govStatus}
-                      </span>
-                   </div>
-                 )}
-                 <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Service & Form</p>
-                    <p className="font-bold text-slate-800">{taskToView.serviceCategory} <ChevronRight className="inline text-slate-400" size={12}/> {taskToView.subService}</p>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Priority & Due Date</p>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getPriorityStyle(taskToView.priority)}`}>{taskToView.priority}</span>
-                      <span className={`text-[11px] font-bold ${taskToView.isOverdue ? 'text-rose-600' : 'text-slate-600'}`}><Calendar size={12} className="inline mr-1 text-slate-400"/>{taskToView.dueDate ? new Date(taskToView.dueDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+                <div className="col-span-2 md:col-span-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Task Title / Name</p>
+                  <p className="font-bold text-slate-800">{taskToView.taskTitle || taskToView.clientName || 'Internal Task'}</p>
+                </div>
+                {taskToView.clientName && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Associated Client</p>
+                    <p className="font-bold text-slate-700">{taskToView.clientName}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Our Status</p>
+                  <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border shadow-sm ${getStatusStyle(taskToView.currentStatus)}`}>{taskToView.currentStatus}</span>
+                </div>
+                {/* 🔴 GOVT STATUS DISPLAY */}
+                {taskToView.govStatus && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Gov. Status</p>
+                    <span className="px-2.5 py-1 rounded-md text-[11px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
+                      🏛️ {taskToView.govStatus}
+                    </span>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Priority & Due Date</p>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getPriorityStyle(taskToView.priority)}`}>{taskToView.priority}</span>
+                    <span className={`text-[11px] font-bold ${taskViewIsOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
+                      <Calendar size={12} className="inline mr-1 text-slate-400"/>{taskToView.dueDate ? new Date(taskToView.dueDate).toLocaleDateString('en-IN') : 'N/A'}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned To</p>
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-5 w-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[9px] font-bold shrink-0">
+                      {taskToView.assignedTo?.name ? taskToView.assignedTo.name.charAt(0).toUpperCase() : 'E'}
                     </div>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned To</p>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-5 w-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[9px] font-bold shrink-0">
-                        {taskToView.assignedTo?.name ? taskToView.assignedTo.name.charAt(0).toUpperCase() : 'E'}
-                      </div>
-                      <span className="font-bold text-slate-700">{taskToView.assignedTo?.name || 'Unassigned'}</span>
-                    </div>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned By</p>
-                    <p className="font-medium text-slate-600">{taskToView.assignedBy?.name || 'Admin'}</p>
-                 </div>
+                    <span className="font-bold text-slate-700">{taskToView.assignedTo?.name || 'Unassigned'}</span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned By</p>
+                  <p className="font-medium text-slate-600">{taskToView.assignedBy?.name || 'Admin'}</p>
+                </div>
               </div>
 
               <div>
-                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Full Description</p>
-                 <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 leading-relaxed shadow-sm">
-                   {taskToView.taskDescription}
-                 </div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Full Description</p>
+                <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 leading-relaxed shadow-sm">
+                  {taskToView.taskDescription}
+                </div>
               </div>
 
               {taskToView.outputFileUrl && (
-                 <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 mb-1.5 border-b border-emerald-100 pb-1">Attached Output</p>
-                    <a href={taskToView.outputFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold hover:bg-emerald-100">
-                      <FileText size={14}/> View Document
-                    </a>
-                 </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 mb-1.5 border-b border-emerald-100 pb-1">Attached Output</p>
+                  <a href={taskToView.outputFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold hover:bg-emerald-100">
+                    <FileText size={14}/> View Document
+                  </a>
+                </div>
               )}
 
               {taskToView.remarks && (
-                 <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Remarks & Log History</p>
-                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl max-h-40 overflow-y-auto text-xs whitespace-pre-wrap font-mono text-slate-600 custom-scrollbar shadow-inner">
-                      {taskToView.remarks}
-                    </div>
-                 </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Remarks & Log History</p>
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl max-h-40 overflow-y-auto text-xs whitespace-pre-wrap font-mono text-slate-600 custom-scrollbar shadow-inner">
+                    {taskToView.remarks}
+                  </div>
+                </div>
               )}
             </div>
 
@@ -1344,78 +1468,77 @@ const WorkManagement = () => {
               </div>
 
               <div>
-                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">Performance Summary</p>
-                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
-                      <p className="text-[10px] font-bold uppercase text-slate-500">Tasks Assigned</p>
-                      <p className="text-xl font-black text-slate-700 mt-1">{eodToView.totalAssigned}</p>
-                    </div>
-                    <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 text-center">
-                      <p className="text-[10px] font-bold uppercase text-emerald-600">Tasks Done</p>
-                      <p className="text-xl font-black text-emerald-700 mt-1">{eodToView.totalCompleted}</p>
-                    </div>
-                    <div className="bg-amber-50 p-3 rounded-lg border border-amber-100 text-center">
-                      <p className="text-[10px] font-bold uppercase text-amber-600">Pending Tasks</p>
-                      <p className="text-xl font-black text-amber-700 mt-1">{eodToView.pendingClient}</p>
-                    </div>
-                    <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-center">
-                      <p className="text-[10px] font-bold uppercase text-purple-600">In Review</p>
-                      <p className="text-xl font-black text-purple-700 mt-1">{eodToView.underReview}</p>
-                    </div>
-                 </div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">Performance Summary</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-center">
+                    <p className="text-[10px] font-bold uppercase text-slate-500">Tasks Assigned</p>
+                    <p className="text-xl font-black text-slate-700 mt-1">{eodToView.totalAssigned}</p>
+                  </div>
+                  <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 text-center">
+                    <p className="text-[10px] font-bold uppercase text-emerald-600">Tasks Done</p>
+                    <p className="text-xl font-black text-emerald-700 mt-1">{eodToView.totalCompleted}</p>
+                  </div>
+                  <div className="bg-amber-50 p-3 rounded-lg border border-amber-100 text-center">
+                    <p className="text-[10px] font-bold uppercase text-amber-600">Pending Tasks</p>
+                    <p className="text-xl font-black text-amber-700 mt-1">{eodToView.pendingClient}</p>
+                  </div>
+                  <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-center">
+                    <p className="text-[10px] font-bold uppercase text-purple-600">In Review</p>
+                    <p className="text-xl font-black text-purple-700 mt-1">{eodToView.underReview}</p>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                 <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase text-blue-600 flex items-center gap-1"><Phone size={12}/> Follow-ups</p>
-                      <p className="text-2xl font-black text-blue-800 mt-1">{eodToView.followUpsDone || 0}</p>
-                    </div>
-                 </div>
-                 <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase text-emerald-600 flex items-center gap-1"><FileText size={12}/> Docs Collected</p>
-                      <p className="text-2xl font-black text-emerald-800 mt-1">{eodToView.documentsCollected || 0}</p>
-                    </div>
-                 </div>
+                <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-blue-600 flex items-center gap-1"><Phone size={12}/> Follow-ups</p>
+                    <p className="text-2xl font-black text-blue-800 mt-1">{eodToView.followUpsDone || 0}</p>
+                  </div>
+                </div>
+                <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-emerald-600 flex items-center gap-1"><FileText size={12}/> Docs Collected</p>
+                    <p className="text-2xl font-black text-emerald-800 mt-1">{eodToView.documentsCollected || 0}</p>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-4">
-                 <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Major Achievement / Work Done</p>
-                    <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 leading-relaxed shadow-sm">
-                      {eodToView.majorAchievement || 'No major achievement logged.'}
-                    </div>
-                 </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Major Achievement / Work Done</p>
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 leading-relaxed shadow-sm">
+                    {eodToView.majorAchievement || 'No major achievement logged.'}
+                  </div>
+                </div>
 
-                 <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-rose-500 mb-1.5 border-b border-rose-100 pb-1">Challenges & Blockers</p>
-                    <div className="bg-rose-50 p-3 rounded-lg border border-rose-100 text-rose-800 leading-relaxed shadow-sm">
-                      {eodToView.majorChallenge || 'No challenges faced today.'}
-                    </div>
-                 </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-rose-500 mb-1.5 border-b border-rose-100 pb-1">Challenges & Blockers</p>
+                  <div className="bg-rose-50 p-3 rounded-lg border border-rose-100 text-rose-800 leading-relaxed shadow-sm">
+                    {eodToView.majorChallenge || 'No challenges faced today.'}
+                  </div>
+                </div>
 
-                 {eodToView.supportRequired && (
-                   <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-500 mb-1.5 border-b border-indigo-100 pb-1">Support Required From Admin</p>
-                      <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-800 leading-relaxed shadow-sm">
-                        {eodToView.supportRequired}
-                      </div>
-                   </div>
-                 )}
-
-                 <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Tomorrow's Priority</p>
-                    <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 font-bold shadow-sm">
-                      {eodToView.tomorrowPriority || 'Not specified.'}
+                {eodToView.supportRequired && (
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-500 mb-1.5 border-b border-indigo-100 pb-1">Support Required From Admin</p>
+                    <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-800 leading-relaxed shadow-sm">
+                      {eodToView.supportRequired}
                     </div>
-                 </div>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Tomorrow's Priority</p>
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 font-bold shadow-sm">
+                    {eodToView.tomorrowPriority || 'Not specified.'}
+                  </div>
+                </div>
               </div>
 
-            </div>
-
-            <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
-              <button onClick={() => setIsEodViewModalOpen(false)} className="px-6 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 rounded-xl transition-colors shadow-sm">Close View</button>
+              <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
+                <button onClick={() => setIsEodViewModalOpen(false)} className="px-6 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 rounded-xl transition-colors shadow-sm">Close View</button>
+              </div>
             </div>
           </div>
         </div>
