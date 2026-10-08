@@ -136,7 +136,7 @@ const ItrReturns = () => {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter]);
 
-  // PAN Auto-fetch
+  // 🔴 PAN Auto-fetch logic updated for pagination and full extraction
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setFormData(prev => ({ ...prev, pan: val }));
@@ -145,7 +145,8 @@ const ItrReturns = () => {
       setFetchingPan(true);
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
+        // Adding fetchAll=true so that we don't get limited by pagination while searching
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}&fetchAll=true`, { headers });
         setPanSuggestions(res.data.clients || res.data || []);
         setShowSuggestions(true);
       } catch (error) {
@@ -159,16 +160,26 @@ const ItrReturns = () => {
     }
   };
 
+  // 🔴 FULL DATA EXTRACTION on Selection
   const handleSelectSuggestion = (client) => {
+    // Utility to format date from backend for HTML input type="date"
+    const parseDate = (d) => {
+      if (!d) return '';
+      const dateObj = new Date(d);
+      if (!isNaN(dateObj.getTime())) return dateObj.toISOString().split('T')[0];
+      return '';
+    };
+
     setFormData(prev => ({
       ...prev,
       pan: client.pan,
-      assesseeName: client.name || prev.assesseeName,
-      mobile: client.mobile || prev.mobile,
-      email: client.email || prev.email,
-      district: client.district || prev.district,
-      state: client.state || prev.state,
-      pinCode: client.pinCode || prev.pinCode
+      assesseeName: client.name || prev.assesseeName || '',
+      mobile: client.mobile || prev.mobile || '',
+      email: client.email || prev.email || '',
+      dob: client.dob ? parseDate(client.dob) : prev.dob || '', // Populating DOB
+      district: client.district || prev.district || '',
+      state: client.state || prev.state || '',
+      pinCode: client.pinCode || prev.pinCode || ''
     }));
     setShowSuggestions(false); 
     toast.success("✅ Client Data Auto-Filled!");
@@ -1217,13 +1228,27 @@ const ItrReturns = () => {
                       <p className="text-lg font-black text-rose-600">₹{(clientToView.feeAmount || 0) - (clientToView.amountReceived || 0)}</p>
                     </div>
                   </div>
+                  <div className="mt-3 text-right">
+                     <span className="text-[10px] font-bold text-slate-400 uppercase">Last Payment Date: </span>
+                     <span className="text-xs font-bold text-slate-700">{clientToView.paymentDate ? new Date(clientToView.paymentDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+                  </div>
                 </div>
-              </div>
 
+              </div>
+              
             </div>
             
             <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
-              <div></div>
+              <div>
+                 {isAdmin ? (
+                   <button 
+                     onClick={() => { setIsViewModalOpen(false); confirmDelete(clientToView); }} 
+                     className="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-transparent hover:border-rose-200 flex items-center gap-1.5"
+                   >
+                     <Trash2 size={15} /> Remove Workspace
+                   </button>
+                 ) : <div></div>}
+              </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => setIsViewModalOpen(false)} className="px-5 py-2.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors">
                   Close Profile
@@ -1237,10 +1262,10 @@ const ItrReturns = () => {
         </div>
       )}
 
-      {/* ADD / EDIT MODAL */}
+      {/* ADD / EDIT / IMPORT MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
             
             <div className="flex justify-between items-center px-8 py-5 border-b border-slate-100 bg-slate-50/80">
               <div>
@@ -1294,7 +1319,7 @@ const ItrReturns = () => {
                   </div>
 
                   <div className="md:col-span-1">
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Assessee Name *</label>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Client / Assessee Name *</label>
                     <input type="text" name="assesseeName" required value={formData.assesseeName} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm font-semibold border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100" />
                   </div>
                   

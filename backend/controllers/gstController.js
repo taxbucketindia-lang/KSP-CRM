@@ -1,14 +1,96 @@
 import GstReturn from '../models/GstReturn.js';
 import ClientMaster from '../models/ClientMaster.js'; 
 
-// @desc    Get all GST records
+// @desc    Get all GST records (WITH PAGINATION & FILTERS)
 export const getGstReturns = async (req, res) => {
   try {
-    const gstRecords = await GstReturn.find({})
-      .populate('createdBy', 'name empId')
-      .populate('clientMasterId', 'clientId pan clientType gstin') 
-      .sort({ createdAt: -1 });
-    res.json(gstRecords);
+    const { 
+      page = 1, 
+      limit = 10, 
+      search, 
+      status, 
+      taxpayerType, 
+      state, 
+      paymentPlan, 
+      bankLinked, 
+      aadhaarKyc, 
+      gstr1, 
+      gstr3b,
+      fetchAll 
+    } = req.query;
+
+    let filter = {};
+
+    // Search filter
+    if (search) {
+      filter.$or = [
+        { assesseeName: { $regex: search, $options: 'i' } },
+        { tradeName: { $regex: search, $options: 'i' } },
+        { gstin: { $regex: search, $options: 'i' } },
+        { pan: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Other filters
+    if (status && status !== 'ALL') {
+      filter.gstStatus = status === 'Documents Pending' ? { $in: [status, null, ''] } : status;
+    }
+    if (taxpayerType && taxpayerType !== 'ALL') {
+      filter.taxpayerType = taxpayerType === 'Regular' ? { $in: [taxpayerType, null, ''] } : taxpayerType;
+    }
+    if (state && state !== 'ALL') {
+      filter.state = state;
+    }
+    if (paymentPlan && paymentPlan !== 'ALL') {
+      filter.feeStatus = paymentPlan === 'Yearly' ? { $in: [paymentPlan, null, ''] } : paymentPlan;
+    }
+    if (bankLinked && bankLinked !== 'ALL') {
+      filter.bankLinkedStatus = bankLinked === 'Not Updated' ? { $in: [bankLinked, null, ''] } : bankLinked;
+    }
+    if (aadhaarKyc && aadhaarKyc !== 'ALL') {
+      filter.aadhaarKycStatus = aadhaarKyc === 'No' ? { $in: [aadhaarKyc, null, ''] } : aadhaarKyc;
+    }
+    if (gstr1 && gstr1 !== 'ALL') {
+      filter.gstr1FilingDate = gstr1 === 'Filed' ? { $exists: true, $ne: null } : { $eq: null };
+    }
+    if (gstr3b && gstr3b !== 'ALL') {
+      filter.gstr3bFilingDate = gstr3b === 'Filed' ? { $exists: true, $ne: null } : { $eq: null };
+    }
+
+    let gstRecords = [];
+    let totalCount = 0;
+    let totalPages = 1;
+
+    // Excel Export ke time pe `fetchAll` true hoga toh bina limit ke list bhejni hai
+    if (fetchAll === 'true') {
+      gstRecords = await GstReturn.find(filter)
+        .populate('createdBy', 'name empId')
+        .populate('clientMasterId', 'clientId pan clientType gstin')
+        .sort({ createdAt: -1 })
+        .lean();
+      totalCount = gstRecords.length;
+    } else {
+      // Pagination Logic
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      totalCount = await GstReturn.countDocuments(filter);
+      totalPages = Math.ceil(totalCount / parseInt(limit));
+
+      gstRecords = await GstReturn.find(filter)
+        .populate('createdBy', 'name empId')
+        .populate('clientMasterId', 'clientId pan clientType gstin')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+    }
+
+    res.status(200).json({
+      data: gstRecords,
+      currentPage: parseInt(page),
+      totalPages,
+      totalCount
+    });
+
   } catch (error) { 
     res.status(500).json({ message: error.message }); 
   }

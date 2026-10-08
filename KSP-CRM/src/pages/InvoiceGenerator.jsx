@@ -67,7 +67,7 @@ const InvoiceGenerator = () => {
   const [customQrImage, setCustomQrImage] = useState(null);
   const [stampImage, setStampImage] = useState(null);
 
-  // 🔴 UPDATED: tradeName added here so it correctly ties to the input
+  // Customer state for invoice
   const [customer, setCustomer] = useState({ name: "", tradeName: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
   const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0 }]);
   const [bank, setBank] = useState(axisBankPreset);
@@ -126,28 +126,51 @@ const InvoiceGenerator = () => {
     }
   };
 
+  // 🔴 UPDATED PAN SEARCH LOGIC
+  // 🔴 BULLETPROOF PAN SEARCH LOGIC FOR INVOICE
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setCustomer(prev => ({ ...prev, pan: val }));
+    
     if (val.length >= 2) {
       setFetchingPan(true);
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
-        setPanSuggestions(res.data || []);
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}&fetchAll=true`, { headers });
+        
+        // Console mein check karne ke liye ki backend kya bhej raha hai
+        console.log("PAN API Response:", res.data); 
+
+        // 🔴 100% Fail-Safe Array Extraction
+        let clientsArray = [];
+        if (Array.isArray(res.data)) {
+          clientsArray = res.data;
+        } else if (res.data && Array.isArray(res.data.clients)) {
+          clientsArray = res.data.clients;
+        } else if (res.data && Array.isArray(res.data.data)) {
+          clientsArray = res.data.data;
+        }
+        
+        setPanSuggestions(clientsArray);
         setShowSuggestions(true);
-      } catch (error) { console.error(error); } finally { setFetchingPan(false); }
+      } catch (error) { 
+        console.error("Error fetching PAN details", error); 
+      } finally { 
+        setFetchingPan(false); 
+      }
     } else {
-      setPanSuggestions([]); setShowSuggestions(false);
+      setPanSuggestions([]); 
+      setShowSuggestions(false);
     }
   };
 
+  // 🔴 UPDATED SELECT SUGGESTION LOGIC
   const handleSelectSuggestion = (client) => {
     setCustomer(prev => ({
       ...prev, 
       pan: client.pan, 
       name: client.name || prev.name, 
-      tradeName: client.tradeName || prev.tradeName, // 🔴 NAYA: Fetch Trade Name 
+      tradeName: client.tradeName || prev.tradeName, 
       phone: client.mobile || prev.phone,
       email: client.email || prev.email, 
       address: [client.address, client.district, client.pinCode].filter(Boolean).join(', ') || prev.address,
@@ -314,7 +337,6 @@ const InvoiceGenerator = () => {
     setInvoiceId(null); setInvoiceNo(""); setInvoiceDate(""); setIsTaxbucket(true); setIsProforma(false);
     setIsGstEnabled(true); setTaxes({ igst: true, cgst: false, sgst: false });
     setCompanyDetails(defaultCompany); setShowQr(true);
-    // 🔴 UPDATED: tradeName cleared properly
     setCustomer({ name: "", tradeName: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
     setItems([{ description: '', hsn: '', qty: 1, rate: 0 }]); setBank(axisBankPreset); 
     setLogoImage(null); setStampImage(null); setCustomQrImage(null);
@@ -696,7 +718,6 @@ const InvoiceGenerator = () => {
             <div className="grid grid-cols-12 border border-blue-900 text-xs mb-4">
               <div className="col-span-7 p-3 border-r border-blue-900 space-y-1">
                 <p className="font-bold text-blue-900 border-b border-blue-100 pb-1 mb-1">Customer Detail</p>
-                {/* 🔴 NAYA: PRINT VIEW MEIN FIRM NAME DIKHEGA */}
                 <p><strong>M/S</strong> : <span className="font-bold">{customer.name || '---'} {customer.tradeName ? `(${customer.tradeName})` : ''}</span></p>
                 <p><strong>Address</strong> : {customer.address || '---'}</p>
                 <p><strong>Phone</strong> : {customer.phone ? `-${customer.phone}` : '---'}</p>
@@ -1255,7 +1276,7 @@ const InvoiceGenerator = () => {
           </div>
         </div>
       )}
-
+      
     </div>
   );
 };

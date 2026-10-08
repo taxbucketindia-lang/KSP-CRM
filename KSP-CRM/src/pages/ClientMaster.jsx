@@ -83,12 +83,17 @@ const ClientMaster = () => {
       ]);
       
       // Backend ab totalPages aur array object mein bhej raha hai
-      setClients(clientsRes.data.clients || []);
+      setClients(clientsRes.data.clients || clientsRes.data || []);
       setTotalPages(clientsRes.data.totalPages || 1);
       setTotalRecords(clientsRes.data.totalCount || 0);
 
-      setAllInvoices(invoicesRes.data?.data || []);
-      setGstData(gstRes.data || []);
+      setAllInvoices(invoicesRes.data?.data || invoicesRes.data || []);
+      
+      // 🔴 THE FIX: GST list ko object se theek se nikaalo!
+      const fetchedGstData = gstRes.data?.data || gstRes.data?.clients || gstRes.data || [];
+      // Agar backend phir bhi galti se object bhej raha hai jo array nahi hai
+      setGstData(Array.isArray(fetchedGstData) ? fetchedGstData : []);
+
     } catch (error) {
       toast.error("Failed to load database");
     } finally {
@@ -117,19 +122,22 @@ const ClientMaster = () => {
     if (val.length === 10 && !editingId) {
       setFetchingPan(true);
       setTimeout(() => {
-        const match = gstData.find(g => g.pan?.toUpperCase() === val);
-        if (match) {
-           setFormData(prev => ({
-             ...prev,
-             tradeName: prev.tradeName || match.tradeName || '',
-             name: prev.name || match.assesseeName || '',
-             gstin: prev.gstin || match.gstin || '',
-             mobile: prev.mobile || match.mobile || '',
-             email: prev.email || match.email || '',
-             state: prev.state || match.state || '',
-             pinCode: prev.pinCode || match.pinCode || ''
-           }));
-           toast.success("✅ Trade Name & Details Auto-Fetched from GST Workspace!");
+        // GST Data array hai ya nahi, double check karne ke baad hi `.find` run karein
+        if (Array.isArray(gstData)) {
+          const match = gstData.find(g => g.pan?.toUpperCase() === val);
+          if (match) {
+             setFormData(prev => ({
+               ...prev,
+               tradeName: prev.tradeName || match.tradeName || '',
+               name: prev.name || match.assesseeName || '',
+               gstin: prev.gstin || match.gstin || '',
+               mobile: prev.mobile || match.mobile || '',
+               email: prev.email || match.email || '',
+               state: prev.state || match.state || '',
+               pinCode: prev.pinCode || match.pinCode || ''
+             }));
+             toast.success("✅ Trade Name & Details Auto-Fetched from GST Workspace!");
+          }
         }
         setFetchingPan(false);
       }, 500); 
@@ -166,7 +174,7 @@ const ClientMaster = () => {
   // 🔴 FINAL DISPLAY LIST (With Local Patches and Dues Filter)
   const finalDisplayClients = useMemo(() => {
     const patchedClients = clients.map(client => {
-       if (!client.tradeName) {
+       if (!client.tradeName && Array.isArray(gstData)) {
           const match = gstData.find(g => g.pan?.toUpperCase() === client.pan?.toUpperCase());
           if (match && match.tradeName) {
              return { ...client, tradeName: match.tradeName }; 
@@ -465,7 +473,9 @@ const ClientMaster = () => {
           const totalCredit = paidAmt + discAmt;
           
           let desc = `Part Payment Received against Invoice ${inv.invoiceNo} via ${ph.mode || 'Online'}`;
-          if (discAmt > 0) desc += ` (+ ₹${discAmt.toLocaleString('en-IN')} Discount)`;
+          if (discAmt > 0) {
+            desc += ` (+ ₹${discAmt.toLocaleString('en-IN')} Discount)`;
+          }
 
           transactions.push({
             id: `pay-${inv._id}-${idx}`,
@@ -1004,7 +1014,7 @@ const ClientMaster = () => {
                 </div>
               )}
 
-              {/* TAB 2: ACCOUNT STATEMENT & LEDGER */}
+              {/* TAB 2: ACCOUNT STATEMENT & Ledger */}
               {activeTab === 'ledger' && (
                 <div className="space-y-6 animate-in fade-in">
                   
