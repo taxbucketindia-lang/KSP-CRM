@@ -25,18 +25,25 @@ const ItrReturns = () => {
   const [panSuggestions, setPanSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [verificationFilter, setVerificationFilter] = useState('ALL');
   const [processedFilter, setProcessedFilter] = useState('ALL');
   const [returnTypeFilter, setReturnTypeFilter] = useState('ALL');
-  // 🔴 NAYA STATE: Fee Status Filter ke liye
   const [feeStatusFilter, setFeeStatusFilter] = useState('ALL');
+
+  // 🔴 Server-Side Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const itemsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
 
   const fileInputRef = useRef(null);
 
+  // Modals States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [currentItrId, setCurrentItrId] = useState(null);
@@ -69,53 +76,67 @@ const ItrReturns = () => {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  const getFilteredItrRemarks = (remarksStr) => {
-    if (!remarksStr) return '';
-    const blocks = remarksStr.split(/(?=\n\n--------------------------------------\n|\n?📅 )/);
-    const filtered = blocks.filter(block => {
-      const lower = block.toLowerCase();
-      return (
-        lower.includes('(itr return note)') ||
-        lower.includes('workspace note') ||
-        lower.includes('imported client') ||
-        lower.includes('itr workspace') ||
-        lower.includes('itr profile')
-      );
-    });
-    return filtered.join('').trim();
-  };
-
+  // 🔴 FETCH DATA WITH PAGINATION
   const fetchData = async () => {
+    setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchQuery,
+        status: statusFilter,
+        verification: verificationFilter,
+        processed: processedFilter,
+        returnType: returnTypeFilter,
+        feeStatus: feeStatusFilter
+      }).toString();
+
       const [crmRes, itrRes, basRes] = await Promise.all([
-        axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }), 
-        axios.get(`${import.meta.env.VITE_API_URL}/itr`, { headers }),     
+        axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })), 
+        axios.get(`${import.meta.env.VITE_API_URL}/itr?${params}`, { headers }),     
         axios.get(`${import.meta.env.VITE_API_URL}/bas`, { headers }).catch(() => ({ data: [] }))
       ]);
       
       const crmClients = crmRes.data || [];
-      const activeItrRecords = itrRes.data || [];
-
-      const availableForImport = crmClients.filter(c => c.service === 'ITR Filing');
-
+      const availableForImport = Array.isArray(crmClients) ? crmClients.filter(c => c.service === 'ITR Filing') : [];
       setImportList(availableForImport); 
-      setItrClients(activeItrRecords); 
+      
+      // Handle Paginated Backend Response
+      if (itrRes.data && itrRes.data.data) {
+        setItrClients(itrRes.data.data);
+        setTotalPages(itrRes.data.totalPages || 1);
+        setTotalRecords(itrRes.data.totalCount || 0);
+      } else {
+         setItrClients(itrRes.data || []);
+      }
+
       setBas(basRes.data || []);
       setSelectedIds([]); 
     } catch (error) {
       toast.error("Failed to load data");
+      console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
+  // Debounce API calls when filters or search change
   useEffect(() => {
-    fetchData();
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 500); 
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token]);
+  }, [user.token, currentPage, searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter]);
 
+  // Reset page to 1 if any filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter]);
+
+  // PAN Auto-fetch
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setFormData(prev => ({ ...prev, pan: val }));
@@ -125,7 +146,7 @@ const ItrReturns = () => {
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
         const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
-        setPanSuggestions(res.data || []);
+        setPanSuggestions(res.data.clients || res.data || []);
         setShowSuggestions(true);
       } catch (error) {
         console.error("Error fetching PAN details", error);
@@ -153,152 +174,144 @@ const ItrReturns = () => {
     toast.success("✅ Client Data Auto-Filled!");
   };
 
-  const filteredClients = useMemo(() => {
-    const filtered = itrClients.filter((client) => {
-      const searchStr = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (client.assesseeName?.toLowerCase() || '').includes(searchStr) || 
-        (client.pan?.toLowerCase() || '').includes(searchStr) ||
-        (client.clientMasterId?.clientId?.toLowerCase() || '').includes(searchStr);
-
-      const matchesStatus = statusFilter === 'ALL' || (client.itrStatus || 'Documents Pending') === statusFilter;
-      const matchesVerif = verificationFilter === 'ALL' || (client.verificationMethod || 'Pending') === verificationFilter;
-      const matchesProc = processedFilter === 'ALL' || (client.itrProcessedStatus || 'Pending') === processedFilter;
-      const matchesType = returnTypeFilter === 'ALL' || (client.returnType || 'Original') === returnTypeFilter; 
-      
-      // 🔴 NAYA FILTER LOGIC: Fee Status
-      const matchesFee = feeStatusFilter === 'ALL' || (client.feeStatus || 'Dues') === feeStatusFilter;
-
-      return matchesSearch && matchesStatus && matchesVerif && matchesProc && matchesType && matchesFee;
-    });
-
-    // 🔴 NAYA SORTING LOGIC: Sort by Filing Date (Latest Top)
-    return filtered.sort((a, b) => {
-      const dateA = a.filingDate ? new Date(a.filingDate).getTime() : 0;
-      const dateB = b.filingDate ? new Date(b.filingDate).getTime() : 0;
-      
-      if (dateA !== dateB) {
-        return dateB - dateA; // Descending order (Latest date on top)
-      }
-      // Agar dono me date nahi hai ya same hai, toh creation date ke hisaab se sort karo
-      return new Date(b.createdAt) - new Date(a.createdAt);
-    });
-  }, [itrClients, searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter]); // Added feeStatusFilter in dependencies
-
+  // Metrics (Based on current page records. For total system sum, backend aggregation needed)
   const stats = useMemo(() => {
     let totalFeeAmount = 0;
     let totalReceivedAmount = 0;
 
-    filteredClients.forEach(c => {
+    itrClients.forEach(c => {
       totalFeeAmount += Number(c.feeAmount || 0);
       totalReceivedAmount += Number(c.amountReceived || 0);
     });
 
     return {
-      total: filteredClients.length,
-      pending: filteredClients.filter(c => (c.itrStatus || 'Documents Pending') === 'Documents Pending').length,
-      processing: filteredClients.filter(c => c.itrStatus === 'Processing').length,
-      completed: filteredClients.filter(c => ['Filed', 'E-Verified', 'Refund Issued'].includes(c.itrStatus)).length,
+      total: totalRecords, 
+      pending: itrClients.filter(c => (c.itrStatus || 'Documents Pending') === 'Documents Pending').length,
+      processing: itrClients.filter(c => c.itrStatus === 'Processing').length,
+      completed: itrClients.filter(c => ['Filed', 'E-Verified', 'Refund Issued'].includes(c.itrStatus)).length,
       totalFeeAmount,
       totalReceivedAmount,
       totalPendingAmount: totalFeeAmount - totalReceivedAmount
     };
-  }, [filteredClients]);
+  }, [itrClients, totalRecords]);
 
+  // EXCEL EXPORT (Full Download)
   const handleExportExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('ITR Workspace');
+    const toastId = toast.loading("Fetching all ITR records for export...");
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const params = new URLSearchParams({
+        search: searchQuery,
+        status: statusFilter,
+        verification: verificationFilter,
+        processed: processedFilter,
+        returnType: returnTypeFilter,
+        feeStatus: feeStatusFilter,
+        fetchAll: 'true' // Requesting full list from backend
+      }).toString();
 
-    worksheet.columns = [
-      { header: 'Master Client ID', key: 'clientId', width: 20 },
-      { header: 'PAN', key: 'pan', width: 15 },
-      { header: 'Assessee Name', key: 'assesseeName', width: 25 },
-      { header: 'Mobile', key: 'mobile', width: 15 },
-      { header: 'Email', key: 'email', width: 25 },
-      { header: 'DOB', key: 'dob', width: 15 },
-      { header: 'District', key: 'district', width: 15 },
-      { header: 'State', key: 'state', width: 15 },
-      { header: 'Pin Code', key: 'pinCode', width: 15 },
-      { header: 'ITR Status', key: 'itrStatus', width: 25 },
-      { header: 'ITR AY', key: 'itrFiledUpToAY', width: 15 },
-      { header: 'Return Type', key: 'returnType', width: 15 },
-      { header: 'Acknowledgement No', key: 'acknowledgementNo', width: 25 },
-      { header: 'Filing Date', key: 'filingDate', width: 15 },
-      { header: 'Next Reminder', key: 'nextReminderDate', width: 15 },
-      { header: 'Portal Password', key: 'portalPassword', width: 20 },
-      { header: 'Form No', key: 'formNo', width: 15 },
-      { header: 'Regime', key: 'regime', width: 15 },
-      { header: 'ITR Filed By', key: 'itrFiledBy', width: 20 },
-      { header: 'Verification Method', key: 'verificationMethod', width: 25 },
-      { header: 'Processed Status', key: 'itrProcessedStatus', width: 25 },
-      { header: 'Total Income', key: 'totalIncome', width: 15 },
-      { header: 'Income Tax', key: 'incomeTax', width: 15 },
-      { header: 'TDS', key: 'tds', width: 15 },
-      { header: 'TCS', key: 'tcs', width: 15 },
-      { header: 'Self Adv Tax', key: 'selfAdvTax', width: 15 },
-      { header: 'Refund/Payable', key: 'refund', width: 15 },
-      { header: 'Bank Name', key: 'bankName', width: 20 },
-      { header: 'Account No', key: 'accountNo', width: 20 },
-      { header: 'IFSC Code', key: 'ifscCode', width: 15 },
-      { header: 'Fee Status', key: 'feeStatus', width: 15 },
-      { header: 'Total Fee', key: 'feeAmount', width: 15 },
-      { header: 'Received Amount', key: 'amountReceived', width: 18 },
-      { header: 'System Added By', key: 'createdBy', width: 20 } 
-    ];
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/itr?${params}`, { headers });
+      const fullItrList = res.data.data || res.data || [];
 
-    worksheet.getRow(1).font = { bold: true };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+      toast.success("Generating Excel File...", { id: toastId });
 
-    const dataToExport = selectedIds.length > 0 
-      ? filteredClients.filter(c => selectedIds.includes(c._id)) 
-      : filteredClients;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('ITR Workspace');
 
-    dataToExport.forEach(client => { 
-      worksheet.addRow({
-        clientId: client.clientMasterId?.clientId || 'Pending',
-        pan: client.pan || '',
-        assesseeName: client.assesseeName || '',
-        mobile: client.mobile || '',
-        email: client.email || '',
-        dob: client.dob ? new Date(client.dob).toLocaleDateString('en-IN') : '',
-        district: client.district || '',
-        state: client.state || '',
-        pinCode: client.pinCode || client.pincode || '',
-        itrStatus: client.itrStatus || 'Documents Pending',
-        itrFiledUpToAY: client.itrFiledUpToAY || '',
-        returnType: client.returnType || 'Original',
-        acknowledgementNo: client.acknowledgementNo || '',
-        filingDate: client.filingDate ? new Date(client.filingDate).toLocaleDateString('en-IN') : '',
-        nextReminderDate: client.nextReminderDate ? new Date(client.nextReminderDate).toLocaleDateString('en-IN') : '',
-        portalPassword: client.portalPassword || '',
-        formNo: client.formNo || '',
-        regime: client.regime || '',
-        itrFiledBy: client.itrFiledBy || '',
-        verificationMethod: client.verificationMethod || '',
-        itrProcessedStatus: client.itrProcessedStatus || '',
-        totalIncome: client.totalIncome || 0,
-        incomeTax: client.incomeTax || 0,
-        tds: client.tds || 0,
-        tcs: client.tcs || 0,
-        selfAdvTax: client.selfAdvTax || 0,
-        refund: client.refund || 0,
-        bankName: client.bankName || '',
-        accountNo: client.accountNo || '',
-        ifscCode: client.ifscCode || '',
-        feeStatus: client.feeStatus || '',
-        feeAmount: client.feeAmount || 0,
-        amountReceived: client.amountReceived || 0,
-        createdBy: client.createdBy?.name || 'Admin' 
+      worksheet.columns = [
+        { header: 'Master Client ID', key: 'clientId', width: 20 },
+        { header: 'PAN', key: 'pan', width: 15 },
+        { header: 'Assessee Name', key: 'assesseeName', width: 25 },
+        { header: 'Mobile', key: 'mobile', width: 15 },
+        { header: 'Email', key: 'email', width: 25 },
+        { header: 'DOB', key: 'dob', width: 15 },
+        { header: 'District', key: 'district', width: 15 },
+        { header: 'State', key: 'state', width: 15 },
+        { header: 'Pin Code', key: 'pinCode', width: 15 },
+        { header: 'ITR Status', key: 'itrStatus', width: 25 },
+        { header: 'ITR AY', key: 'itrFiledUpToAY', width: 15 },
+        { header: 'Return Type', key: 'returnType', width: 15 },
+        { header: 'Acknowledgement No', key: 'acknowledgementNo', width: 25 },
+        { header: 'Filing Date', key: 'filingDate', width: 15 },
+        { header: 'Next Reminder', key: 'nextReminderDate', width: 15 },
+        { header: 'Portal Password', key: 'portalPassword', width: 20 },
+        { header: 'Form No', key: 'formNo', width: 15 },
+        { header: 'Regime', key: 'regime', width: 15 },
+        { header: 'ITR Filed By', key: 'itrFiledBy', width: 20 },
+        { header: 'Verification Method', key: 'verificationMethod', width: 25 },
+        { header: 'Processed Status', key: 'itrProcessedStatus', width: 25 },
+        { header: 'Total Income', key: 'totalIncome', width: 15 },
+        { header: 'Income Tax', key: 'incomeTax', width: 15 },
+        { header: 'TDS', key: 'tds', width: 15 },
+        { header: 'TCS', key: 'tcs', width: 15 },
+        { header: 'Self Adv Tax', key: 'selfAdvTax', width: 15 },
+        { header: 'Refund/Payable', key: 'refund', width: 15 },
+        { header: 'Bank Name', key: 'bankName', width: 20 },
+        { header: 'Account No', key: 'accountNo', width: 20 },
+        { header: 'IFSC Code', key: 'ifscCode', width: 15 },
+        { header: 'Fee Status', key: 'feeStatus', width: 15 },
+        { header: 'Total Fee', key: 'feeAmount', width: 15 },
+        { header: 'Received Amount', key: 'amountReceived', width: 18 },
+        { header: 'System Added By', key: 'createdBy', width: 20 } 
+      ];
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+
+      const dataToExport = selectedIds.length > 0 
+        ? fullItrList.filter(c => selectedIds.includes(c._id)) 
+        : fullItrList;
+
+      dataToExport.forEach(client => { 
+        worksheet.addRow({
+          clientId: client.clientMasterId?.clientId || 'Pending',
+          pan: client.pan || '',
+          assesseeName: client.assesseeName || '',
+          mobile: client.mobile || '',
+          email: client.email || '',
+          dob: client.dob ? new Date(client.dob).toLocaleDateString('en-IN') : '',
+          district: client.district || '',
+          state: client.state || '',
+          pinCode: client.pinCode || client.pincode || '',
+          itrStatus: client.itrStatus || 'Documents Pending',
+          itrFiledUpToAY: client.itrFiledUpToAY || '',
+          returnType: client.returnType || 'Original',
+          acknowledgementNo: client.acknowledgementNo || '',
+          filingDate: client.filingDate ? new Date(client.filingDate).toLocaleDateString('en-IN') : '',
+          nextReminderDate: client.nextReminderDate ? new Date(client.nextReminderDate).toLocaleDateString('en-IN') : '',
+          portalPassword: client.portalPassword || '',
+          formNo: client.formNo || '',
+          regime: client.regime || '',
+          itrFiledBy: client.itrFiledBy || '',
+          verificationMethod: client.verificationMethod || '',
+          itrProcessedStatus: client.itrProcessedStatus || '',
+          totalIncome: client.totalIncome || 0,
+          incomeTax: client.incomeTax || 0,
+          tds: client.tds || 0,
+          tcs: client.tcs || 0,
+          selfAdvTax: client.selfAdvTax || 0,
+          refund: client.refund || 0,
+          bankName: client.bankName || '',
+          accountNo: client.accountNo || '',
+          ifscCode: client.ifscCode || '',
+          feeStatus: client.feeStatus || '',
+          feeAmount: client.feeAmount || 0,
+          amountReceived: client.amountReceived || 0,
+          createdBy: client.createdBy?.name || 'Admin' 
+        });
       });
-    });
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `ITR_Workspace_${selectedIds.length > 0 ? 'Selected_' : ''}${new Date().toISOString().split('T')[0]}.xlsx`);
-    
-    if(selectedIds.length > 0) setSelectedIds([]);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `ITR_Workspace_${selectedIds.length > 0 ? 'Selected_' : ''}${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      if(selectedIds.length > 0) setSelectedIds([]);
+    } catch (error) {
+      toast.error("Failed to generate Excel.", { id: toastId });
+    }
   };
 
+  // EXCEL IMPORT
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -354,14 +367,6 @@ const ItrReturns = () => {
           return 'Documents Pending';
         };
 
-        const normalizeReturnType = (val) => {
-          if (!val) return 'Original';
-          const s = String(val).toLowerCase();
-          if (s.includes('revis')) return 'Revised';
-          if (s.includes('updat')) return 'Updated';
-          return 'Original';
-        };
-
         const formattedItrRecords = data.map(row => ({
           assesseeName: getVal(row, ['Assessee Name', 'Name', 'Client Name', 'Client / Trade Name', 'assesseeName']),
           pan: String(getVal(row, ['PAN', 'pan', 'Pan', 'PAN Number', 'PAN No', 'PAN No.'])),
@@ -373,7 +378,7 @@ const ItrReturns = () => {
           pinCode: getVal(row, ['Pin Code', 'Pincode', 'pinCode', 'pincode', 'Zip']),
           itrStatus: normalizeItrStatus(getVal(row, ['ITR Status', 'itrStatus'])),
           itrFiledUpToAY: getVal(row, ['ITR AY', 'itrFiledUpToAY', 'AY']) || 'AY 2026-27',
-          returnType: normalizeReturnType(getVal(row, ['Return Type', 'returnType', 'Type'])), 
+          returnType: getVal(row, ['Return Type', 'returnType', 'Type']) || 'Original', 
           acknowledgementNo: String(getVal(row, ['Acknowledgement No', 'Ack No', 'acknowledgementNo', 'Ack Number']) || ''), 
           filingDate: parseDate(getVal(row, ['Filing Date', 'filingDate'])),
           nextReminderDate: parseDate(getVal(row, ['Next Reminder', 'nextReminderDate', 'Next Due Date'])),
@@ -418,7 +423,7 @@ const ItrReturns = () => {
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
-      setSelectedIds(filteredClients.map(c => c._id));
+      setSelectedIds(itrClients.map(c => c._id));
     } else {
       setSelectedIds([]);
     }
@@ -481,47 +486,6 @@ const ItrReturns = () => {
 
       return updated;
     });
-  };
-
-  const handleImportSelect = (e) => {
-    const cid = e.target.value;
-    setImportClientId(cid);
-    
-    if (!cid) {
-      setFormData(initialForm); 
-      return;
-    }
-
-    const client = importList.find(c => c._id === cid);
-    if (client) {
-      const parseDate = (d) => {
-        if (!d) return '';
-        const dateObj = new Date(d);
-        if (!isNaN(dateObj.getTime())) return dateObj.toISOString().split('T')[0];
-        return '';
-      };
-
-      setFormData({
-        ...initialForm,
-        assesseeName: client.assesseeName || '',
-        pan: client.pan || '',
-        dob: client.dob ? parseDate(client.dob) : '',
-        mobile: client.mobile || '',
-        email: client.email || '',
-        district: client.district || '',
-        state: client.state || '',
-        pinCode: client.pinCode || client.pincode || '', 
-        leadSource: client.leadSource || 'Google',
-        referredByBA: client.referredByBA ? (client.referredByBA._id || client.referredByBA) : '',
-        referenceName: client.referenceName || '',
-        otherSourceName: client.otherSourceName || '',
-        itrFiledUpToAY: client.itrFiledUpToAY || 'AY 2026-27',
-        filingDate: parseDate(client.filingDate),
-        nextReminderDate: parseDate(client.nextReminderDate),
-        itrStatus: client.itrStatus || 'Documents Pending',
-        portalPassword: client.portalPassword || '',
-      });
-    }
   };
 
   const handleOpenAdd = () => {
@@ -699,6 +663,7 @@ const ItrReturns = () => {
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
       <Toaster position="top-right" />
 
+      {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
@@ -721,7 +686,7 @@ const ItrReturns = () => {
         </div>
       </div>
 
-      {/* METRICS CARDS */}
+      {/* OVERALL METRICS CARDS */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
           <div className="flex items-start justify-between">
@@ -761,14 +726,14 @@ const ItrReturns = () => {
         </div>
       </div>
 
-      {/* FINANCIAL METRICS */}
+      {/* CURRENT PAGE FINANCIAL METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-[0_2px_4px_rgba(0,0,0,0.02)] flex items-center gap-4">
           <div className="h-10 w-10 rounded-full bg-slate-50 text-slate-600 flex items-center justify-center font-bold border border-slate-100 shrink-0">
             <Calculator size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Billed Fees</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Billed</p>
             <h3 className="text-lg font-black text-slate-800 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalFeeAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -777,7 +742,7 @@ const ItrReturns = () => {
             <CheckCircle2 size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Received</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Received</p>
             <h3 className="text-lg font-black text-emerald-600 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalReceivedAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -786,7 +751,7 @@ const ItrReturns = () => {
             <Wallet size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pending Dues</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Dues</p>
             <h3 className="text-lg font-black text-rose-600 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalPendingAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -798,7 +763,7 @@ const ItrReturns = () => {
         <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col xl:flex-row xl:items-center gap-4">
           <div className="relative w-full xl:w-72 shrink-0">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder="Search Client, PAN or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors shadow-sm" />
+            <input type="text" placeholder="Search Client or PAN..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors shadow-sm" />
           </div>
           
           <div className="flex flex-wrap items-center gap-3 w-full">
@@ -837,7 +802,6 @@ const ItrReturns = () => {
               <option value="Updated">Updated</option>
             </select>
 
-            {/* 🔴 NAYA FILTER: FEE STATUS */}
             <select value={feeStatusFilter} onChange={(e) => setFeeStatusFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
               <option value="ALL">Fee: All</option>
               <option value="Paid">Paid</option>
@@ -866,6 +830,7 @@ const ItrReturns = () => {
           </div>
         )}
 
+        {/* PAGINATION TABLE */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -873,13 +838,12 @@ const ItrReturns = () => {
                 <th className="py-4 px-4 w-12 text-center border-r border-slate-100">
                   <input 
                     type="checkbox" 
-                    checked={selectedIds.length === filteredClients.length && filteredClients.length > 0} 
+                    checked={selectedIds.length === itrClients.length && itrClients.length > 0} 
                     onChange={handleSelectAll} 
                     className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
                   />
                 </th>
                 <th className="py-4 px-6">Client Details</th>
-                <th className="py-4 px-6">Tax Info</th>
                 <th className="py-4 px-6">Important Dates</th>
                 <th className="py-4 px-6 bg-slate-50/50">Live Status Tracker</th>
                 <th className="py-4 px-6">Added By</th>
@@ -888,11 +852,11 @@ const ItrReturns = () => {
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
-                <tr><td colSpan="7" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading ITR workflow...</td></tr>
-              ) : filteredClients.length === 0 ? (
-                <tr><td colSpan="7" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No active clients match filters.</td></tr>
+                <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading ITR workflow...</td></tr>
+              ) : itrClients.length === 0 ? (
+                <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No active clients match filters.</td></tr>
               ) : (
-                filteredClients.map((client) => {
+                itrClients.map((client) => {
                   const currentStatus = client.itrStatus || 'Documents Pending';
                   const isSelected = selectedIds.includes(client._id);
 
@@ -909,7 +873,6 @@ const ItrReturns = () => {
                       <td className="py-4 px-6">
                         <div className="font-bold text-slate-800 text-base flex items-center gap-2">
                            {client.assesseeName} 
-                           {/* 🔴 CLIENT ID DISPLAY IN TABLE */}
                            {client.clientMasterId?.clientId && (
                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-slate-200/70 text-slate-600 tracking-wider">
                                {client.clientMasterId.clientId}
@@ -917,15 +880,12 @@ const ItrReturns = () => {
                            )}
                         </div>
                         <div className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5 mt-1">
-                            <span className="font-mono text-sm font-bold text-slate-700 px-2 py-0.5 inline-block uppercase">
+                            <span className="font-mono text-sm font-bold text-slate-700 px-2 py-0.5 inline-block uppercase bg-slate-100 border border-slate-200 rounded">
                               {client.pan || 'N/A'}
                            </span>
-                          </div>
+                        </div>
                       </td>
-                      <td className="py-4 pr-6">
-                        
-                      </td>
-                      <td className="py-4 pl-6">
+                      <td className="py-4 px-6">
                         <div className="flex flex-col gap-1.5 text-[11px] font-semibold">
                           <span className="text-slate-800 font-bold mb-0.5 flex items-center gap-2">
                             {client.itrFiledUpToAY || 'AY 2026-27'}
@@ -933,7 +893,6 @@ const ItrReturns = () => {
                               {client.returnType || 'Original'}
                             </span>
                           </span>
-                          {/* 🔴 Filing Date Displayed clearly */}
                           {client.filingDate && (
                             <span className="text-emerald-600 mt-1">Filed: {new Date(client.filingDate).toLocaleDateString('en-IN')}</span>
                           )}
@@ -976,13 +935,18 @@ const ItrReturns = () => {
                       </td>
                       
                       <td className="py-4 px-6 text-right">
-                        <div className="flex items-center justify-end gap-2.5">
+                        <div className="flex items-center justify-center gap-2.5">
                           <button onClick={() => handleOpenView(client)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-lg transition-all border border-blue-200 shadow-sm" title="View Profile">
                             <Eye size={14} strokeWidth={2.5}/> View
                           </button>
                           <button onClick={() => handleOpenRemarks(client)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white rounded-lg transition-all border border-amber-200 shadow-sm" title="Remarks">
                             <MessageSquare size={14} strokeWidth={2.5}/> Note
                           </button>
+                          {isAdmin && (
+                            <button onClick={() => confirmDelete(client)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors" title="Delete">
+                              <Trash2 size={16}/>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -992,14 +956,41 @@ const ItrReturns = () => {
             </tbody>
           </table>
         </div>
+
+        {/* SERVER-SIDE PAGINATION CONTROLS */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200 rounded-b-2xl">
+            <span className="text-xs font-bold text-slate-500">
+              Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
+            </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                disabled={currentPage === 1 || loading}
+                className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
+                {currentPage} / {totalPages}
+              </span>
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                disabled={currentPage === totalPages || loading}
+                className="px-4 py-2 text-xs font-bold bg-blue-600 text-white border border-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* VIEW PROFILE MODAL - REDESIGNED */}
+      {/* VIEW PROFILE MODAL */}
       {isViewModalOpen && clientToView && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-slate-50 rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
             
-            {/* Sleek Gradient Header */}
             <div className="relative px-8 pt-6 pb-16 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex justify-between items-start overflow-hidden">
               <div className="absolute top-0 right-0 -mt-10 -mr-10 h-40 w-40 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
               
@@ -1010,7 +1001,6 @@ const ItrReturns = () => {
                 <div>
                   <h2 className="text-2xl font-black tracking-tight">{clientToView.assesseeName}</h2>
                   <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-blue-100 font-medium">
-                    {/* 🔴 CLIENT ID DISPLAY IN MODAL HEADER */}
                     {clientToView.clientMasterId?.clientId && (
                       <span className="flex items-center gap-1.5 bg-white/20 px-2.5 py-1 rounded-md border border-white/30 font-mono tracking-wider text-white font-bold">
                         ID: {clientToView.clientMasterId.clientId}
@@ -1033,22 +1023,18 @@ const ItrReturns = () => {
             
             <div className="overflow-y-auto p-6 md:p-8 space-y-6 custom-scrollbar">
               
-              {/* Top Row: General Info & Filing Status */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* Contact & Demographics Card */}
+                {/* Contact Card */}
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
                     <Navigation size={14}/> Contact & Address
                   </h3>
-                  
                   <div className="space-y-4">
                     <div>
                       <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Email Address</p>
                       <p className="text-sm font-semibold text-slate-800">{clientToView.email || 'N/A'}</p>
                     </div>
-                    
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Date of Birth</p>
@@ -1058,13 +1044,9 @@ const ItrReturns = () => {
                         <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Lead Source</p>
                         <p className="text-sm font-semibold text-slate-800">
                           {clientToView.leadSource || 'Google'}
-                          {clientToView.leadSource === 'BA' && clientToView.referredByBA && ` (${clientToView.referredByBA.baName || clientToView.referredByBA.name || 'BA'})`}
-                          {clientToView.leadSource === 'Reference' && clientToView.referenceName && ` (${clientToView.referenceName})`}
-                          {clientToView.leadSource === 'Other' && clientToView.otherSourceName && ` (${clientToView.otherSourceName})`}
                         </p>
                       </div>
                     </div>
-                    
                     <div className="pt-3 border-t border-slate-100">
                       <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Registered Address</p>
                       <p className="text-sm font-semibold text-slate-700">
@@ -1080,7 +1062,6 @@ const ItrReturns = () => {
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
                     <Activity size={14}/> ITR Tracking Status
                   </h3>
-                  
                   <div className="space-y-4">
                     <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
                       <span className="text-xs font-bold text-slate-500">Live Status</span>
@@ -1114,16 +1095,13 @@ const ItrReturns = () => {
                 </div>
               </div>
 
-              {/* Tax Computation Wide Card */}
+              {/* Tax Computation Card */}
               <div className="bg-gradient-to-br from-indigo-50/50 to-blue-50/50 p-6 rounded-2xl border border-indigo-100 shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 right-0 text-indigo-500 opacity-5 -mt-6 -mr-6"><Calculator size={150} /></div>
-                
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5">
                   <h3 className="text-sm font-black text-indigo-900 flex items-center gap-2 z-10">
                     <Calculator size={18} className="text-indigo-600"/> Tax Computation & Portal Info
                   </h3>
-                  
-                  {/* ACKNOWLEDGEMENT NO IN VIEW PROFILE */}
                   {clientToView.acknowledgementNo && clientToView.acknowledgementNo !== 'N/A' && (
                     <div className="mt-3 sm:mt-0 flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-indigo-200 shadow-sm z-10">
                       <span className="text-[10px] font-bold uppercase text-slate-500">Ack No.</span>
@@ -1187,7 +1165,6 @@ const ItrReturns = () => {
 
               {/* Bottom Row: Bank & Fees */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
                 {/* Bank Details */}
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
@@ -1241,7 +1218,6 @@ const ItrReturns = () => {
                     </div>
                   </div>
                 </div>
-
               </div>
 
             </div>
@@ -1581,6 +1557,42 @@ const ItrReturns = () => {
         </div>
       )}
 
+      {/* REMARKS MODAL */}
+      {isRemarksModalOpen && clientForRemarks && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <MessageSquare className="text-amber-600" size={20}/> Client Notes & Remarks
+              </h3>
+              <button onClick={() => setIsRemarksModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18}/></button>
+            </div>
+            
+            <div className="p-6 bg-amber-50/30">
+              <div className="bg-white border border-slate-200 rounded-xl p-4 h-64 overflow-y-auto mb-4 custom-scrollbar whitespace-pre-wrap text-sm text-slate-700">
+                {clientForRemarks.remarks ? clientForRemarks.remarks : <span className="text-slate-400 italic">No notes found for this client...</span>}
+              </div>
+              
+              <form onSubmit={handleAddRemarkSubmit}>
+                <textarea 
+                  required
+                  rows="3"
+                  value={newRemarkText}
+                  onChange={(e) => setNewRemarkText(e.target.value)}
+                  placeholder="Add a new remark, note, or update..."
+                  className="w-full text-sm font-medium border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-amber-500/20 resize-none shadow-sm"
+                ></textarea>
+                <div className="flex justify-end mt-3">
+                  <button type="submit" className="px-6 py-2 text-sm font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl shadow-md transition-all flex items-center gap-2">
+                    <Send size={14}/> Add Note
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* UNLINK CONFIRMATION MODAL */}
       {isDeleteModalOpen && clientToDelete && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
@@ -1606,5 +1618,3 @@ const ItrReturns = () => {
 };
 
 export default ItrReturns;
-
-
