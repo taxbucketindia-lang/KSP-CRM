@@ -1,14 +1,97 @@
 import FssaiWorkspace from '../models/FssaiWorkspace.js';
 import ClientMaster from '../models/ClientMaster.js';
 
-// @desc    Get all FSSAI workspaces
+// @desc    Get all FSSAI workspaces (WITH PAGINATION)
 export const getFssaiWorkspaces = async (req, res) => {
   try {
-    const workspaces = await FssaiWorkspace.find()
-      .populate('clientMasterId', 'clientId name pan')
-      .populate('createdBy', 'name empId')
-      .sort({ createdAt: -1 });
-    res.status(200).json(workspaces);
+    const { 
+      page = 1, 
+      limit = 10, 
+      search, 
+      status, 
+      licenseType,
+      fetchAll 
+    } = req.query;
+
+    let filter = {};
+
+    // Search filter
+    if (search) {
+      filter.$or = [
+        { assesseeName: { $regex: search, $options: 'i' } },
+        { fssaiLicenseNo: { $regex: search, $options: 'i' } },
+        { pan: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (status && status !== 'ALL') {
+      filter.fssaiStatus = status;
+    }
+    if (licenseType && licenseType !== 'ALL') {
+      filter.licenseType = licenseType;
+    }
+
+    let workspaces = [];
+    let totalCount = 0;
+    let totalPages = 1;
+
+    // Excel Export ke time pe `fetchAll` true hoga toh bina limit ke list bhejni hai
+    if (fetchAll === 'true') {
+      workspaces = await FssaiWorkspace.find(filter)
+        .populate({
+          path: 'clientMasterId',
+          match: search ? {
+            $or: [
+              { name: { $regex: search, $options: 'i' } },
+              { clientId: { $regex: search, $options: 'i' } }
+            ]
+          } : {},
+          select: 'clientId name pan'
+        })
+        .populate('createdBy', 'name empId')
+        .sort({ createdAt: -1 })
+        .lean();
+      
+      // Filter out null clients if search was applied on client
+      workspaces = workspaces.filter(w => w.clientMasterId != null || !search || (w.assesseeName && w.assesseeName.toLowerCase().includes(search.toLowerCase())) || (w.fssaiLicenseNo && w.fssaiLicenseNo.toLowerCase().includes(search.toLowerCase())) || (w.pan && w.pan.toLowerCase().includes(search.toLowerCase())) );
+      totalCount = workspaces.length;
+    } else {
+      // Find matching clients first if searching
+      if (search) {
+        const matchingClients = await ClientMaster.find({
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { clientId: { $regex: search, $options: 'i' } }
+          ]
+        }).select('_id');
+        
+        if(matchingClients.length > 0) {
+           const clientIds = matchingClients.map(c => c._id);
+           filter.$or = filter.$or || [];
+           filter.$or.push({ clientMasterId: { $in: clientIds } });
+        }
+      }
+
+      // Pagination Logic
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      totalCount = await FssaiWorkspace.countDocuments(filter);
+      totalPages = Math.ceil(totalCount / parseInt(limit));
+
+      workspaces = await FssaiWorkspace.find(filter)
+        .populate('clientMasterId', 'clientId name pan')
+        .populate('createdBy', 'name empId')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+    }
+
+    res.status(200).json({
+      data: workspaces,
+      currentPage: parseInt(page),
+      totalPages,
+      totalCount
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -33,7 +116,23 @@ export const createFssaiWorkspace = async (req, res) => {
     if (!clientDoc) {
       // Auto-generate client if not exists
       const panSuffix = uppercasePan.slice(-5);
-      const sequenceNum = String(await ClientMaster.countDocuments() + 1).padStart(4, '0');
+      
+      let nextSeq = 1;
+      const lastClient = await ClientMaster.findOne({ clientId: { $regex: /^TB-/ } }).sort({ createdAt: -1 });
+      
+      if (lastClient && lastClient.clientId) {
+        const parts = lastClient.clientId.split('-'); 
+        const lastSeqStr = parts[parts.length - 1]; 
+        if (!isNaN(lastSeqStr)) {
+           nextSeq = parseInt(lastSeqStr, 10) + 1; 
+        } else {
+           nextSeq = (await ClientMaster.countDocuments()) + 1;
+        }
+      } else {
+         nextSeq = (await ClientMaster.countDocuments()) + 1;
+      }
+      const sequenceNum = String(nextSeq).padStart(4, '0');
+
       clientDoc = await ClientMaster.create({
         clientId: `TB-${panSuffix}-${sequenceNum}`,
         pan: uppercasePan,

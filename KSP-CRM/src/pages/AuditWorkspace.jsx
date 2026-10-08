@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
@@ -24,6 +24,12 @@ const AuditWorkspace = () => {
   const [panSuggestions, setPanSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // 🔴 Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const itemsPerPage = 10;
+
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -38,7 +44,6 @@ const AuditWorkspace = () => {
   const [isEditEngagementModalOpen, setIsEditEngagementModalOpen] = useState(false);
   const [isEditClientModalOpen, setIsEditClientModalOpen] = useState(false); 
 
-  // 🔴 NAYA STATE: Quick Remarks History Modal ke liye
   const [quickRemarksModal, setQuickRemarksModal] = useState({ open: false, audit: null, newRemark: '' });
 
   const [editingIds, setEditingIds] = useState({ auditor: null, udin: null, filing: null, checklist: null });
@@ -86,23 +91,53 @@ const AuditWorkspace = () => {
     nature_of_business: '', registered_office_address: '', books_kept_at: '', accounting_method: ''
   });
 
-  // FETCH DATA
+  // 🔴 FETCH DATA (PAGINATED)
   const fetchInitialData = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
+      
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchQuery,
+        status: statusFilter
+      }).toString();
+
       const [clientsRes, auditsRes, auditorsRes] = await Promise.all([
-        axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: { data: [] } })),
-        axios.get(`${import.meta.env.VITE_API_URL}/audit/engagements`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${import.meta.env.VITE_API_URL}/client-master?fetchAll=true`, { headers }).catch(() => ({ data: { data: [] } })),
+        axios.get(`${import.meta.env.VITE_API_URL}/audit/engagements?${params}`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/audit/auditors`, { headers }).catch(() => ({ data: [] }))
       ]);
-      setClients(Array.isArray(clientsRes.data?.data) ? clientsRes.data.data : (Array.isArray(clientsRes.data) ? clientsRes.data : []));
-      setAudits(auditsRes.data || []);
+
+      const clientArr = clientsRes.data?.clients || clientsRes.data?.data || clientsRes.data || [];
+      setClients(Array.isArray(clientArr) ? clientArr : []);
+
+      if (auditsRes.data && auditsRes.data.data) {
+        setAudits(auditsRes.data.data);
+        setTotalPages(auditsRes.data.totalPages || 1);
+        setTotalRecords(auditsRes.data.totalCount || 0);
+      } else {
+        setAudits(auditsRes.data || []);
+      }
+
       setAuditorsMaster(auditorsRes.data || []);
     } catch (error) { toast.error("Failed to load audit dashboard data"); } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchInitialData(); }, [user.token]);
+  useEffect(() => { 
+    const timeoutId = setTimeout(() => {
+      fetchInitialData(); 
+    }, 500); 
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line
+  }, [user.token, currentPage, searchQuery, statusFilter]);
+
+  // Reset page to 1 if any filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter]);
+
 
   const loadChildData = async (auditId, tabName) => {
     if (tabName === 'profile' || tabName === 'engagement') return;
@@ -132,12 +167,11 @@ const AuditWorkspace = () => {
     setActiveTab('engagement');
   };
 
-  // 🔴 NAYA FUNCTION: Quick Remarks History Setup
   const openQuickRemarks = (audit) => {
     setQuickRemarksModal({
       open: true,
       audit: audit,
-      newRemark: '' // Khaali box naye remark ke liye
+      newRemark: '' 
     });
   };
 
@@ -145,17 +179,12 @@ const AuditWorkspace = () => {
     e.preventDefault();
     if (!quickRemarksModal.newRemark.trim()) return;
 
-    // Format: 05-Oct-2026 | 12:15 PM
     const timestamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const empName = user.name || 'User';
     const empRole = user.role === 'Admin' ? 'Admin' : 'Staff';
     
-    // Naye remark ka structure
     const formattedNewRemark = `➤ ${empName} (${empRole}) - [${timestamp}]\n${quickRemarksModal.newRemark.trim()}`;
-    
     const existingRemarks = quickRemarksModal.audit.remarks || '';
-    
-    // Naye remark ko existing history ke upar append karna hai
     const finalRemarksString = existingRemarks 
       ? `${formattedNewRemark}\n\n-------------------------\n\n${existingRemarks}`
       : formattedNewRemark;
@@ -174,19 +203,38 @@ const AuditWorkspace = () => {
     }
   };
 
+  // 🔴 BULLETPROOF PAN SEARCH LOGIC FOR AUDIT WORKSPACE
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setAuditForm(prev => ({ ...prev, pan: val, client_id: '' })); 
+
     if (val.length >= 2) {
       setFetchingPan(true);
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
-        const results = res.data?.data || res.data || [];
-        setPanSuggestions(Array.isArray(results) ? results : []);
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}&fetchAll=true`, { headers });
+        
+        // Fail-Safe Array Extraction
+        let clientsArray = [];
+        if (Array.isArray(res.data)) {
+          clientsArray = res.data;
+        } else if (res.data && Array.isArray(res.data.clients)) {
+          clientsArray = res.data.clients;
+        } else if (res.data && Array.isArray(res.data.data)) {
+          clientsArray = res.data.data;
+        }
+
+        setPanSuggestions(clientsArray);
         setShowSuggestions(true);
-      } catch (error) { console.error("Error", error); } finally { setFetchingPan(false); }
-    } else { setPanSuggestions([]); setShowSuggestions(false); }
+      } catch (error) { 
+        console.error("Error fetching PAN details", error); 
+      } finally { 
+        setFetchingPan(false); 
+      }
+    } else { 
+      setPanSuggestions([]); 
+      setShowSuggestions(false); 
+    }
   };
 
   const handleSelectSuggestion = (client) => {
@@ -393,13 +441,8 @@ const AuditWorkspace = () => {
     setIsChecklistModalOpen(true);
   };
 
-  const filteredAudits = useMemo(() => {
-    return audits.filter(a => {
-      const clientName = a.client_id?.name || '';
-      const searchStr = searchQuery.toLowerCase();
-      return (clientName.toLowerCase().includes(searchStr) || (a.client_id?.clientId || '').toLowerCase().includes(searchStr)) && (statusFilter === 'ALL' || a.engagement_status === statusFilter);
-    });
-  }, [audits, searchQuery, statusFilter]);
+  // We are using directly audits list since search and filtering is applied via backend.
+  const filteredAudits = audits; 
 
   const getStatusBadge = (status) => {
     if (status === 'Closed' || status === 'Filed') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
@@ -483,9 +526,12 @@ const AuditWorkspace = () => {
                           <MessageSquare size={16} strokeWidth={2.5}/>
                         </button>
                         
-                        <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Delete Audit">
-                          <Trash2 size={16} strokeWidth={2.5}/>
-                        </button>
+                        {/* Only Admin can delete an audit engagement entirely */}
+                        {user?.role === 'Admin' && (
+                          <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Delete Audit">
+                            <Trash2 size={16} strokeWidth={2.5}/>
+                          </button>
+                        )}
 
                         <button onClick={() => handleOpenView(a)} className="px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl transition-colors border border-blue-200 text-xs font-bold flex items-center gap-2 shadow-sm inline-flex">
                           <Eye size={16} strokeWidth={2.5}/> Open Workspace
@@ -498,6 +544,34 @@ const AuditWorkspace = () => {
             </tbody>
           </table>
         </div>
+
+        {/* SERVER-SIDE PAGINATION CONTROLS */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
+            <span className="text-xs font-bold text-slate-500">
+              Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
+            </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                disabled={currentPage === 1 || loading}
+                className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
+                {currentPage} / {totalPages}
+              </span>
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                disabled={currentPage === totalPages || loading}
+                className="px-4 py-2 text-xs font-bold bg-blue-600 text-white border border-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 🔴 NAYA MODAL: QUICK REMARKS HISTORY MODAL */}

@@ -27,7 +27,7 @@ const Dashboard = () => {
   
   const [data, setData] = useState({ 
     leads: [], clients: [], tasks: [], employees: [], attendance: [],
-    itr: [], gst: [], roc: [], audit: [], invoices: [], clientMaster: [] // 🔴 NAYA: clientMaster array added
+    itr: [], gst: [], roc: [], audit: [], invoices: [], clientMaster: []
   });
   
   const [loading, setLoading] = useState(true);
@@ -46,7 +46,6 @@ const Dashboard = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       
-      // 🔴 NAYA: Client Master API Call Added to Fetch Array
       const [leadsRes, clientsRes, tasksRes, empRes, attRes, itrRes, gstRes, rocRes, auditRes, invoicesRes, clientMasterRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })),
@@ -61,18 +60,19 @@ const Dashboard = () => {
         axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: [] }))
       ]);
 
+      // STRCIT ARRAY CHECKS APPLIED HERE TO PREVENT CRASHES
       setData({
         leads: Array.isArray(leadsRes.data) ? leadsRes.data : (leadsRes.data?.leads || []),
         clients: Array.isArray(clientsRes.data) ? clientsRes.data : (clientsRes.data?.clients || []),
-        tasks: tasksRes.data || [],
-        employees: empRes.data || [],
-        attendance: attRes.data || [],
-        itr: itrRes.data || [],
-        gst: gstRes.data || [],
-        roc: rocRes.data || [],
-        audit: auditRes.data || [],
-        invoices: Array.isArray(invoicesRes.data?.data) ? invoicesRes.data.data : (invoicesRes.data || []),
-        clientMaster: Array.isArray(clientMasterRes.data?.data) ? clientMasterRes.data.data : (clientMasterRes.data || [])
+        tasks: Array.isArray(tasksRes.data) ? tasksRes.data : (tasksRes.data?.tasks || []),
+        employees: Array.isArray(empRes.data) ? empRes.data : (empRes.data?.employees || []),
+        attendance: Array.isArray(attRes.data) ? attRes.data : (attRes.data?.attendance || []),
+        itr: Array.isArray(itrRes.data) ? itrRes.data : (itrRes.data?.data || []),
+        gst: Array.isArray(gstRes.data) ? gstRes.data : (gstRes.data?.data || []),
+        roc: Array.isArray(rocRes.data) ? rocRes.data : (rocRes.data?.data || []),
+        audit: Array.isArray(auditRes.data) ? auditRes.data : (auditRes.data?.data || []),
+        invoices: Array.isArray(invoicesRes.data?.data) ? invoicesRes.data.data : (Array.isArray(invoicesRes.data) ? invoicesRes.data : []),
+        clientMaster: Array.isArray(clientMasterRes.data?.data) ? clientMasterRes.data.data : (Array.isArray(clientMasterRes.data) ? clientMasterRes.data : [])
       });
       setLastUpdated(new Date());
     } catch (error) {
@@ -200,8 +200,8 @@ const Dashboard = () => {
       return d.getTime() <= today.getTime(); 
     };
 
-    const leadReminders = (data.leads || []).filter(l => l.status === 'Follow-up' && isDue(l.nextFollowUpDate)).map(l => ({ ...l, notifType: 'lead' }));
-    const clientReminders = (data.clients || []).filter(c => isDue(c.nextReminderDate)).map(c => ({ ...c, notifType: 'client' }));
+    const leadReminders = (Array.isArray(data.leads) ? data.leads : []).filter(l => l.status === 'Follow-up' && isDue(l.nextFollowUpDate)).map(l => ({ ...l, notifType: 'lead' }));
+    const clientReminders = (Array.isArray(data.clients) ? data.clients : []).filter(c => isDue(c.nextReminderDate)).map(c => ({ ...c, notifType: 'client' }));
 
     return [...leadReminders, ...clientReminders];
   }, [data.leads, data.clients]);
@@ -216,7 +216,7 @@ const Dashboard = () => {
     
     const defaultersMap = new Map();
 
-    // 🔴 1. ADD CLIENT MASTER OPENING BALANCES FIRST
+    // 1. ADD CLIENT MASTER OPENING BALANCES FIRST
     if (Array.isArray(clientMaster)) {
       clientMaster.forEach(client => {
         const openingBal = Number(client.openingBalance || 0);
@@ -236,7 +236,7 @@ const Dashboard = () => {
       });
     }
 
-    // 🔴 2. THEN ADD INVOICES DATA
+    // 2. THEN ADD INVOICES DATA
     if (Array.isArray(invoices)) {
       invoices.forEach(inv => {
         const invTotal = Number(inv.totalAmountAfterTax || 0);
@@ -260,7 +260,6 @@ const Dashboard = () => {
           
           if (defaultersMap.has(clientName)) {
              defaultersMap.get(clientName).due += due;
-             // Dono ka pending hai toh tag update kar do
              if (!defaultersMap.get(clientName).source.includes('Invoice')) {
                defaultersMap.get(clientName).source += ' + Invoice';
              }
@@ -278,27 +277,34 @@ const Dashboard = () => {
     const paidClientsCount = Array.isArray(invoices) ? invoices.filter(i => i.paymentStatus === 'Paid').length : 0;
     const totalInvoicesCount = Array.isArray(invoices) ? invoices.length : 0;
 
-    const newLeads = leads.filter(l => l.status === 'New').length;
-    const hotLeads = leads.filter(l => l.priority === 'Hot').length;
-    const convertedLeads = leads.filter(l => l.status === 'Converted').length;
+    const safeLeads = Array.isArray(leads) ? leads : [];
+    const newLeads = safeLeads.filter(l => l.status === 'New').length;
+    const hotLeads = safeLeads.filter(l => l.priority === 'Hot').length;
+    const convertedLeads = safeLeads.filter(l => l.status === 'Converted').length;
     
-    const activeTasks = tasks.filter(t => !['Completed', 'Approved'].includes(t.currentStatus)).length;
-    const overdueTasks = tasks.filter(t => t.isOverdue).length;
-    const sortedTasks = [...tasks].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
+    const activeTasks = safeTasks.filter(t => !['Completed', 'Approved'].includes(t.currentStatus)).length;
+    const overdueTasks = safeTasks.filter(t => t.isOverdue).length;
+    const sortedTasks = [...safeTasks].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     const latestTask = sortedTasks.length > 0 ? sortedTasks[0] : null;
 
     const criticalAlerts = [];
-    gst.forEach(g => {
-        if(g.gstStatus === 'Error/Mismatch') criticalAlerts.push({ name: g.tradeName || g.assesseeName, issue: 'Error/Mismatch in GST', id: g._id, link: '/clients?service=GST%20Registration' });
-    });
-    itr.forEach(i => {
-        if(i.itrProcessedStatus === 'Defective') criticalAlerts.push({ name: i.assesseeName, issue: 'Defective ITR', id: i._id, link: '/clients?service=ITR%20Filing' });
-    });
+    if (Array.isArray(gst)) {
+      gst.forEach(g => {
+          if(g.gstStatus === 'Error/Mismatch') criticalAlerts.push({ name: g.tradeName || g.assesseeName, issue: 'Error/Mismatch in GST', id: g._id, link: '/clients?service=GST%20Registration' });
+      });
+    }
+    
+    if (Array.isArray(itr)) {
+      itr.forEach(i => {
+          if(i.itrProcessedStatus === 'Defective') criticalAlerts.push({ name: i.assesseeName, issue: 'Defective ITR', id: i._id, link: '/clients?service=ITR%20Filing' });
+      });
+    }
 
     const offset = new Date().getTimezoneOffset() * 60000;
     const localToday = new Date(Date.now() - offset).toISOString().split('T')[0];
     
-    const activeEmployees = employees.filter(e => e.status === 'Active');
+    const activeEmployees = (Array.isArray(employees) ? employees : []).filter(e => e.status === 'Active');
     const totalEmps = activeEmployees.length;
     
     let presentCount = 0;
@@ -318,11 +324,11 @@ const Dashboard = () => {
     const notMarkedCount = totalEmps > 0 ? (totalEmps - presentCount - absentCount) : 0;
 
     const serviceBreakdown = {
-      ITR: itr.length,
-      GST: gst.length,
-      ROC: roc.length,
-      Audit: audit.length,
-      Other: clients.length
+      ITR: Array.isArray(itr) ? itr.length : 0,
+      GST: Array.isArray(gst) ? gst.length : 0,
+      ROC: Array.isArray(roc) ? roc.length : 0,
+      Audit: Array.isArray(audit) ? audit.length : 0,
+      Other: Array.isArray(clients) ? clients.length : 0
     };
 
     return {
@@ -335,7 +341,7 @@ const Dashboard = () => {
       revenuePercentage,
       topDefaulters,
       
-      totalLeads: leads.length,
+      totalLeads: safeLeads.length,
       newLeads,
       hotLeads,
       convertedLeads,

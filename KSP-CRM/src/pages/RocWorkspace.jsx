@@ -25,9 +25,16 @@ const RocWorkspace = () => {
   const [panSuggestions, setPanSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('ALL');
+
+  // 🔴 Server-Side Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const itemsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
   const fileInputRef = useRef(null);
@@ -39,7 +46,7 @@ const RocWorkspace = () => {
   const [deleteModal, setDeleteModal] = useState({ open: false, client: null });
   
   const initialForm = {
-    pan: '', name: '', clientType: 'Private Limited',
+    pan: '', name: '', clientId: '', clientType: 'Private Limited',
     cinOrLlpIn: '', dateOfIncorporation: '',
     tan: '', udyamNumber: '', importExportCode: '', 
     authorizedCapital: '', paidUpCapital: '',
@@ -47,18 +54,35 @@ const RocWorkspace = () => {
     startupIndia: { isRegistered: false, dpiitNumber: '', recognitionDate: '', certificateNo: '', status: 'N/A' },
     shareholders: [], 
     directors: [], 
-    complianceFilings: [], // 🔴 NAYA: COMPLIANCE FILINGS ARRAY
+    complianceFilings: [], 
     status: 'Active'
   };
   
   const [formData, setFormData] = useState(initialForm);
 
+  // 🔴 FETCH DATA WITH PAGINATION
   const fetchWorkspaces = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/roc/workspaces`, { headers });
-      setWorkspaces(res.data || []);
+      
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchQuery,
+        status: statusFilter,
+        type: typeFilter
+      }).toString();
+
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/roc/workspaces?${params}`, { headers });
+      
+      if (res.data && res.data.data) {
+        setWorkspaces(res.data.data);
+        setTotalPages(res.data.totalPages || 1);
+        setTotalRecords(res.data.totalCount || 0);
+      } else {
+        setWorkspaces(res.data || []);
+      }
       setSelectedIds([]);
     } catch (error) {
       toast.error("Failed to load ROC workspaces");
@@ -67,11 +91,21 @@ const RocWorkspace = () => {
     }
   };
 
+  // Debounce API calls when filters or search change
   useEffect(() => {
-    fetchWorkspaces();
+    const timeoutId = setTimeout(() => {
+      fetchWorkspaces();
+    }, 500); 
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token]);
+  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter]);
 
+  // Reset page to 1 if any filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, typeFilter]);
+
+  // 🔴 BULLETPROOF PAN SEARCH LOGIC FOR ROC
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setFormData(prev => ({ ...prev, pan: val }));
@@ -80,8 +114,19 @@ const RocWorkspace = () => {
       setFetchingPan(true);
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
-        setPanSuggestions(res.data || []);
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}&fetchAll=true`, { headers });
+        
+        // 🔴 100% Fail-Safe Array Extraction
+        let clientsArray = [];
+        if (Array.isArray(res.data)) {
+          clientsArray = res.data;
+        } else if (res.data && Array.isArray(res.data.clients)) {
+          clientsArray = res.data.clients;
+        } else if (res.data && Array.isArray(res.data.data)) {
+          clientsArray = res.data.data;
+        }
+        
+        setPanSuggestions(clientsArray);
         setShowSuggestions(true);
       } catch (error) {
         console.error("Error fetching PAN details", error);
@@ -99,6 +144,7 @@ const RocWorkspace = () => {
       ...prev,
       pan: client.pan,
       name: client.name || prev.name,
+      clientId: client.clientId || '',
       clientType: client.clientType || prev.clientType,
       cinOrLlpIn: client.cinOrLlpIn || prev.cinOrLlpIn 
     }));
@@ -139,7 +185,7 @@ const RocWorkspace = () => {
     });
   };
 
-  // 🔴 NAYA: COMPLIANCE FILINGS HANDLERS
+  // COMPLIANCE FILINGS HANDLERS
   const handleAddCompliance = () => {
     setFormData(prev => ({ 
       ...prev, 
@@ -157,163 +203,164 @@ const RocWorkspace = () => {
     });
   };
 
-  const filteredWorkspaces = useMemo(() => {
-    return workspaces.filter(ws => {
-      const client = ws.clientMasterId || {};
-      const searchStr = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (ws.companyName?.toLowerCase() || client.name?.toLowerCase() || '').includes(searchStr) || 
-        (ws.pan?.toLowerCase() || client.pan?.toLowerCase() || '').includes(searchStr) || 
-        (ws.cinOrLlpIn?.toLowerCase() || '').includes(searchStr) ||
-        (client.clientId?.toLowerCase() || '').includes(searchStr);
-
-      const matchesStatus = statusFilter === 'ALL' || ws.status === statusFilter;
-      const cType = ws.clientType || client.clientType;
-      const matchesType = typeFilter === 'ALL' || cType === typeFilter;
-      
-      return matchesSearch && matchesStatus && matchesType;
-    });
-  }, [workspaces, searchQuery, statusFilter, typeFilter]);
-
   const stats = useMemo(() => {
     return {
-      total: workspaces.length,
+      total: totalRecords,
       active: workspaces.filter(w => w.status === 'Active').length,
       startups: workspaces.filter(w => w.startupIndia?.isRegistered).length,
       strikeOff: workspaces.filter(w => w.status === 'Strike Off').length
     };
-  }, [workspaces]);
+  }, [workspaces, totalRecords]);
 
+  // EXCEL EXPORT (Full Download via backend request)
   const handleExportExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('ROC Workspace');
+    const toastId = toast.loading("Fetching all ROC records for export...");
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const params = new URLSearchParams({
+        search: searchQuery,
+        status: statusFilter,
+        type: typeFilter,
+        fetchAll: 'true' // Requesting full list from backend
+      }).toString();
 
-    let excelColumns = [
-      { header: 'Master Client ID', key: 'clientId', width: 20 },
-      { header: 'Company PAN', key: 'pan', width: 15 },
-      { header: 'Entity Name', key: 'name', width: 30 },
-      { header: 'Entity Type', key: 'clientType', width: 20 },
-      { header: 'CIN / LLPIN', key: 'cinOrLlpIn', width: 25 },
-      { header: 'Date of Inc.', key: 'dateOfIncorporation', width: 15 },
-      { header: 'TAN Number', key: 'tan', width: 15 },
-      { header: 'UDYAM Number', key: 'udyamNumber', width: 20 },
-      { header: 'IEC Code', key: 'importExportCode', width: 15 },
-      { header: 'Auth Capital', key: 'authorizedCapital', width: 15 },
-      { header: 'Paid Capital', key: 'paidUpCapital', width: 15 },
-      { header: 'Auditor Name', key: 'auditorName', width: 20 },
-      { header: 'Auditor Mem No', key: 'auditorMembershipNo', width: 15 },
-      { header: 'Auditor FRN', key: 'auditorFrn', width: 15 },
-      { header: 'Auditor Place', key: 'auditorPlace', width: 15 },
-      { header: 'Auditor Appt Date', key: 'auditorAppointmentDate', width: 15 },
-      { header: 'Auditor Valid Till', key: 'auditorTenureEndDate', width: 15 },
-      { header: 'Startup Registered', key: 'startupReg', width: 15 },
-      { header: 'DPIIT Number', key: 'dpiitNumber', width: 20 },
-      { header: 'Startup Cert No', key: 'certificateNo', width: 15 },
-      { header: 'Startup Rec. Date', key: 'recognitionDate', width: 15 },
-      { header: 'Startup Status', key: 'startupStatus', width: 15 },
-      { header: 'Total Compliance Forms', key: 'complianceCount', width: 20 }
-    ];
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/roc/workspaces?${params}`, { headers });
+      const fullWorkspacesList = res.data.data || res.data || [];
 
-    for(let i = 1; i <= 5; i++) {
-      excelColumns.push(
-        { header: `Dir ${i} Name`, key: `d${i}_name`, width: 20 },
-        { header: `Dir ${i} DIN`, key: `d${i}_din`, width: 15 },
-        { header: `Dir ${i} PAN`, key: `d${i}_pan`, width: 15 },
-        { header: `Dir ${i} DOB`, key: `d${i}_dob`, width: 15 },
-        { header: `Dir ${i} Phone`, key: `d${i}_phone`, width: 15 },
-        { header: `Dir ${i} Email`, key: `d${i}_email`, width: 20 },
-        { header: `Dir ${i} Appt Date`, key: `d${i}_appt`, width: 15 },
-        { header: `Dir ${i} Resign Date`, key: `d${i}_resign`, width: 15 },
-        { header: `Dir ${i} DSC Status`, key: `d${i}_dsc`, width: 15 },
-        { header: `Dir ${i} DSC Expiry`, key: `d${i}_dscExp`, width: 15 }
-      );
-    }
+      toast.success("Generating Excel File...", { id: toastId });
 
-    for(let i = 1; i <= 5; i++) {
-      excelColumns.push(
-        { header: `SH ${i} Name`, key: `s${i}_name`, width: 20 },
-        { header: `SH ${i} Address`, key: `s${i}_address`, width: 25 },
-        { header: `SH ${i} %`, key: `s${i}_perc`, width: 10 },
-        { header: `SH ${i} Face Value`, key: `s${i}_fv`, width: 15 },
-        { header: `SH ${i} Shares`, key: `s${i}_shares`, width: 15 },
-        { header: `SH ${i} Total`, key: `s${i}_total`, width: 15 },
-        { header: `SH ${i} Remarks`, key: `s${i}_rem`, width: 20 }
-      );
-    }
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('ROC Workspace');
 
-    excelColumns.push({ header: 'Current Status', key: 'status', width: 15 });
-    worksheet.columns = excelColumns;
+      let excelColumns = [
+        { header: 'Master Client ID', key: 'clientId', width: 20 },
+        { header: 'Company PAN', key: 'pan', width: 15 },
+        { header: 'Entity Name', key: 'name', width: 30 },
+        { header: 'Entity Type', key: 'clientType', width: 20 },
+        { header: 'CIN / LLPIN', key: 'cinOrLlpIn', width: 25 },
+        { header: 'Date of Inc.', key: 'dateOfIncorporation', width: 15 },
+        { header: 'TAN Number', key: 'tan', width: 15 },
+        { header: 'UDYAM Number', key: 'udyamNumber', width: 20 },
+        { header: 'IEC Code', key: 'importExportCode', width: 15 },
+        { header: 'Auth Capital', key: 'authorizedCapital', width: 15 },
+        { header: 'Paid Capital', key: 'paidUpCapital', width: 15 },
+        { header: 'Auditor Name', key: 'auditorName', width: 20 },
+        { header: 'Auditor Mem No', key: 'auditorMembershipNo', width: 15 },
+        { header: 'Auditor FRN', key: 'auditorFrn', width: 15 },
+        { header: 'Auditor Place', key: 'auditorPlace', width: 15 },
+        { header: 'Auditor Appt Date', key: 'auditorAppointmentDate', width: 15 },
+        { header: 'Auditor Valid Till', key: 'auditorTenureEndDate', width: 15 },
+        { header: 'Startup Registered', key: 'startupReg', width: 15 },
+        { header: 'DPIIT Number', key: 'dpiitNumber', width: 20 },
+        { header: 'Startup Cert No', key: 'certificateNo', width: 15 },
+        { header: 'Startup Rec. Date', key: 'recognitionDate', width: 15 },
+        { header: 'Startup Status', key: 'startupStatus', width: 15 },
+        { header: 'Total Compliance Forms', key: 'complianceCount', width: 20 }
+      ];
 
-    worksheet.getRow(1).font = { bold: true };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+      for(let i = 1; i <= 5; i++) {
+        excelColumns.push(
+          { header: `Dir ${i} Name`, key: `d${i}_name`, width: 20 },
+          { header: `Dir ${i} DIN`, key: `d${i}_din`, width: 15 },
+          { header: `Dir ${i} PAN`, key: `d${i}_pan`, width: 15 },
+          { header: `Dir ${i} DOB`, key: `d${i}_dob`, width: 15 },
+          { header: `Dir ${i} Phone`, key: `d${i}_phone`, width: 15 },
+          { header: `Dir ${i} Email`, key: `d${i}_email`, width: 20 },
+          { header: `Dir ${i} Appt Date`, key: `d${i}_appt`, width: 15 },
+          { header: `Dir ${i} Resign Date`, key: `d${i}_resign`, width: 15 },
+          { header: `Dir ${i} DSC Status`, key: `d${i}_dsc`, width: 15 },
+          { header: `Dir ${i} DSC Expiry`, key: `d${i}_dscExp`, width: 15 }
+        );
+      }
 
-    const dataToExport = selectedIds.length > 0 ? filteredWorkspaces.filter(ws => selectedIds.includes(ws._id)) : filteredWorkspaces;
+      for(let i = 1; i <= 5; i++) {
+        excelColumns.push(
+          { header: `SH ${i} Name`, key: `s${i}_name`, width: 20 },
+          { header: `SH ${i} Address`, key: `s${i}_address`, width: 25 },
+          { header: `SH ${i} %`, key: `s${i}_perc`, width: 10 },
+          { header: `SH ${i} Face Value`, key: `s${i}_fv`, width: 15 },
+          { header: `SH ${i} Shares`, key: `s${i}_shares`, width: 15 },
+          { header: `SH ${i} Total`, key: `s${i}_total`, width: 15 },
+          { header: `SH ${i} Remarks`, key: `s${i}_rem`, width: 20 }
+        );
+      }
 
-    dataToExport.forEach(ws => { 
-      const client = ws.clientMasterId || {};
+      excelColumns.push({ header: 'Current Status', key: 'status', width: 15 });
+      worksheet.columns = excelColumns;
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+
+      const dataToExport = selectedIds.length > 0 ? fullWorkspacesList.filter(ws => selectedIds.includes(ws._id)) : fullWorkspacesList;
+
+      dataToExport.forEach(ws => { 
+        const client = ws.clientMasterId || {};
+        
+        let rowObj = {
+          clientId: client.clientId || '',
+          pan: ws.pan || client.pan || '',
+          name: ws.companyName || client.name || '',
+          clientType: ws.clientType || client.clientType || '',
+          cinOrLlpIn: ws.cinOrLlpIn || '',
+          dateOfIncorporation: ws.dateOfIncorporation ? new Date(ws.dateOfIncorporation).toLocaleDateString('en-IN') : '',
+          tan: ws.tan || '',
+          udyamNumber: ws.udyamNumber || '',
+          importExportCode: ws.importExportCode || '',
+          authorizedCapital: ws.authorizedCapital || 0,
+          paidUpCapital: ws.paidUpCapital || 0,
+          auditorName: ws.auditorName || '',
+          auditorMembershipNo: ws.auditorMembershipNo || '',
+          auditorFrn: ws.auditorFrn || '',
+          auditorPlace: ws.auditorPlace || '',
+          auditorAppointmentDate: ws.auditorAppointmentDate ? new Date(ws.auditorAppointmentDate).toLocaleDateString('en-IN') : '',
+          auditorTenureEndDate: ws.auditorTenureEndDate ? new Date(ws.auditorTenureEndDate).toLocaleDateString('en-IN') : '',
+          startupReg: ws.startupIndia?.isRegistered ? 'Yes' : 'No',
+          dpiitNumber: ws.startupIndia?.dpiitNumber || '',
+          certificateNo: ws.startupIndia?.certificateNo || '',
+          recognitionDate: ws.startupIndia?.recognitionDate ? new Date(ws.startupIndia.recognitionDate).toLocaleDateString('en-IN') : '',
+          startupStatus: ws.startupIndia?.status || '',
+          complianceCount: ws.complianceFilings?.length || 0,
+          status: ws.status || 'Active'
+        };
+
+        (ws.directors || []).forEach((d, idx) => {
+          if(idx >= 5) return;
+          const i = idx + 1;
+          rowObj[`d${i}_name`] = d.name || '';
+          rowObj[`d${i}_din`] = d.dinOrDpin || '';
+          rowObj[`d${i}_pan`] = d.pan || '';
+          rowObj[`d${i}_dob`] = d.dob ? new Date(d.dob).toLocaleDateString('en-IN') : '';
+          rowObj[`d${i}_phone`] = d.mobile || '';
+          rowObj[`d${i}_email`] = d.email || '';
+          rowObj[`d${i}_appt`] = d.appointmentDate ? new Date(d.appointmentDate).toLocaleDateString('en-IN') : '';
+          rowObj[`d${i}_resign`] = d.resigningDate ? new Date(d.resigningDate).toLocaleDateString('en-IN') : '';
+          rowObj[`d${i}_dsc`] = d.dscStatus || '';
+          rowObj[`d${i}_dscExp`] = d.dscValidUpto ? new Date(d.dscValidUpto).toLocaleDateString('en-IN') : '';
+        });
+
+        (ws.shareholders || []).forEach((s, idx) => {
+          if(idx >= 5) return;
+          const i = idx + 1;
+          rowObj[`s${i}_name`] = s.name || '';
+          rowObj[`s${i}_address`] = s.address || '';
+          rowObj[`s${i}_perc`] = s.sharePercentage || '';
+          rowObj[`s${i}_fv`] = s.faceValue || '';
+          rowObj[`s${i}_shares`] = s.noOfShares || '';
+          rowObj[`s${i}_total`] = s.totalValue || '';
+          rowObj[`s${i}_rem`] = s.remarks || '';
+        });
+
+        worksheet.addRow(rowObj);
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `ROC_Workspace_${selectedIds.length > 0 ? 'Selected_' : ''}${new Date().toISOString().split('T')[0]}.xlsx`);
       
-      let rowObj = {
-        clientId: client.clientId || '',
-        pan: ws.pan || client.pan || '',
-        name: ws.companyName || client.name || '',
-        clientType: ws.clientType || client.clientType || '',
-        cinOrLlpIn: ws.cinOrLlpIn || '',
-        dateOfIncorporation: ws.dateOfIncorporation ? new Date(ws.dateOfIncorporation).toLocaleDateString('en-IN') : '',
-        tan: ws.tan || '',
-        udyamNumber: ws.udyamNumber || '',
-        importExportCode: ws.importExportCode || '',
-        authorizedCapital: ws.authorizedCapital || 0,
-        paidUpCapital: ws.paidUpCapital || 0,
-        auditorName: ws.auditorName || '',
-        auditorMembershipNo: ws.auditorMembershipNo || '',
-        auditorFrn: ws.auditorFrn || '',
-        auditorPlace: ws.auditorPlace || '',
-        auditorAppointmentDate: ws.auditorAppointmentDate ? new Date(ws.auditorAppointmentDate).toLocaleDateString('en-IN') : '',
-        auditorTenureEndDate: ws.auditorTenureEndDate ? new Date(ws.auditorTenureEndDate).toLocaleDateString('en-IN') : '',
-        startupReg: ws.startupIndia?.isRegistered ? 'Yes' : 'No',
-        dpiitNumber: ws.startupIndia?.dpiitNumber || '',
-        certificateNo: ws.startupIndia?.certificateNo || '',
-        recognitionDate: ws.startupIndia?.recognitionDate ? new Date(ws.startupIndia.recognitionDate).toLocaleDateString('en-IN') : '',
-        startupStatus: ws.startupIndia?.status || '',
-        complianceCount: ws.complianceFilings?.length || 0,
-        status: ws.status || 'Active'
-      };
-
-      (ws.directors || []).forEach((d, idx) => {
-        if(idx >= 5) return;
-        const i = idx + 1;
-        rowObj[`d${i}_name`] = d.name || '';
-        rowObj[`d${i}_din`] = d.dinOrDpin || '';
-        rowObj[`d${i}_pan`] = d.pan || '';
-        rowObj[`d${i}_dob`] = d.dob ? new Date(d.dob).toLocaleDateString('en-IN') : '';
-        rowObj[`d${i}_phone`] = d.mobile || '';
-        rowObj[`d${i}_email`] = d.email || '';
-        rowObj[`d${i}_appt`] = d.appointmentDate ? new Date(d.appointmentDate).toLocaleDateString('en-IN') : '';
-        rowObj[`d${i}_resign`] = d.resigningDate ? new Date(d.resigningDate).toLocaleDateString('en-IN') : '';
-        rowObj[`d${i}_dsc`] = d.dscStatus || '';
-        rowObj[`d${i}_dscExp`] = d.dscValidUpto ? new Date(d.dscValidUpto).toLocaleDateString('en-IN') : '';
-      });
-
-      (ws.shareholders || []).forEach((s, idx) => {
-        if(idx >= 5) return;
-        const i = idx + 1;
-        rowObj[`s${i}_name`] = s.name || '';
-        rowObj[`s${i}_address`] = s.address || '';
-        rowObj[`s${i}_perc`] = s.sharePercentage || '';
-        rowObj[`s${i}_fv`] = s.faceValue || '';
-        rowObj[`s${i}_shares`] = s.noOfShares || '';
-        rowObj[`s${i}_total`] = s.totalValue || '';
-        rowObj[`s${i}_rem`] = s.remarks || '';
-      });
-
-      worksheet.addRow(rowObj);
-    });
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `ROC_Workspace_${selectedIds.length > 0 ? 'Selected_' : ''}${new Date().toISOString().split('T')[0]}.xlsx`);
-    
-    if(selectedIds.length > 0) setSelectedIds([]);
+      if(selectedIds.length > 0) setSelectedIds([]);
+    } catch (error) {
+      toast.error("Failed to generate Excel.", { id: toastId });
+    }
   };
 
   const handleFileUpload = async (e) => {
@@ -436,7 +483,7 @@ const RocWorkspace = () => {
   };
 
   const handleSelectAll = (e) => {
-    if (e.target.checked) setSelectedIds(filteredWorkspaces.map(w => w._id));
+    if (e.target.checked) setSelectedIds(workspaces.map(w => w._id));
     else setSelectedIds([]);
   };
 
@@ -505,6 +552,7 @@ const RocWorkspace = () => {
     setFormData({
       pan: ws.pan || ws.clientMasterId?.pan || '',
       name: ws.companyName || ws.clientMasterId?.name || '',
+      clientId: ws.clientMasterId?.clientId || '',
       clientType: ws.clientType || ws.clientMasterId?.clientType || 'Private Limited',
       cinOrLlpIn: ws.cinOrLlpIn || '',
       dateOfIncorporation: parseDate(ws.dateOfIncorporation),
@@ -528,7 +576,7 @@ const RocWorkspace = () => {
       },
       shareholders: ws.shareholders || [],
       directors: formattedDirectors,
-      complianceFilings: formattedCompliance, // 🔴 NAYA: Load existing filings
+      complianceFilings: formattedCompliance, 
       status: ws.status || 'Active'
     });
     setIsModalOpen(true);
@@ -702,10 +750,10 @@ const RocWorkspace = () => {
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
                 <tr><td colSpan="5" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading ROC Data...</td></tr>
-              ) : filteredWorkspaces.length === 0 ? (
+              ) : workspaces.length === 0 ? (
                 <tr><td colSpan="5" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No corporate entities found.</td></tr>
               ) : (
-                filteredWorkspaces.map((ws) => {
+                workspaces.map((ws) => {
                   const client = ws.clientMasterId || {};
                   const isSelected = selectedIds.includes(ws._id);
                   const displayName = ws.companyName || client.name || 'Unknown Entity';
@@ -788,6 +836,34 @@ const RocWorkspace = () => {
             </tbody>
           </table>
         </div>
+
+        {/* SERVER-SIDE PAGINATION CONTROLS */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
+            <span className="text-xs font-bold text-slate-500">
+              Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
+            </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                disabled={currentPage === 1 || loading}
+                className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100">
+                {currentPage} / {totalPages}
+              </span>
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                disabled={currentPage === totalPages || loading}
+                className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white border border-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ADD / EDIT ROC WORKSPACE MODAL */}
@@ -1090,7 +1166,7 @@ const RocWorkspace = () => {
                 )}
               </div>
 
-              {/* 🔴 NEW: SECTION 6: COMPLIANCE & FORM FILINGS */}
+              {/* SECTION 6: COMPLIANCE & FORM FILINGS */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -1322,7 +1398,7 @@ const RocWorkspace = () => {
 
               </div>
 
-              {/* 🔴 VIEW COMPLIANCE FILINGS */}
+              {/* VIEW COMPLIANCE FILINGS */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 mb-4 flex items-center gap-2">
                   <FileText size={16} className="text-indigo-600"/> Compliance & Form Filings Tracker

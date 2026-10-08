@@ -28,6 +28,12 @@ const FssaiWorkspace = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [licenseTypeFilter, setLicenseTypeFilter] = useState('ALL');
 
+  // 🔴 Server-Side Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const itemsPerPage = 10;
+
   const [selectedIds, setSelectedIds] = useState([]);
   const fileInputRef = useRef(null);
 
@@ -44,7 +50,7 @@ const FssaiWorkspace = () => {
   const [newRemarkText, setNewRemarkText] = useState('');
 
   const initialForm = {
-    pan: '', fssaiLicenseNo: '', assesseeName: '',
+    pan: '', fssaiLicenseNo: '', assesseeName: '', clientId: '',
     licenseType: 'Basic Registration', kindOfBusiness: '',
     mobile: '', email: '', state: '', address: '', pinCode: '',
     issueDate: '', expiryDate: '',
@@ -57,12 +63,28 @@ const FssaiWorkspace = () => {
   
   const [formData, setFormData] = useState(initialForm);
 
+  // 🔴 FETCH DATA WITH PAGINATION
   const fetchWorkspaces = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/fssai`, { headers });
-      setWorkspaces(res.data || []);
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchQuery,
+        status: statusFilter,
+        licenseType: licenseTypeFilter
+      }).toString();
+
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/fssai?${params}`, { headers });
+      
+      if (res.data && res.data.data) {
+        setWorkspaces(res.data.data);
+        setTotalPages(res.data.totalPages || 1);
+        setTotalRecords(res.data.totalCount || 0);
+      } else {
+        setWorkspaces(res.data || []);
+      }
       setSelectedIds([]);
     } catch (error) {
       toast.error("Failed to load FSSAI workspaces");
@@ -71,12 +93,21 @@ const FssaiWorkspace = () => {
     }
   };
 
+  // Debounce API calls when filters or search change
   useEffect(() => {
-    fetchWorkspaces();
+    const timeoutId = setTimeout(() => {
+      fetchWorkspaces();
+    }, 500); 
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token]);
+  }, [user.token, currentPage, searchQuery, statusFilter, licenseTypeFilter]);
 
-  // PAN Auto-Suggest Logic
+  // Reset page to 1 if any filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, licenseTypeFilter]);
+
+  // 🔴 BULLETPROOF PAN SEARCH LOGIC
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
     setFormData(prev => ({ ...prev, pan: val }));
@@ -85,8 +116,18 @@ const FssaiWorkspace = () => {
       setFetchingPan(true);
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
-        setPanSuggestions(res.data || []);
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}&fetchAll=true`, { headers });
+        
+        let clientsArray = [];
+        if (Array.isArray(res.data)) {
+          clientsArray = res.data;
+        } else if (res.data && Array.isArray(res.data.clients)) {
+          clientsArray = res.data.clients;
+        } else if (res.data && Array.isArray(res.data.data)) {
+          clientsArray = res.data.data;
+        }
+
+        setPanSuggestions(clientsArray);
         setShowSuggestions(true);
       } catch (error) {
         console.error("Error fetching PAN details", error);
@@ -104,6 +145,7 @@ const FssaiWorkspace = () => {
       ...prev,
       pan: client.pan,
       assesseeName: client.name || prev.assesseeName,
+      clientId: client.clientId || '',
       mobile: client.mobile || prev.mobile,
       email: client.email || prev.email,
       state: client.state || prev.state,
@@ -125,109 +167,110 @@ const FssaiWorkspace = () => {
     toast.success(`${type} copied!`, { icon: '📋', style: { borderRadius: '10px', background: '#333', color: '#fff' } });
   };
 
-  // Filters & Search
-  const filteredWorkspaces = useMemo(() => {
-    const filtered = workspaces.filter(ws => {
-      const searchStr = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (ws.assesseeName?.toLowerCase() || '').includes(searchStr) || 
-        (ws.pan?.toLowerCase() || '').includes(searchStr) || 
-        (ws.fssaiLicenseNo?.toLowerCase() || '').includes(searchStr) ||
-        (ws.clientMasterId?.clientId?.toLowerCase() || '').includes(searchStr);
-
-      const matchesStatus = statusFilter === 'ALL' || ws.fssaiStatus === statusFilter;
-      const matchesType = licenseTypeFilter === 'ALL' || ws.licenseType === licenseTypeFilter;
-      
-      return matchesSearch && matchesStatus && matchesType;
-    });
-    return filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [workspaces, searchQuery, statusFilter, licenseTypeFilter]);
-
   const stats = useMemo(() => {
     let totalFee = 0;
     let totalReceived = 0;
-    filteredWorkspaces.forEach(c => {
+    workspaces.forEach(c => {
       totalFee += Number(c.feeAmount || 0);
       totalReceived += Number(c.amountReceived || 0);
     });
 
     return {
-      total: filteredWorkspaces.length,
-      active: filteredWorkspaces.filter(w => !['License Expired', 'Error/Mismatch'].includes(w.fssaiStatus)).length,
-      expired: filteredWorkspaces.filter(w => w.fssaiStatus === 'License Expired').length,
-      filed: filteredWorkspaces.filter(w => w.fssaiStatus === 'Filed').length,
+      total: totalRecords,
+      active: workspaces.filter(w => !['License Expired', 'Error/Mismatch'].includes(w.fssaiStatus)).length,
+      expired: workspaces.filter(w => w.fssaiStatus === 'License Expired').length,
+      filed: workspaces.filter(w => w.fssaiStatus === 'Filed').length,
       totalFee, totalReceived,
       pendingDues: totalFee - totalReceived
     };
-  }, [filteredWorkspaces]);
+  }, [workspaces, totalRecords]);
 
+  // EXCEL EXPORT (Full Download via backend request)
   const handleExportExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('FSSAI Workspace');
+    const toastId = toast.loading("Fetching all FSSAI records for export...");
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const params = new URLSearchParams({
+        search: searchQuery,
+        status: statusFilter,
+        licenseType: licenseTypeFilter,
+        fetchAll: 'true' // Requesting full list from backend
+      }).toString();
 
-    worksheet.columns = [
-      { header: 'Master ID', key: 'clientId', width: 20 },
-      { header: 'PAN', key: 'pan', width: 15 },
-      { header: 'Entity Name', key: 'name', width: 30 },
-      { header: 'FSSAI License No', key: 'licenseNo', width: 25 },
-      { header: 'License Type', key: 'licenseType', width: 20 },
-      { header: 'Kind of Business', key: 'kob', width: 25 },
-      { header: 'Mobile', key: 'mobile', width: 15 },
-      { header: 'Email', key: 'email', width: 25 },
-      { header: 'State', key: 'state', width: 15 },
-      { header: 'Issue Date', key: 'issueDate', width: 15 },
-      { header: 'Expiry Date', key: 'expiryDate', width: 15 },
-      { header: 'FoSCoS User ID', key: 'portalId', width: 20 },
-      { header: 'FoSCoS Password', key: 'portalPass', width: 20 },
-      { header: 'Financial Year', key: 'fy', width: 15 },
-      { header: 'Return Type', key: 'returnType', width: 20 },
-      { header: 'Current Status', key: 'status', width: 20 },
-      { header: 'Due Date', key: 'dueDate', width: 15 },
-      { header: 'Filing Date', key: 'filingDate', width: 15 },
-      { header: 'Ack / SRN No', key: 'ackNo', width: 20 },
-      { header: 'Fee Status', key: 'feeStatus', width: 15 },
-      { header: 'Total Fee', key: 'feeAmount', width: 15 },
-      { header: 'Received', key: 'amountReceived', width: 15 },
-      { header: 'Balance', key: 'balance', width: 15 }
-    ];
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/fssai?${params}`, { headers });
+      const fullWorkspacesList = res.data.data || res.data || [];
 
-    worksheet.getRow(1).font = { bold: true };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+      toast.success("Generating Excel File...", { id: toastId });
 
-    const dataToExport = selectedIds.length > 0 ? filteredWorkspaces.filter(ws => selectedIds.includes(ws._id)) : filteredWorkspaces;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('FSSAI Workspace');
 
-    dataToExport.forEach(ws => { 
-      worksheet.addRow({
-        clientId: ws.clientMasterId?.clientId || 'N/A',
-        pan: ws.pan || '',
-        name: ws.assesseeName || '',
-        licenseNo: ws.fssaiLicenseNo || '',
-        licenseType: ws.licenseType || '',
-        kob: ws.kindOfBusiness || '',
-        mobile: ws.mobile || '',
-        email: ws.email || '',
-        state: ws.state || '',
-        issueDate: ws.issueDate ? new Date(ws.issueDate).toLocaleDateString('en-IN') : '',
-        expiryDate: ws.expiryDate ? new Date(ws.expiryDate).toLocaleDateString('en-IN') : '',
-        portalId: ws.foscosUserId || '',
-        portalPass: ws.foscosPassword || '',
-        fy: ws.financialYear || '',
-        returnType: ws.returnType || '',
-        status: ws.fssaiStatus || '',
-        dueDate: ws.dueDate ? new Date(ws.dueDate).toLocaleDateString('en-IN') : '',
-        filingDate: ws.filingDate ? new Date(ws.filingDate).toLocaleDateString('en-IN') : '',
-        ackNo: ws.acknowledgementNo || '',
-        feeStatus: ws.feeStatus || '',
-        feeAmount: ws.feeAmount || 0,
-        amountReceived: ws.amountReceived || 0,
-        balance: (ws.feeAmount || 0) - (ws.amountReceived || 0)
+      worksheet.columns = [
+        { header: 'Master ID', key: 'clientId', width: 20 },
+        { header: 'PAN', key: 'pan', width: 15 },
+        { header: 'Entity Name', key: 'name', width: 30 },
+        { header: 'FSSAI License No', key: 'licenseNo', width: 25 },
+        { header: 'License Type', key: 'licenseType', width: 20 },
+        { header: 'Kind of Business', key: 'kob', width: 25 },
+        { header: 'Mobile', key: 'mobile', width: 15 },
+        { header: 'Email', key: 'email', width: 25 },
+        { header: 'State', key: 'state', width: 15 },
+        { header: 'Issue Date', key: 'issueDate', width: 15 },
+        { header: 'Expiry Date', key: 'expiryDate', width: 15 },
+        { header: 'FoSCoS User ID', key: 'portalId', width: 20 },
+        { header: 'FoSCoS Password', key: 'portalPass', width: 20 },
+        { header: 'Financial Year', key: 'fy', width: 15 },
+        { header: 'Return Type', key: 'returnType', width: 20 },
+        { header: 'Current Status', key: 'status', width: 20 },
+        { header: 'Due Date', key: 'dueDate', width: 15 },
+        { header: 'Filing Date', key: 'filingDate', width: 15 },
+        { header: 'Ack / SRN No', key: 'ackNo', width: 20 },
+        { header: 'Fee Status', key: 'feeStatus', width: 15 },
+        { header: 'Total Fee', key: 'feeAmount', width: 15 },
+        { header: 'Received', key: 'amountReceived', width: 15 },
+        { header: 'Balance', key: 'balance', width: 15 }
+      ];
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+
+      const dataToExport = selectedIds.length > 0 ? fullWorkspacesList.filter(ws => selectedIds.includes(ws._id)) : fullWorkspacesList;
+
+      dataToExport.forEach(ws => { 
+        worksheet.addRow({
+          clientId: ws.clientMasterId?.clientId || 'N/A',
+          pan: ws.pan || '',
+          name: ws.assesseeName || '',
+          licenseNo: ws.fssaiLicenseNo || '',
+          licenseType: ws.licenseType || '',
+          kob: ws.kindOfBusiness || '',
+          mobile: ws.mobile || '',
+          email: ws.email || '',
+          state: ws.state || '',
+          issueDate: ws.issueDate ? new Date(ws.issueDate).toLocaleDateString('en-IN') : '',
+          expiryDate: ws.expiryDate ? new Date(ws.expiryDate).toLocaleDateString('en-IN') : '',
+          portalId: ws.foscosUserId || '',
+          portalPass: ws.foscosPassword || '',
+          fy: ws.financialYear || '',
+          returnType: ws.returnType || '',
+          status: ws.fssaiStatus || '',
+          dueDate: ws.dueDate ? new Date(ws.dueDate).toLocaleDateString('en-IN') : '',
+          filingDate: ws.filingDate ? new Date(ws.filingDate).toLocaleDateString('en-IN') : '',
+          ackNo: ws.acknowledgementNo || '',
+          feeStatus: ws.feeStatus || '',
+          feeAmount: ws.feeAmount || 0,
+          amountReceived: ws.amountReceived || 0,
+          balance: (ws.feeAmount || 0) - (ws.amountReceived || 0)
+        });
       });
-    });
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `FSSAI_Workspace_${new Date().toISOString().split('T')[0]}.xlsx`);
-    if(selectedIds.length > 0) setSelectedIds([]);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `FSSAI_Workspace_${new Date().toISOString().split('T')[0]}.xlsx`);
+      if(selectedIds.length > 0) setSelectedIds([]);
+    } catch (error) {
+      toast.error("Failed to generate Excel.", { id: toastId });
+    }
   };
 
   // 🔴 IMPORT LOGIC
@@ -407,6 +450,7 @@ const FssaiWorkspace = () => {
       pan: ws.pan || '',
       fssaiLicenseNo: ws.fssaiLicenseNo || '',
       assesseeName: ws.assesseeName || '',
+      clientId: ws.clientMasterId?.clientId || '',
       licenseType: ws.licenseType || 'Basic Registration',
       kindOfBusiness: ws.kindOfBusiness || '',
       mobile: ws.mobile || '', email: ws.email || '', state: ws.state || '',
@@ -611,10 +655,10 @@ const FssaiWorkspace = () => {
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
                 <tr><td colSpan="4" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading FSSAI database...</td></tr>
-              ) : filteredWorkspaces.length === 0 ? (
+              ) : workspaces.length === 0 ? (
                 <tr><td colSpan="4" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No FSSAI records found.</td></tr>
               ) : (
-                filteredWorkspaces.map((ws) => {
+                workspaces.map((ws) => {
                   const isSelected = selectedIds.includes(ws._id);
                   const isExpired = ws.fssaiStatus === 'License Expired' || (ws.expiryDate && new Date(ws.expiryDate) < new Date());
 
@@ -692,6 +736,34 @@ const FssaiWorkspace = () => {
             </tbody>
           </table>
         </div>
+
+        {/* SERVER-SIDE PAGINATION CONTROLS */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
+            <span className="text-xs font-bold text-slate-500">
+              Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
+            </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                disabled={currentPage === 1 || loading}
+                className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100">
+                {currentPage} / {totalPages}
+              </span>
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                disabled={currentPage === totalPages || loading}
+                className="px-4 py-2 text-xs font-bold bg-emerald-600 text-white border border-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ONBOARD / EDIT MODAL */}

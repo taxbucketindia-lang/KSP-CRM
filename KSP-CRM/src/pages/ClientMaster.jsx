@@ -82,17 +82,43 @@ const ClientMaster = () => {
         axios.get(`${import.meta.env.VITE_API_URL}/gst`, { headers }).catch(() => ({ data: [] }))
       ]);
       
-      // Backend ab totalPages aur array object mein bhej raha hai
-      setClients(clientsRes.data.clients || clientsRes.data || []);
+      const fetchedClients = clientsRes.data.clients || clientsRes.data || [];
+      const fetchedGstData = gstRes.data?.data || gstRes.data?.clients || gstRes.data || [];
+      const safeGstData = Array.isArray(fetchedGstData) ? fetchedGstData : [];
+      
+      // 🔴 NAYA LOGIC: Jabhi Clients fetch honge, hum unka tradeName check karenge
+      // Agar backend mein tradeName missing hai, par GST data mein milta hai, toh backend ko permanent UPDATE bhejenge
+      
+      const patchPromises = [];
+      const patchedClients = fetchedClients.map(client => {
+         if (!client.tradeName && safeGstData.length > 0) {
+            const match = safeGstData.find(g => g.pan?.toUpperCase() === client.pan?.toUpperCase());
+            if (match && match.tradeName) {
+               // 1. Array mein temporary update karo taaki UI turant theek dikhe
+               client.tradeName = match.tradeName; 
+               // 2. Database mein permanent save karne ke liye promise bana lo
+               patchPromises.push(
+                 axios.put(`${import.meta.env.VITE_API_URL}/client-master/${client._id}`, 
+                   { tradeName: match.tradeName }, 
+                   { headers }
+                 ).catch(() => console.log('Silent auto-update failed for', client.pan))
+               );
+            }
+         }
+         return client;
+      });
+
+      // Background mein saare missing names update kar do
+      if (patchPromises.length > 0) {
+        Promise.all(patchPromises); 
+      }
+
+      setClients(patchedClients);
       setTotalPages(clientsRes.data.totalPages || 1);
       setTotalRecords(clientsRes.data.totalCount || 0);
 
       setAllInvoices(invoicesRes.data?.data || invoicesRes.data || []);
-      
-      // 🔴 THE FIX: GST list ko object se theek se nikaalo!
-      const fetchedGstData = gstRes.data?.data || gstRes.data?.clients || gstRes.data || [];
-      // Agar backend phir bhi galti se object bhej raha hai jo array nahi hai
-      setGstData(Array.isArray(fetchedGstData) ? fetchedGstData : []);
+      setGstData(safeGstData);
 
     } catch (error) {
       toast.error("Failed to load database");
@@ -105,7 +131,7 @@ const ClientMaster = () => {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       fetchData();
-    }, 500); // 500ms delay while typing search
+    }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
   }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
@@ -122,7 +148,6 @@ const ClientMaster = () => {
     if (val.length === 10 && !editingId) {
       setFetchingPan(true);
       setTimeout(() => {
-        // GST Data array hai ya nahi, double check karne ke baad hi `.find` run karein
         if (Array.isArray(gstData)) {
           const match = gstData.find(g => g.pan?.toUpperCase() === val);
           if (match) {
@@ -171,21 +196,11 @@ const ClientMaster = () => {
     return totalDue > 0 ? totalDue : 0;
   };
 
-  // 🔴 FINAL DISPLAY LIST (With Local Patches and Dues Filter)
+  // 🔴 FINAL DISPLAY LIST (Sirf Dues filter handle kar raha hai, kyunki trade name patch upar ho gaya)
   const finalDisplayClients = useMemo(() => {
-    const patchedClients = clients.map(client => {
-       if (!client.tradeName && Array.isArray(gstData)) {
-          const match = gstData.find(g => g.pan?.toUpperCase() === client.pan?.toUpperCase());
-          if (match && match.tradeName) {
-             return { ...client, tradeName: match.tradeName }; 
-          }
-       }
-       return client;
-    });
+    if (duesFilter === 'All') return clients;
 
-    if (duesFilter === 'All') return patchedClients;
-
-    return patchedClients.filter(client => {
+    return clients.filter(client => {
       let matchesDues = true;
       const clientDue = getClientDueAmount(client);
       
@@ -203,10 +218,8 @@ const ClientMaster = () => {
       
       return matchesDues;
     });
-  }, [clients, gstData, duesFilter, allInvoices]);
+  }, [clients, duesFilter, allInvoices]);
 
-  // Global Finances Note: This will now calculate for the current paginated view. 
-  // If you want pure global stats without loading all clients, backend must calculate it separately.
   const globalFinances = useMemo(() => {
     let billed = 0;
     let received = 0;
@@ -232,7 +245,7 @@ const ClientMaster = () => {
     return { billed: finalBilled, received, due: finalDue };
   }, [allInvoices, clients]);
 
-  // 🔴 EXCEL EXPORT - Fetch all records directly from backend before export
+  // 🔴 EXCEL EXPORT
   const handleExportExcel = async () => {
     const toastId = toast.loading("Fetching all client records for export...");
     try {
@@ -243,7 +256,7 @@ const ClientMaster = () => {
         status: statusFilter,
         month: monthFilter,
         year: yearFilter,
-        fetchAll: 'true' // Trigger backend to return ALL matched items without limit
+        fetchAll: 'true' 
       }).toString();
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?${params}`, { headers });

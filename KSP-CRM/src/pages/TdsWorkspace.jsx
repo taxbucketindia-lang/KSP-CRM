@@ -11,6 +11,8 @@ import {
 
 const TdsWorkspace = () => {
   const { user } = useContext(AuthContext);
+
+  const isAdmin = user?.role === 'Admin';
   
   // ==========================================
   // 1. WORKSPACE STATES (M1)
@@ -28,13 +30,19 @@ const TdsWorkspace = () => {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  // 🔴 Server-Side Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const itemsPerPage = 10;
   
   // ==========================================
   // 2. 360 VIEW STATES (TABS)
   // ==========================================
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewingData, setViewingData] = useState(null);
-  const [activeTab, setActiveTab] = useState('profile'); // 🔴 Default changed to Profile
+  const [activeTab, setActiveTab] = useState('profile'); 
   const [tabData, setTabData] = useState({ returns: [], deductees: [], challans: [] });
   const [loadingTabData, setLoadingTabData] = useState(false);
 
@@ -68,14 +76,29 @@ const TdsWorkspace = () => {
   const [formData, setFormData] = useState(initialWorkspaceForm);
 
   // ==========================================
-  // FETCHING LOGIC
+  // 🔴 FETCHING LOGIC WITH PAGINATION
   // ==========================================
   const fetchWorkspaces = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/tds/workspaces`, { headers });
-      setWorkspaces(res.data || []);
+      
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchQuery,
+        status: statusFilter
+      }).toString();
+
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/tds/workspaces?${params}`, { headers });
+      
+      if (res.data && res.data.data) {
+        setWorkspaces(res.data.data);
+        setTotalPages(res.data.totalPages || 1);
+        setTotalRecords(res.data.totalCount || 0);
+      } else {
+        setWorkspaces(res.data || []);
+      }
     } catch (error) {
       toast.error("Failed to load TDS workspaces");
     } finally {
@@ -83,13 +106,22 @@ const TdsWorkspace = () => {
     }
   };
 
+  // Debounce API calls when filters or search change
   useEffect(() => {
-    fetchWorkspaces();
+    const timeoutId = setTimeout(() => {
+      fetchWorkspaces();
+    }, 500); 
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token]);
+  }, [user.token, currentPage, searchQuery, statusFilter]);
+
+  // Reset page to 1 if any filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter]);
 
   const loadTabSpecificData = async (workspaceId, tabName) => {
-    if (tabName === 'profile') return; // No need to fetch for profile, data is already in viewingData
+    if (tabName === 'profile') return; 
     setLoadingTabData(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
@@ -117,11 +149,11 @@ const TdsWorkspace = () => {
   const handleOpenView = (ws) => {
     setViewingData(ws);
     setIsViewModalOpen(true);
-    setActiveTab('profile'); // 🔴 Start with profile tab to show logins
+    setActiveTab('profile'); 
   };
 
   // ==========================================
-  // M1: WORKSPACE HANDLERS
+  // 🔴 M1: WORKSPACE HANDLERS (BULLETPROOF PAN AUTO-FILL)
   // ==========================================
   const handlePanChange = async (e) => {
     const val = e.target.value.toUpperCase();
@@ -131,8 +163,19 @@ const TdsWorkspace = () => {
       setFetchingPan(true);
       try {
         const headers = { Authorization: `Bearer ${user.token}` };
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}`, { headers });
-        setPanSuggestions(res.data || []);
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?search=${val}&fetchAll=true`, { headers });
+        
+        // 100% Fail-Safe Array Extraction
+        let clientsArray = [];
+        if (Array.isArray(res.data)) {
+          clientsArray = res.data;
+        } else if (res.data && Array.isArray(res.data.clients)) {
+          clientsArray = res.data.clients;
+        } else if (res.data && Array.isArray(res.data.data)) {
+          clientsArray = res.data.data;
+        }
+
+        setPanSuggestions(clientsArray);
         setShowSuggestions(true);
       } catch (error) {
         console.error("Error fetching PAN details", error);
@@ -170,7 +213,6 @@ const TdsWorkspace = () => {
       const headers = { Authorization: `Bearer ${user.token}` };
       
       if (editingId) {
-        // 🔴 YAHAN API CONNECT KAR DI GAYI HAI
         await axios.put(`${import.meta.env.VITE_API_URL}/tds/workspaces/${editingId}`, formData, { headers });
         toast.success("TDS Workspace Updated Successfully!");
       } else {
@@ -328,24 +370,14 @@ const TdsWorkspace = () => {
   // ==========================================
   // HELPERS
   // ==========================================
-  const filteredWorkspaces = useMemo(() => {
-    return workspaces.filter(ws => {
-      const client = ws.clientMasterId || {};
-      const searchStr = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (ws.companyName?.toLowerCase() || client.name?.toLowerCase() || '').includes(searchStr) || 
-        (ws.pan?.toLowerCase() || client.pan?.toLowerCase() || '').includes(searchStr) || 
-        (ws.tan?.toLowerCase() || '').includes(searchStr) ||
-        (client.clientId?.toLowerCase() || '').includes(searchStr);
-      const matchesStatus = statusFilter === 'ALL' || (ws.isActive ? 'Active' : 'Inactive') === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [workspaces, searchQuery, statusFilter]);
+  
+  // Using paginated spaces directly for display
+  const finalDisplayWorkspaces = workspaces;
 
   const stats = useMemo(() => ({
-    total: workspaces.length,
+    total: totalRecords,
     active: workspaces.filter(w => w.isActive).length,
-  }), [workspaces]);
+  }), [workspaces, totalRecords]);
 
   const copyToClipboard = (text, type) => {
     if(!text) return;
@@ -423,10 +455,10 @@ const TdsWorkspace = () => {
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
                 <tr><td colSpan="4" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Deductor Master...</td></tr>
-              ) : filteredWorkspaces.length === 0 ? (
+              ) : finalDisplayWorkspaces.length === 0 ? (
                 <tr><td colSpan="4" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No Deductors found.</td></tr>
               ) : (
-                filteredWorkspaces.map((ws) => {
+                finalDisplayWorkspaces.map((ws) => {
                   const client = ws.clientMasterId || {};
                   return (
                     <tr key={ws._id} className="hover:bg-indigo-50/30 transition-colors group">
@@ -470,9 +502,11 @@ const TdsWorkspace = () => {
                           <button onClick={() => handleEditWorkspace(ws)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Deductor">
                             <Pencil size={16}/>
                           </button>
-                          <button onClick={() => handleDeleteWorkspace(ws._id, ws.companyName)} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Deductor">
-      <Trash2 size={16}/>
-    </button>
+                          {isAdmin && (
+                            <button onClick={() => handleDeleteWorkspace(ws._id, ws.companyName)} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Deductor">
+                              <Trash2 size={16}/>
+                            </button>
+                          )}
                           <button onClick={() => handleOpenView(ws)} className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white rounded-xl transition-colors border border-indigo-200 text-xs font-bold flex items-center gap-2 shadow-sm" title="View Profile">
                             <Eye size={16} strokeWidth={2.5}/> View Profile
                           </button>
@@ -485,6 +519,35 @@ const TdsWorkspace = () => {
             </tbody>
           </table>
         </div>
+
+        {/* SERVER-SIDE PAGINATION CONTROLS */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
+            <span className="text-xs font-bold text-slate-500">
+              Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
+            </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                disabled={currentPage === 1 || loading}
+                className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100">
+                {currentPage} / {totalPages}
+              </span>
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                disabled={currentPage === totalPages || loading}
+                className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white border border-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* 🔴 FULL VIEW MODAL (THE 360 TDS SUITE) */}
@@ -523,7 +586,7 @@ const TdsWorkspace = () => {
             {/* Navigation Tabs */}
             <div className="flex items-center gap-2 px-6 bg-white border-b border-slate-200 shrink-0 overflow-x-auto custom-scrollbar pt-2">
               {[
-                { id: 'profile', icon: <Building2 size={16}/>, label: 'Master Profile (M1)' }, // 🔴 NEW TAB
+                { id: 'profile', icon: <Building2 size={16}/>, label: 'Master Profile (M1)' }, 
                 { id: 'returns', icon: <FileText size={16}/>, label: 'Quarterly Returns (M2)' },
                 { id: 'deductees', icon: <Users size={16}/>, label: 'Deductee Master (M3)' },
                 { id: 'challans', icon: <Receipt size={16}/>, label: 'Challan Bank (M4)' }
@@ -644,80 +707,81 @@ const TdsWorkspace = () => {
               )}
 
               {/* 🟢 TAB 1: RETURNS (M2) */}
-              {/* 🟢 TAB 1: RETURNS (M2) */}
-{activeTab === 'returns' && (
-  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-    <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-      <div>
-        <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Financial Year Tracking</h3>
-        <p className="text-xs text-slate-500">Manage all Q1-Q4 returns here.</p>
-      </div>
-      <button onClick={() => setIsReturnModalOpen(true)} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm shrink-0">
-        <Plus size={14}/> Init New FY Returns
-      </button>
-    </div>
-    
-    {tabData.returns.length === 0 ? (
-      <div className="text-center py-10 bg-white rounded-2xl border border-slate-200 border-dashed">
-        <p className="text-sm font-bold text-slate-400">No returns found. Initialize a financial year to auto-create quarters.</p>
-      </div>
-    ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {tabData.returns.map(ret => (
-          <div key={ret._id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all group flex flex-col justify-between relative">
-            
-            {/* 🔴 DELETE BUTTON FOR RETURN */}
-            <button 
-              onClick={async () => {
-                if(window.confirm('Are you sure you want to delete this return layer?')) {
-                  try {
-                    const headers = { Authorization: `Bearer ${user.token}` };
-                    await axios.delete(`${import.meta.env.VITE_API_URL}/tds/returns/${ret._id}`, { headers });
-                    toast.success("Return deleted successfully!");
-                    loadTabSpecificData(viewingData._id, 'returns');
-                  } catch (err) { toast.error("Failed to delete return"); }
-                }
-              }} 
-              className="absolute top-3 right-3 text-slate-300 hover:text-rose-600 transition-colors p-1" 
-              title="Delete Return"
-            >
-              <Trash2 size={15}/>
-            </button>
+              {activeTab === 'returns' && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                    <div>
+                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Financial Year Tracking</h3>
+                      <p className="text-xs text-slate-500">Manage all Q1-Q4 returns here.</p>
+                    </div>
+                    <button onClick={() => setIsReturnModalOpen(true)} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm shrink-0">
+                      <Plus size={14}/> Init New FY Returns
+                    </button>
+                  </div>
+                  
+                  {tabData.returns.length === 0 ? (
+                    <div className="text-center py-10 bg-white rounded-2xl border border-slate-200 border-dashed">
+                      <p className="text-sm font-bold text-slate-400">No returns found. Initialize a financial year to auto-create quarters.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {tabData.returns.map(ret => (
+                        <div key={ret._id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all group flex flex-col justify-between relative">
+                          
+                          {/* 🔴 DELETE BUTTON FOR RETURN */}
+                          {isAdmin && (
+                            <button 
+                              onClick={async () => {
+                                if(window.confirm('Are you sure you want to delete this return layer?')) {
+                                  try {
+                                    const headers = { Authorization: `Bearer ${user.token}` };
+                                    await axios.delete(`${import.meta.env.VITE_API_URL}/tds/returns/${ret._id}`, { headers });
+                                    toast.success("Return deleted successfully!");
+                                    loadTabSpecificData(viewingData._id, 'returns');
+                                  } catch (err) { toast.error("Failed to delete return"); }
+                                }
+                              }} 
+                              className="absolute top-3 right-3 text-slate-300 hover:text-rose-600 transition-colors p-1" 
+                              title="Delete Return"
+                            >
+                              <Trash2 size={15}/>
+                            </button>
+                          )}
 
-            <div>
-              <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3 pr-6">
-                <div>
-                  <span className="text-[10px] font-black uppercase text-slate-400">{ret.financialYear}</span>
-                  <h4 className="text-lg font-black text-indigo-700 flex items-center gap-1">{ret.quarter} <span className="text-xs font-bold text-slate-500 bg-slate-100 px-1.5 rounded">{ret.formType}</span></h4>
+                          <div>
+                            <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3 pr-6">
+                              <div>
+                                <span className="text-[10px] font-black uppercase text-slate-400">{ret.financialYear}</span>
+                                <h4 className="text-lg font-black text-indigo-700 flex items-center gap-1">{ret.quarter} <span className="text-xs font-bold text-slate-500 bg-slate-100 px-1.5 rounded">{ret.formType}</span></h4>
+                              </div>
+                            </div>
+                            <div className="space-y-2 mb-3">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-slate-500">Status</span>
+                                <span className="text-[9px] font-bold uppercase bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200">{ret.status}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-slate-500">Type</span>
+                                <span className="font-semibold text-slate-800">{ret.returnType}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-slate-500">Due Date</span>
+                                <span className="font-semibold text-rose-600">
+                                  {ret.dueDate ? new Date(ret.dueDate).toLocaleDateString('en-IN') : 'N/A'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <button onClick={() => openReturnEditor(ret)} className="w-full mt-2 bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200 hover:border-indigo-200 text-xs font-bold py-2 rounded-xl transition-all flex items-center justify-center gap-1 shrink-0">
+                            Open Editor <ArrowRight size={14}/>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div className="space-y-2 mb-3">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-500">Status</span>
-                  <span className="text-[9px] font-bold uppercase bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200">{ret.status}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-500">Type</span>
-                  <span className="font-semibold text-slate-800">{ret.returnType}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-500">Due Date</span>
-                  <span className="font-semibold text-rose-600">
-                    {ret.dueDate ? new Date(ret.dueDate).toLocaleDateString('en-IN') : 'N/A'}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <button onClick={() => openReturnEditor(ret)} className="w-full mt-2 bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200 hover:border-indigo-200 text-xs font-bold py-2 rounded-xl transition-all flex items-center justify-center gap-1 shrink-0">
-              Open Editor <ArrowRight size={14}/>
-            </button>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-)}
+              )}
 
               {/* 🟢 TAB 2: DEDUCTEES (M3) */}
               {activeTab === 'deductees' && (

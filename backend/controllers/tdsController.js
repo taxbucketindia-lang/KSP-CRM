@@ -41,15 +41,64 @@ const decrypt = (text) => {
 
 
 // ==========================================
-// 🏢 M1: TDS WORKSPACE (DEDUCTOR MASTER)
+// 🏢 M1: TDS WORKSPACE (DEDUCTOR MASTER) WITH PAGINATION
 // ==========================================
 
 export const getTdsWorkspaces = async (req, res) => {
   try {
-    let workspaces = await TdsWorkspace.find({ isActive: true })
-      .populate('clientMasterId', 'clientId name pan mobile email')
-      .sort({ createdAt: -1 })
-      .lean();
+    // 🔴 Extract query parameters for pagination and filtering
+    const { 
+      page = 1, 
+      limit = 10, 
+      search, 
+      status, 
+      fetchAll 
+    } = req.query;
+
+    let filter = { isActive: true };
+
+    // Search filter
+    if (search) {
+      filter.$or = [
+        { companyName: { $regex: search, $options: 'i' } },
+        { pan: { $regex: search, $options: 'i' } },
+        { tan: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (status && status !== 'ALL') {
+       // Since the existing model only has isActive, we infer status from it
+       if (status === 'Active') {
+          filter.isActive = true;
+       } else if (status === 'Inactive') {
+          filter.isActive = false;
+       }
+    }
+
+    let workspaces = [];
+    let totalCount = 0;
+    let totalPages = 1;
+
+    // Excel Export ke time pe `fetchAll` true hoga toh bina limit ke list bhejni hai
+    if (fetchAll === 'true') {
+      workspaces = await TdsWorkspace.find(filter)
+        .populate('clientMasterId', 'clientId name pan mobile email')
+        .sort({ createdAt: -1 })
+        .lean();
+      totalCount = workspaces.length;
+    } else {
+      // Pagination Logic
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      totalCount = await TdsWorkspace.countDocuments(filter);
+      totalPages = Math.ceil(totalCount / parseInt(limit));
+
+      workspaces = await TdsWorkspace.find(filter)
+        .populate('clientMasterId', 'clientId name pan mobile email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+    }
 
     // Decrypt passwords before sending to frontend
     workspaces = workspaces.map(ws => {
@@ -58,8 +107,16 @@ export const getTdsWorkspaces = async (req, res) => {
       return ws;
     });
 
-    res.status(200).json(workspaces);
-  } catch (error) { res.status(500).json({ message: error.message }); }
+    res.status(200).json({
+      data: workspaces,
+      currentPage: parseInt(page),
+      totalPages,
+      totalCount
+    });
+
+  } catch (error) { 
+    res.status(500).json({ message: error.message }); 
+  }
 };
 
 export const createTdsWorkspace = async (req, res) => {
