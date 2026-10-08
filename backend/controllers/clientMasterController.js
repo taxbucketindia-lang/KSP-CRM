@@ -3,48 +3,74 @@ import ItrReturn from '../models/ItrReturn.js';
 import GstReturn from '../models/GstReturn.js'; 
 import RocWorkspace from '../models/RocWorkspace.js';
 import TdsWorkspace from '../models/TdsWorkspace.js';
-import AuditEngagement from '../models/AuditEngagement.js'; // 🔴 NAYA: Audit Model
+import AuditEngagement from '../models/AuditEngagement.js'; 
 import FssaiWorkspace from '../models/FssaiWorkspace.js';
-// import TdsReturn from '../models/TdsReturn.js'; // 🔴 TDS Model (Aapka jo bhi TDS model ka naam ho wo yahan likh lena)
 
 // ==========================================
-// 1. Get All Clients (with dynamic service checks)
+// 1. Get All Clients (WITH SERVER-SIDE PAGINATION)
 // ==========================================
 export const getClients = async (req, res) => {
   try {
-    const { search, type, status } = req.query;
+    // 🔴 NAYA: page, limit, month, year, aur fetchAll frontend se aayega
+    const { search, type, status, page = 1, limit = 10, month, year, fetchAll } = req.query;
     let filter = {};
 
+    // Search Filtering
     if (search) {
       filter.$or = [
-        { name: { $regex: search,$options: 'i' } },
-        { tradeName: { $regex: search,$options: 'i' } },
-        { pan: { $regex: search,$options: 'i' } },
-        { gstin: { $regex: search,$options: 'i' } },
-        { clientId: { $regex: search,$options: 'i' } } // 🔴 ID se search
+        { name: { $regex: search, $options: 'i' } },
+        { tradeName: { $regex: search, $options: 'i' } },
+        { pan: { $regex: search, $options: 'i' } },
+        { gstin: { $regex: search, $options: 'i' } },
+        { clientId: { $regex: search, $options: 'i' } }
       ];
     }
     if (type && type !== 'All') filter.clientType = type;
     if (status && status !== 'All') filter.status = status;
 
-    // lean() makes the query faster and returns a plain JS object
-    const clients = await ClientMaster.find(filter).lean().sort({ createdAt: -1 });
+    // Date Filtering (Month & Year)
+    if (year && year !== 'All') {
+      const startDate = new Date(`${year}-01-01T00:00:00.000Z`);
+      const endDate = new Date(`${year}-12-31T23:59:59.999Z`);
+      
+      if (month && month !== 'All') {
+        const mIndex = parseInt(month) - 1;
+        startDate.setMonth(mIndex);
+        endDate.setMonth(mIndex);
+        endDate.setDate(new Date(year, mIndex + 1, 0).getDate()); // Last day of month
+      }
+      filter.createdAt = { $gte: startDate, $lte: endDate };
+    }
 
-    // 🔴 THE MAGIC: Fetch Live Workspace Links dynamically for each client
+    let clients = [];
+    let totalPages = 1;
+    let totalCount = 0;
+
+    // 🔴 Agar Excel Export ke liye call kiya hai, toh saara data bhejenge bina limit ke
+    if (fetchAll === 'true') {
+      clients = await ClientMaster.find(filter).lean().sort({ createdAt: -1 });
+      totalCount = clients.length;
+    } else {
+      // 🔴 SERVER SIDE PAGINATION LOGIC
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      totalCount = await ClientMaster.countDocuments(filter);
+      totalPages = Math.ceil(totalCount / parseInt(limit));
+      
+      clients = await ClientMaster.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+    }
+
+    // Fetch Live Workspace Links dynamically for each client
     const enrichedClients = await Promise.all(clients.map(async (client) => {
-      // Alag-alag tables me check karo ki client ka data hai ya nahi
       const hasItr = await ItrReturn.exists({ clientMasterId: client._id });
       const hasGst = await GstReturn.exists({ clientMasterId: client._id });
       const hasRoc = await RocWorkspace.exists({ clientMasterId: client._id });
-      
-      // 🔴 NAYA: Audit ka check (Audit model me foreign key 'client_id' hoti hai)
       const hasAudit = await AuditEngagement.exists({ client_id: client._id, is_active: true });
-      
-      // 🔴 NAYA: TDS ka check (Maan lijiye aapke TDS model me foreign key clientMasterId hai)
-      // const hasTds = await TdsReturn.exists({ clientMasterId: client._id });
-     const hasTds = await TdsWorkspace.exists({ pan: client.pan }); // Jab TDS import kar lein tab upar wali line uncomment kar dena
-
-     const hasFssai = await FssaiWorkspace.exists({ clientMasterId: client._id });
+      const hasTds = await TdsWorkspace.exists({ pan: client.pan }); 
+      const hasFssai = await FssaiWorkspace.exists({ clientMasterId: client._id });
 
       return {
         ...client,
@@ -52,14 +78,20 @@ export const getClients = async (req, res) => {
           itr: !!hasItr,
           gst: !!hasGst,
           roc: !!hasRoc,
-          audit: !!hasAudit, // 🔴 Ab Audit automatically ACTIVE ho jayega!
-          tds: !!hasTds,  // 🔴 TDS bhi automatically active ho jayega!
+          audit: !!hasAudit, 
+          tds: !!hasTds,  
           fssai: !!hasFssai,
         }
       };
     }));
 
-    res.status(200).json(enrichedClients);
+    // Response mein current page aur total pages bhi bhej rahe hain
+    res.status(200).json({
+      clients: enrichedClients,
+      currentPage: parseInt(page),
+      totalPages,
+      totalCount
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -81,8 +113,8 @@ export const createClient = async (req, res) => {
       return res.status(400).json({ message: `Client already exists with this PAN: ${existingClient.name}` });
     }
 
-    // 🔴 THE MAGIC: Auto-Generate Client ID (TB-Last5-0001)
-    const panSuffix = uppercasePan.slice(-5); // Last 5 digits/chars
+    // Auto-Generate Client ID (TB-Last5-0001)
+    const panSuffix = uppercasePan.slice(-5);
     let nextSeq = 1;
     const lastClient = await ClientMaster.findOne({ clientId: { $regex: /^TB-/ } }).sort({ createdAt: -1 });
     
@@ -102,7 +134,7 @@ export const createClient = async (req, res) => {
     const generatedClientId = `TB-${panSuffix}-${sequenceNum}`;
 
     const newClient = new ClientMaster({
-      clientId: generatedClientId, // 🔴 ID assign kar di
+      clientId: generatedClientId, 
       pan: uppercasePan,
       ...otherData
     });
@@ -120,15 +152,9 @@ export const createClient = async (req, res) => {
 export const updateClient = async (req, res) => {
   try {
     const { pan, ...updateData } = req.body;
-    
     if (pan) updateData.pan = pan.toUpperCase();
 
-    const updatedClient = await ClientMaster.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
-
+    const updatedClient = await ClientMaster.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!updatedClient) return res.status(404).json({ message: "Client not found." });
 
     res.status(200).json({ message: "Client details updated", data: updatedClient });
@@ -150,4 +176,3 @@ export const deleteClient = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-

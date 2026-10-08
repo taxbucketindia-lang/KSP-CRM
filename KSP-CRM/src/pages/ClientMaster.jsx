@@ -18,10 +18,10 @@ const ClientMaster = () => {
   
   const [clients, setClients] = useState([]);
   const [allInvoices, setAllInvoices] = useState([]); 
-  const [gstData, setGstData] = useState([]); // 🔴 NAYA: GST Data for Auto-Sync
+  const [gstData, setGstData] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [fetchingPan, setFetchingPan] = useState(false); // 🔴 NAYA: Auto-fill loader
+  const [fetchingPan, setFetchingPan] = useState(false); 
   
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,8 +31,10 @@ const ClientMaster = () => {
   const [yearFilter, setYearFilter] = useState('All');  
   const [duesFilter, setDuesFilter] = useState('All'); 
 
-  // Pagination
+  // Pagination Variables (Now Server Side)
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
   const itemsPerPage = 10;
 
   // Modals
@@ -58,18 +60,33 @@ const ClientMaster = () => {
   
   const [formData, setFormData] = useState(initialForm);
 
+  // 🔴 FETCH DATA (NOW WITH PAGINATION PARAMETERS)
   const fetchData = async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      // 🔴 NAYA: GST api ko bhi load kiya gaya hai for smart sync
+      
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchQuery,
+        type: typeFilter,
+        status: statusFilter,
+        month: monthFilter,
+        year: yearFilter
+      }).toString();
+
       const [clientsRes, invoicesRes, gstRes] = await Promise.all([
-        axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }),
+        axios.get(`${import.meta.env.VITE_API_URL}/client-master?${params}`, { headers }),
         axios.get(`${import.meta.env.VITE_API_URL}/invoices`, { headers }).catch(() => ({ data: { data: [] } })),
         axios.get(`${import.meta.env.VITE_API_URL}/gst`, { headers }).catch(() => ({ data: [] }))
       ]);
       
-      setClients(clientsRes.data || []);
+      // Backend ab totalPages aur array object mein bhej raha hai
+      setClients(clientsRes.data.clients || []);
+      setTotalPages(clientsRes.data.totalPages || 1);
+      setTotalRecords(clientsRes.data.totalCount || 0);
+
       setAllInvoices(invoicesRes.data?.data || []);
       setGstData(gstRes.data || []);
     } catch (error) {
@@ -79,19 +96,26 @@ const ClientMaster = () => {
     }
   };
 
+  // 🔴 USE EFFECT: Dependency on Page & Filters (Debounce API logic to avoid spamming server)
   useEffect(() => {
-    fetchData();
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 500); // 500ms delay while typing search
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token]);
+  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
 
-  // 🔴 NAYA: PAN TYPE KARTE HI GST DATABASE SE AUTO-FILL HO JAYEGA
+  // Reset to page 1 if any filter is changed
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter]);
+
   const handlePanChange = (e) => {
     const val = e.target.value.toUpperCase();
     setFormData(prev => ({ ...prev, pan: val }));
     
     if (val.length === 10 && !editingId) {
       setFetchingPan(true);
-      // Backend request ka lag dikhane aur lag free UI dene ke liye timeout use kiya hai
       setTimeout(() => {
         const match = gstData.find(g => g.pan?.toUpperCase() === val);
         if (match) {
@@ -112,10 +136,11 @@ const ClientMaster = () => {
     }
   };
 
+  // Dynamic filter lists
   const uniqueYears = useMemo(() => {
-     const years = clients.map(c => new Date(c.createdAt).getFullYear());
-     return [...new Set(years)].sort((a,b) => b - a); 
-  }, [clients]);
+    const currentY = new Date().getFullYear();
+    return Array.from({length: 10}, (_, i) => currentY - i); 
+  }, []);
 
   const getClientDueAmount = (client) => {
     const clientInvs = allInvoices.filter(inv => 
@@ -138,8 +163,8 @@ const ClientMaster = () => {
     return totalDue > 0 ? totalDue : 0;
   };
 
-  const filteredClients = useMemo(() => {
-    // 🔴 NAYA: Agar trade name blank hai, toh GST database se utha kar background mein set kar dega
+  // 🔴 FINAL DISPLAY LIST (With Local Patches and Dues Filter)
+  const finalDisplayClients = useMemo(() => {
     const patchedClients = clients.map(client => {
        if (!client.tradeName) {
           const match = gstData.find(g => g.pan?.toUpperCase() === client.pan?.toUpperCase());
@@ -150,54 +175,30 @@ const ClientMaster = () => {
        return client;
     });
 
+    if (duesFilter === 'All') return patchedClients;
+
     return patchedClients.filter(client => {
-      const searchStr = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (client.name?.toLowerCase() || '').includes(searchStr) || 
-        (client.tradeName?.toLowerCase() || '').includes(searchStr) || 
-        (client.pan?.toLowerCase() || '').includes(searchStr) ||
-        (client.gstin?.toLowerCase() || '').includes(searchStr) ||
-        (client.clientId?.toLowerCase() || '').includes(searchStr);
-        
-      const matchesStatus = statusFilter === 'All' || client.status === statusFilter;
-      const matchesType = typeFilter === 'All' || client.clientType === typeFilter;
-      
-      const createdDate = new Date(client.createdAt);
-      const matchesYear = yearFilter === 'All' || createdDate.getFullYear().toString() === yearFilter;
-      const matchesMonth = monthFilter === 'All' || (createdDate.getMonth() + 1).toString() === monthFilter;
-
       let matchesDues = true;
-      if (duesFilter !== 'All') {
-        const clientDue = getClientDueAmount(client);
-        
-        let billed = Number(client.openingBalance || 0);
-        const clientInvs = allInvoices.filter(inv => 
-          (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
-          (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
-          (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
-        );
-        clientInvs.forEach(inv => { billed += Number(inv.totalAmountAfterTax || 0); });
-
-        if (duesFilter === 'Has Dues') matchesDues = clientDue > 0;
-        if (duesFilter === 'Clear') matchesDues = billed > 0 && clientDue <= 0;
-        if (duesFilter === 'No Invoice') matchesDues = billed === 0;
-      }
+      const clientDue = getClientDueAmount(client);
       
-      return matchesSearch && matchesStatus && matchesType && matchesYear && matchesMonth && matchesDues;
+      let billed = Number(client.openingBalance || 0);
+      const clientInvs = allInvoices.filter(inv => 
+        (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
+        (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
+        (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
+      );
+      clientInvs.forEach(inv => { billed += Number(inv.totalAmountAfterTax || 0); });
+
+      if (duesFilter === 'Has Dues') matchesDues = clientDue > 0;
+      if (duesFilter === 'Clear') matchesDues = billed > 0 && clientDue <= 0;
+      if (duesFilter === 'No Invoice') matchesDues = billed === 0;
+      
+      return matchesDues;
     });
-  }, [clients, gstData, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter, allInvoices]);
+  }, [clients, gstData, duesFilter, allInvoices]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter]);
-
-  const paginatedClients = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredClients.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredClients, currentPage]);
-
-  const totalPages = Math.ceil(filteredClients.length / itemsPerPage);
-
+  // Global Finances Note: This will now calculate for the current paginated view. 
+  // If you want pure global stats without loading all clients, backend must calculate it separately.
   const globalFinances = useMemo(() => {
     let billed = 0;
     let received = 0;
@@ -223,92 +224,113 @@ const ClientMaster = () => {
     return { billed: finalBilled, received, due: finalDue };
   }, [allInvoices, clients]);
 
+  // 🔴 EXCEL EXPORT - Fetch all records directly from backend before export
   const handleExportExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Client Master');
+    const toastId = toast.loading("Fetching all client records for export...");
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const params = new URLSearchParams({
+        search: searchQuery,
+        type: typeFilter,
+        status: statusFilter,
+        month: monthFilter,
+        year: yearFilter,
+        fetchAll: 'true' // Trigger backend to return ALL matched items without limit
+      }).toString();
 
-    worksheet.columns = [
-      { header: 'Client ID', key: 'clientId', width: 15 },
-      { header: 'PAN', key: 'pan', width: 15 },
-      { header: 'Name', key: 'name', width: 30 },
-      { header: 'Trade Name', key: 'tradeName', width: 25 },
-      { header: 'Mobile', key: 'mobile', width: 15 },
-      { header: 'Email', key: 'email', width: 25 },
-      { header: 'Client Type', key: 'clientType', width: 20 },
-      { header: 'Constitution', key: 'constitution', width: 20 },
-      { header: 'GSTIN', key: 'gstin', width: 20 },
-      { header: 'Aadhaar (Last 4)', key: 'aadhaar', width: 15 },
-      { header: 'DOB/Incorporation', key: 'dob', width: 15 },
-      { header: 'Father Name', key: 'fatherName', width: 20 },
-      { header: 'Address', key: 'address', width: 30 },
-      { header: 'State', key: 'state', width: 15 },
-      { header: 'PIN Code', key: 'pinCode', width: 15 },
-      { header: 'CIN / LLPIN', key: 'cin_llpin', width: 25 },
-      { header: 'Date of Incorporation', key: 'date_of_incorporation', width: 15 },
-      { header: 'Nature of Business', key: 'nature_of_business', width: 25 },
-      { header: 'Accounting Method', key: 'accounting_method', width: 15 },
-      { header: 'Status', key: 'status', width: 15 },
-      { header: 'Remarks', key: 'remarks', width: 30 },
-      { header: 'Opening Balance (₹)', key: 'openingBalance', width: 18 }, 
-      { header: 'Total Billed (₹)', key: 'totalBilled', width: 15 },
-      { header: 'Total Received (₹)', key: 'totalReceived', width: 15 },
-      { header: 'Pending Dues (₹)', key: 'pendingDues', width: 15 }
-    ];
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master?${params}`, { headers });
+      const fullClientsList = res.data.clients || [];
 
-    worksheet.getRow(1).font = { bold: true };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+      toast.success("Generating Excel File...", { id: toastId });
 
-    filteredClients.forEach(client => {
-      const clientDue = getClientDueAmount(client);
-      
-      const clientInvs = allInvoices.filter(inv => 
-        (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
-        (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
-        (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
-      );
-      
-      let billed = 0;
-      let received = 0;
-      clientInvs.forEach(inv => {
-        const invTotal = Number(inv.totalAmountAfterTax || 0);
-        let invReceived = Number(inv.amountReceived || 0);
-        if (inv.paymentStatus === 'Paid' && invReceived === 0) invReceived = invTotal;
-        billed += invTotal;
-        received += invReceived;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Client Master');
+
+      worksheet.columns = [
+        { header: 'Client ID', key: 'clientId', width: 15 },
+        { header: 'PAN', key: 'pan', width: 15 },
+        { header: 'Name', key: 'name', width: 30 },
+        { header: 'Trade Name', key: 'tradeName', width: 25 },
+        { header: 'Mobile', key: 'mobile', width: 15 },
+        { header: 'Email', key: 'email', width: 25 },
+        { header: 'Client Type', key: 'clientType', width: 20 },
+        { header: 'Constitution', key: 'constitution', width: 20 },
+        { header: 'GSTIN', key: 'gstin', width: 20 },
+        { header: 'Aadhaar (Last 4)', key: 'aadhaar', width: 15 },
+        { header: 'DOB/Incorporation', key: 'dob', width: 15 },
+        { header: 'Father Name', key: 'fatherName', width: 20 },
+        { header: 'Address', key: 'address', width: 30 },
+        { header: 'State', key: 'state', width: 15 },
+        { header: 'PIN Code', key: 'pinCode', width: 15 },
+        { header: 'CIN / LLPIN', key: 'cin_llpin', width: 25 },
+        { header: 'Date of Incorporation', key: 'date_of_incorporation', width: 15 },
+        { header: 'Nature of Business', key: 'nature_of_business', width: 25 },
+        { header: 'Accounting Method', key: 'accounting_method', width: 15 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'Remarks', key: 'remarks', width: 30 },
+        { header: 'Opening Balance (₹)', key: 'openingBalance', width: 18 }, 
+        { header: 'Total Billed (₹)', key: 'totalBilled', width: 15 },
+        { header: 'Total Received (₹)', key: 'totalReceived', width: 15 },
+        { header: 'Pending Dues (₹)', key: 'pendingDues', width: 15 }
+      ];
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+
+      fullClientsList.forEach(client => {
+        const clientDue = getClientDueAmount(client);
+        
+        const clientInvs = allInvoices.filter(inv => 
+          (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
+          (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
+          (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
+        );
+        
+        let billed = 0;
+        let received = 0;
+        clientInvs.forEach(inv => {
+          const invTotal = Number(inv.totalAmountAfterTax || 0);
+          let invReceived = Number(inv.amountReceived || 0);
+          if (inv.paymentStatus === 'Paid' && invReceived === 0) invReceived = invTotal;
+          billed += invTotal;
+          received += invReceived;
+        });
+
+        worksheet.addRow({
+          clientId: client.clientId || 'Pending',
+          pan: client.pan || '',
+          name: client.name || '',
+          tradeName: client.tradeName || '',
+          mobile: client.mobile || '',
+          email: client.email || '',
+          clientType: client.clientType || 'Individual',
+          constitution: client.constitution || '',
+          gstin: client.gstin || '',
+          aadhaar: client.aadhaar || '',
+          dob: client.dob ? new Date(client.dob).toLocaleDateString('en-IN') : '',
+          fatherName: client.fatherName || '',
+          address: client.address || '',
+          state: client.state || '',
+          pinCode: client.pinCode || '',
+          cin_llpin: client.cin_llpin || '',
+          date_of_incorporation: client.date_of_incorporation ? new Date(client.date_of_incorporation).toLocaleDateString('en-IN') : '',
+          nature_of_business: client.nature_of_business || '',
+          accounting_method: client.accounting_method || '',
+          status: client.status || 'Active',
+          remarks: client.remarks || '',
+          openingBalance: Number(client.openingBalance || 0), 
+          totalBilled: billed,
+          totalReceived: received,
+          pendingDues: clientDue
+        });
       });
 
-      worksheet.addRow({
-        clientId: client.clientId || 'Pending',
-        pan: client.pan || '',
-        name: client.name || '',
-        tradeName: client.tradeName || '',
-        mobile: client.mobile || '',
-        email: client.email || '',
-        clientType: client.clientType || 'Individual',
-        constitution: client.constitution || '',
-        gstin: client.gstin || '',
-        aadhaar: client.aadhaar || '',
-        dob: client.dob ? new Date(client.dob).toLocaleDateString('en-IN') : '',
-        fatherName: client.fatherName || '',
-        address: client.address || '',
-        state: client.state || '',
-        pinCode: client.pinCode || '',
-        cin_llpin: client.cin_llpin || '',
-        date_of_incorporation: client.date_of_incorporation ? new Date(client.date_of_incorporation).toLocaleDateString('en-IN') : '',
-        nature_of_business: client.nature_of_business || '',
-        accounting_method: client.accounting_method || '',
-        status: client.status || 'Active',
-        remarks: client.remarks || '',
-        openingBalance: Number(client.openingBalance || 0), 
-        totalBilled: billed,
-        totalReceived: received,
-        pendingDues: clientDue
-      });
-    });
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `Client_Master_${new Date().toISOString().split('T')[0]}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Client_Master_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (error) {
+      toast.error("Failed to generate Excel.", { id: toastId });
+    }
   };
 
   const handleSave = async (e) => {
@@ -443,9 +465,7 @@ const ClientMaster = () => {
           const totalCredit = paidAmt + discAmt;
           
           let desc = `Part Payment Received against Invoice ${inv.invoiceNo} via ${ph.mode || 'Online'}`;
-          if (discAmt > 0) {
-            desc += ` (+ ₹${discAmt.toLocaleString('en-IN')} Discount)`;
-          }
+          if (discAmt > 0) desc += ` (+ ₹${discAmt.toLocaleString('en-IN')} Discount)`;
 
           transactions.push({
             id: `pay-${inv._id}-${idx}`,
@@ -521,7 +541,7 @@ const ClientMaster = () => {
           <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0"><Building size={18} /></div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Clients</p>
-            <h3 className="text-xl font-black text-slate-800">{clients.length}</h3>
+            <h3 className="text-xl font-black text-slate-800">{totalRecords}</h3> {/* Updated to totalRecords from API */}
           </div>
         </div>
         
@@ -610,7 +630,7 @@ const ClientMaster = () => {
           </div>
         </div>
 
-        {/* LIST VIEW TABLE WITH PAGINATION */}
+        {/* LIST VIEW TABLE WITH SERVER-SIDE PAGINATION */}
         <div className="flex flex-col">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -626,11 +646,11 @@ const ClientMaster = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {loading ? (
-                  <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Master Database...</td></tr>
-                ) : paginatedClients.length === 0 ? (
+                  <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Fetching Page {currentPage}...</td></tr>
+                ) : finalDisplayClients.length === 0 ? (
                   <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
                 ) : (
-                  paginatedClients.map((client) => {
+                  finalDisplayClients.map((client) => {
                     const clientDue = getClientDueAmount(client); 
                     
                     return (
@@ -730,26 +750,26 @@ const ClientMaster = () => {
             </table>
           </div>
 
-          {/* PAGINATION CONTROLS */}
+          {/* SERVER-SIDE PAGINATION CONTROLS */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200 rounded-b-2xl">
               <span className="text-xs font-bold text-slate-500">
-                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredClients.length)} of {filteredClients.length} clients
+                Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
               </span>
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                  disabled={currentPage === 1}
+                  disabled={currentPage === 1 || loading}
                   className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
                 >
                   Previous
                 </button>
                 <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
-                  Page {currentPage} of {totalPages}
+                  {currentPage} / {totalPages}
                 </span>
                 <button 
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
-                  disabled={currentPage === totalPages}
+                  disabled={currentPage === totalPages || loading}
                   className="px-4 py-2 text-xs font-bold bg-blue-600 text-white border border-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
                 >
                   Next
