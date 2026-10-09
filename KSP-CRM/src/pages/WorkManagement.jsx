@@ -141,20 +141,26 @@ const WorkManagement = () => {
     fetchEods();
   }, [viewMode, user.token]);
 
-  // 4. LAZY LOAD CLIENTS
+  // 4. 🔴 FAIL-SAFE CLIENT FETCHING FOR DROPDOWN
   const fetchClientsForDropdown = async () => {
     if (clients.length > 0) return; 
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
+      // 🔴 NAYA LOGIC: Added fetchAll=true to bypass pagination limit
       const [leadsRes, crmRes, masterRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/leads`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${import.meta.env.VITE_API_URL}/clients`, { headers }).catch(() => ({ data: [] })), 
-        axios.get(`${import.meta.env.VITE_API_URL}/client-master`, { headers }).catch(() => ({ data: [] })) 
+        axios.get(`${import.meta.env.VITE_API_URL}/client-master?fetchAll=true`, { headers }).catch(() => ({ data: [] })) 
       ]);
 
       const rawLeads = Array.isArray(leadsRes.data) ? leadsRes.data : (leadsRes.data?.leads || []);
       const rawCrm = Array.isArray(crmRes.data) ? crmRes.data : (crmRes.data?.clients || []);
-      const rawMaster = Array.isArray(masterRes.data) ? masterRes.data : (masterRes.data?.data || []);
+      
+      // 🔴 NAYA LOGIC: Properly parse Client Master Data (it could be in .data or .clients array)
+      const masterData = masterRes.data;
+      const rawMaster = Array.isArray(masterData) 
+        ? masterData 
+        : (Array.isArray(masterData?.clients) ? masterData.clients : (Array.isArray(masterData?.data) ? masterData.data : []));
 
       const formattedLeads = rawLeads.map(l => ({ _id: l._id, clientId: l.clientId || '', name: l.name || 'Unnamed', pan: '', mobile: l.mobile || '', type: 'Lead' }));
       const formattedCrm = rawCrm.map(c => ({ _id: c._id, clientId: c.clientId || '', name: c.assesseeName || c.tradeName || c.name || 'Unnamed', pan: c.pan || '', mobile: c.mobile || '', type: 'Registration CRM' }));
@@ -594,7 +600,7 @@ const WorkManagement = () => {
                   <option value="Not Started">Not Started</option>
                   <option value="Started">🟢 Started</option>
                   <option value="In Progress">▶️ In Progress</option>
-                  <option value="Pending Client">⏳ Pending Client</option>
+                  <option value="Pending Client">⏳ Pending Client (Waiting for Docs)</option>
                   <option value="Pending Government">🏛️ Pending Government</option>
                   <option value="Pending Internal">⏳ Pending Internal</option>
                   <option value="Under Review">👀 Submit for Review</option>
