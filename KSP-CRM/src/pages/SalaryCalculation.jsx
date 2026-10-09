@@ -778,6 +778,7 @@ const SalaryCalculation = () => {
         const liveSummary = {
           totalDays: calc.daysInMonth,
           paidDays: pay.paidDays,
+          upcomingDays: pay.upcomingDays,
           lopDays: pay.lopDays,
           totalLates: calc.totalLates,
           penalizedLates: pay.penalizedLates,
@@ -837,12 +838,13 @@ const SalaryCalculation = () => {
             attendanceSummary: liveSummary,
             adjustments: {
               lopDeduction: pay.lopDeduction,
+              upcomingDeduction: pay.upcomingDeduction, // Month ke bache hue dino ki salary (abhi bani nahi)
               otherDeduction: existingAdj.otherDeduction || 0,
               incentiveBonus: existingAdj.incentiveBonus || 0,
               reimbursement: existingAdj.reimbursement || 0,
               latesForgiven: latesForgiven
             },
-            netPayable: gross - pay.lopDeduction - fullEmpDetails.pf - fullEmpDetails.esi - fullEmpDetails.pt - fullEmpDetails.tds + (existingAdj.incentiveBonus || 0) + (existingAdj.reimbursement || 0) - (existingAdj.otherDeduction || 0)
+            netPayable: gross - pay.lopDeduction - pay.upcomingDeduction - fullEmpDetails.pf - fullEmpDetails.esi - fullEmpDetails.pt - fullEmpDetails.tds + (existingAdj.incentiveBonus || 0) + (existingAdj.reimbursement || 0) - (existingAdj.otherDeduction || 0)
           };
         }
       });
@@ -877,6 +879,8 @@ const SalaryCalculation = () => {
         const pay = computePay({ att: row.calc, gross: snap.gross, openingLeaves: att.openingLeaves, latesForgiven: val });
 
         att.paidDays = pay.paidDays;
+        att.upcomingDays = pay.upcomingDays;
+        adj.upcomingDeduction = pay.upcomingDeduction;
         att.lopDays = pay.lopDays;
         att.penalizedLates = pay.penalizedLates;
         att.latePenaltyDays = pay.latePenaltyDays;
@@ -884,7 +888,7 @@ const SalaryCalculation = () => {
     }
 
     row.netPayable =
-      snap.gross - (snap.pf||0) - (snap.esi||0) - (snap.pt||0) - (snap.tds||0) + adj.incentiveBonus + adj.reimbursement - adj.lopDeduction - adj.otherDeduction;
+      snap.gross - (snap.pf||0) - (snap.esi||0) - (snap.pt||0) - (snap.tds||0) + adj.incentiveBonus + adj.reimbursement - adj.lopDeduction - (adj.upcomingDeduction || 0) - adj.otherDeduction;
 
     setSalarySheet(updatedSheet);
   };
@@ -1003,6 +1007,7 @@ const SalaryCalculation = () => {
         ['Date of Joining:', row.empDetails?.joiningDate ? new Date(row.empDetails.joiningDate).toLocaleDateString('en-IN') : 'N/A', 'PAN:', row.empDetails?.pan || 'N/A'],
         ['Bank A/c No:', maskedBank, 'Working Days:', row.attendanceSummary.totalDays.toString()],
         ['LOP Days:', row.attendanceSummary.lopDays.toString(), 'Paid Days:', row.attendanceSummary.paidDays.toString()],
+        ...(row.attendanceSummary.upcomingDays > 0 ? [['Days Remaining:', row.attendanceSummary.upcomingDays.toString(), 'Salary Up To:', new Date().toLocaleDateString('en-IN')]] : []),
         ['Leaves Used:', `${row.attendanceSummary.paidLeavesGranted || 0} Days`, 'Closing Leave Bal:', `${row.attendanceSummary.closingLeaves || 0} Days`]
       ]
     });
@@ -1022,7 +1027,7 @@ const SalaryCalculation = () => {
       ['', ''] 
     ];
 
-    const totalDeductions = (snap.pf||0) + (snap.esi||0) + (snap.pt||0) + (snap.tds||0) + (adj.lopDeduction||0) + (adj.otherDeduction||0);
+    const totalDeductions = (snap.pf||0) + (snap.esi||0) + (snap.pt||0) + (snap.tds||0) + (adj.lopDeduction||0) + (adj.upcomingDeduction||0) + (adj.otherDeduction||0);
 
     const deductionsData = [
       ['Employee PF', formatCurrency(snap.pf || 0)],
@@ -1030,6 +1035,7 @@ const SalaryCalculation = () => {
       ['Professional Tax', formatCurrency(snap.pt || 0)],
       ['TDS', formatCurrency(snap.tds || 0)],
       ['LOP Deduction', formatCurrency(adj.lopDeduction || 0)],
+      ...(adj.upcomingDeduction > 0 ? [['Remaining Days (Not Yet Earned)', formatCurrency(adj.upcomingDeduction)]] : []),
       ['Other Deductions / Advance', formatCurrency(adj.otherDeduction || 0)],
       ['', ''] 
     ];
@@ -1165,6 +1171,10 @@ const SalaryCalculation = () => {
              <AlertCircle size={16} className="shrink-0"/>
              <span><strong>Sandwich Rule:</strong> Absent / Leave on both sides of a Sunday or Holiday = that off day is cut too. All other Sundays & Holidays are paid.</span>
           </div>
+          <div className="flex items-center gap-2 text-slate-500 mt-1">
+             <Calendar size={16} className="text-blue-500 shrink-0"/>
+             <span><strong>Running Month:</strong> Salary is counted only up to today. Remaining days are added as they pass (and attendance is marked).</span>
+          </div>
         </div>
       </div>
 
@@ -1246,7 +1256,12 @@ const SalaryCalculation = () => {
                       <td className="py-3 px-4 text-right border-r border-slate-100 bg-emerald-50/10 font-bold text-emerald-700">{snap.gross.toLocaleString('en-IN')}</td>
                       
                       <td className="py-3 px-4 text-center bg-amber-50/10 text-xs">{att.totalDays}</td>
-                      <td className="py-3 px-4 text-center bg-amber-50/10 text-sm font-black text-blue-600">{att.paidDays}</td>
+                      <td className="py-3 px-4 text-center bg-amber-50/10 text-sm font-black text-blue-600">
+                        {att.paidDays}
+                        {att.upcomingDays > 0 && (
+                          <div className="text-[8px] font-bold text-slate-400 mt-1 leading-tight">till today<br/>{att.upcomingDays} days left</div>
+                        )}
+                      </td>
                       
                       {/* 🔴 NAYA: PROPER LEAVE DISPLAY IN THE TABLE */}
                       <td className="py-3 px-4 text-center bg-amber-50/10 text-xs">

@@ -24,6 +24,7 @@ const salarySchema = new mongoose.Schema({
     penalizedLates: { type: Number },
     latePenaltyDays: { type: Number },
     sandwichLopDays: { type: Number },
+    upcomingDays: { type: Number },      // Chalte month me bache hue din (salary abhi bani nahi)
     openingLeaves: { type: Number },     // pichla balance + is month ki 1 paid leave
     paidLeavesGranted: { type: Number },
     unpaidLeaves: { type: Number },
@@ -36,7 +37,8 @@ const salarySchema = new mongoose.Schema({
     otherDeduction: { type: Number, default: 0 },
     incentiveBonus: { type: Number, default: 0 },
     reimbursement: { type: Number, default: 0 },
-    latesForgiven: { type: Number, default: 0 }
+    latesForgiven: { type: Number, default: 0 },
+    upcomingDeduction: { type: Number, default: 0 } // Bache hue dino ki rakam
   },
 
   // Final Auto Calculated

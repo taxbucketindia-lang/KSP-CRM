@@ -1,5 +1,6 @@
 // 🔴 PAYROLL RULES (Attendance page aur Salary page dono isi file se calculate karte hain)
 //  1. Salary pure calendar month (28/29/30/31 din) par banti hai. Sunday aur company holiday paid hain.
+//     Chalte month me sirf aaj tak ke dino ki salary banti hai (aane wale din abhi ginti me nahi).
 //  2. Joining wale month se har month 1 paid leave milti hai. Leave ya Absent lagte hi woh use ho jaati hai;
 //     use na ho toh agle month carry forward hoti hai (month finalize ho ya na ho).
 //  3. Shift time se 1 minute bhi late = late mark. Month ke pehle 3 late maaf, 4th late se har late par half day.
@@ -65,13 +66,17 @@ export const computeMonthAttendance = ({
 
   // Kisi bhi date ka final status (jo mark nahi hai uska bhi)
   const resolve = (key) => {
+    // Aaj ke baad ki tareekh par attendance pehle se bhari ho (jaise "Mark Remaining as Present") tab bhi
+    // us din ki salary abhi nahi banti
+    if (key > todayKey) return 'Upcoming';
     const rec = recByDate[key];
     if (rec) return rec.status;
     if (joinKey && key < joinKey) return 'Not Employed';
     if (exitKey && key > exitKey) return 'Not Employed';
+    // Jo din abhi aaya hi nahi (ya aaj, jab tak attendance na lage) uski salary abhi bani nahi
+    if (key >= todayKey) return 'Upcoming';
     if (holidays.includes(key)) return 'Holiday';
     if (isSunday(key)) return 'Weekly Off';
-    if (key >= todayKey) return 'Upcoming'; // aane wale din abhi cut nahi honge
     return 'Not Marked';
   };
 
@@ -158,13 +163,17 @@ export const computePay = ({ att, gross = 0, openingLeaves = MONTHLY_PAID_LEAVE,
   const rawLop = att.notMarked + att.notEmployed + unpaidLeaves
     + (att.halfDay * 0.5) + latePenaltyDays + att.sandwichLopDays;
   const lopDays = Math.min(att.daysInMonth, rawLop);
-  const paidDays = att.daysInMonth - lopDays;
-  const lopDeduction = Math.round((gross / att.daysInMonth) * lopDays) || 0;
+  // Chalte month me sirf beete hue dino ki salary banti hai; aane wale din na paid hain na cut
+  const upcomingDays = Math.min(att.upcoming || 0, att.daysInMonth - lopDays);
+  const paidDays = att.daysInMonth - lopDays - upcomingDays;
+  const perDay = gross / att.daysInMonth;
+  const lopDeduction = Math.round(perDay * lopDays) || 0;
+  const upcomingDeduction = Math.round(perDay * upcomingDays) || 0;
 
   return {
     paidLeavesGranted, unpaidLeaves, closingLeaves,
     penalizedLates: penalized.length, latePenaltyDays,
-    lopDays, paidDays, lopDeduction
+    lopDays, paidDays, lopDeduction, upcomingDays, upcomingDeduction
   };
 };
 
