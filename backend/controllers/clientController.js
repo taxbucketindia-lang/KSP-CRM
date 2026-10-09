@@ -63,7 +63,7 @@ export const convertLeadToClient = async (req, res) => {
     const savedClient = await newClient.save();
 
     lead.status = 'Converted';
-    lead.remarks = `${lead.remarks || ''}\nConverted to Client ID: ${savedClient.clientId} on ${new Date().toLocaleDateString()}`;
+    lead.remarks = `${lead.remarks || ''}\nConverted to Client ID: ${savedClient.clientId} on ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
     await lead.save();
 
     res.status(201).json({ 

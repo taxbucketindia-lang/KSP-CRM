@@ -5,6 +5,7 @@ import RocWorkspace from '../models/RocWorkspace.js';
 import TdsWorkspace from '../models/TdsWorkspace.js';
 import AuditEngagement from '../models/AuditEngagement.js'; 
 import FssaiWorkspace from '../models/FssaiWorkspace.js';
+import Invoice from '../models/Invoice.js';
 
 // ==========================================
 // 1. Get All Clients (WITH SERVER-SIDE PAGINATION)
@@ -12,7 +13,7 @@ import FssaiWorkspace from '../models/FssaiWorkspace.js';
 export const getClients = async (req, res) => {
   try {
     // 🔴 NAYA: page, limit, month, year, aur fetchAll frontend se aayega
-    const { search, type, status, page = 1, limit = 10, month, year, fetchAll } = req.query;
+    const { search, type, status, page = 1, limit = 10, month, year, dues, fetchAll } = req.query;
     let filter = {};
 
     // Search Filtering
@@ -42,26 +43,75 @@ export const getClients = async (req, res) => {
       filter.createdAt = { $gte: startDate, $lte: endDate };
     }
 
-    let clients = [];
-    let totalPages = 1;
-    let totalCount = 0;
+    // 🔴 DUES FILTER + CARDS KA TOTAL (server par, poore filtered data par)
+    // Pehle Dues filter sirf us page ke 10 clients par lagta tha, isliye kisi page par 3 aur kisi par 0 record aate the.
+    // Yahan sirf halke fields load hote hain; poora record sirf current page ke clients ka aata hai.
+    const [lightClients, invoices] = await Promise.all([
+      ClientMaster.find(filter).select('name pan gstin openingBalance').sort({ createdAt: -1 }).lean(),
+      Invoice.find({}).select('customer.name customer.pan customer.gstin totalAmountAfterTax amountReceived paymentStatus').lean()
+    ]);
 
-    // 🔴 Agar Excel Export ke liye call kiya hai, toh saara data bhejenge bina limit ke
-    if (fetchAll === 'true') {
-      clients = await ClientMaster.find(filter).lean().sort({ createdAt: -1 });
-      totalCount = clients.length;
-    } else {
-      // 🔴 SERVER SIDE PAGINATION LOGIC
-      const skip = (parseInt(page) - 1) * parseInt(limit);
-      totalCount = await ClientMaster.countDocuments(filter);
-      totalPages = Math.ceil(totalCount / parseInt(limit));
-      
-      clients = await ClientMaster.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean();
+    // Invoice ko client se jodne ke liye index (PAN / GSTIN / naam se, jaisa frontend karta hai)
+    const byPan = new Map(), byGstin = new Map(), byName = new Map();
+    const addTo = (map, key, inv) => { if (!key) return; if (!map.has(key)) map.set(key, []); map.get(key).push(inv); };
+    invoices.forEach(inv => {
+      addTo(byPan, inv.customer?.pan?.toUpperCase(), inv);
+      addTo(byGstin, inv.customer?.gstin?.toUpperCase(), inv);
+      addTo(byName, inv.customer?.name?.toLowerCase(), inv);
+    });
+
+    const getFinance = (client) => {
+      const matched = new Map();
+      [byPan.get(client.pan?.toUpperCase()), byGstin.get(client.gstin?.toUpperCase()), byName.get(client.name?.toLowerCase())]
+        .forEach(list => (list || []).forEach(inv => matched.set(String(inv._id), inv)));
+
+      const openingBalance = Number(client.openingBalance || 0);
+      let invoiceBilled = 0, received = 0;
+      matched.forEach(inv => {
+        const total = Number(inv.totalAmountAfterTax || 0);
+        let got = Number(inv.amountReceived || 0);
+        if (inv.paymentStatus === 'Paid' && got === 0) got = total;
+        invoiceBilled += total;
+        received += got;
+      });
+
+      const invoiceDue = invoiceBilled - received;
+      const due = Math.max(0, (invoiceDue > 0 ? invoiceDue : 0) + openingBalance);
+      return { billed: invoiceBilled + openingBalance, received, due };
+    };
+
+    let matchedClients = lightClients.map(client => ({ _id: client._id, finance: getFinance(client) }));
+
+    if (dues && dues !== 'All') {
+      matchedClients = matchedClients.filter(({ finance }) => {
+        if (dues === 'Has Dues') return finance.due > 0;
+        if (dues === 'Clear') return finance.billed > 0 && finance.due <= 0;
+        if (dues === 'No Invoice') return finance.billed === 0;
+        return true;
+      });
     }
+
+    const stats = matchedClients.reduce((sum, { finance }) => ({
+      billed: sum.billed + finance.billed,
+      received: sum.received + finance.received,
+      due: sum.due + finance.due
+    }), { billed: 0, received: 0, due: 0 });
+
+    const totalCount = matchedClients.length;
+    let totalPages = 1;
+    let pageIds = matchedClients.map(c => c._id);
+
+    // 🔴 Excel Export (fetchAll) me saara data, warna sirf current page ke records
+    if (fetchAll !== 'true') {
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      totalPages = Math.ceil(totalCount / parseInt(limit));
+      pageIds = pageIds.slice(skip, skip + parseInt(limit));
+    }
+
+    const pageDocs = await ClientMaster.find({ _id: { $in: pageIds } }).lean();
+    const docById = new Map(pageDocs.map(doc => [String(doc._id), doc]));
+    const clients = pageIds.map(id => docById.get(String(id))).filter(Boolean); // wahi order (naya pehle)
+
 
     // Fetch Live Workspace Links dynamically for each client
     const enrichedClients = await Promise.all(clients.map(async (client) => {
@@ -90,7 +140,8 @@ export const getClients = async (req, res) => {
       clients: enrichedClients,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

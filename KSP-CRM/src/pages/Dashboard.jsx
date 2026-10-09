@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -37,7 +38,7 @@ const Dashboard = () => {
 
   const [punchLoading, setPunchLoading] = useState(false);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
 
   const fetchMegaDashboardData = async (silent = false) => {
     if (!silent) setLoading(true);

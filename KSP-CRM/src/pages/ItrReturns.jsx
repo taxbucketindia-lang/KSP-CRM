@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -37,6 +38,7 @@ const ItrReturns = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [serverStats, setServerStats] = useState(null); // Poore filtered data ke totals (server se)
   const itemsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
@@ -59,7 +61,7 @@ const ItrReturns = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
 
   const initialForm = {
     assesseeName: '', pan: '', dob: '', mobile: '', email: '', 
@@ -108,6 +110,7 @@ const ItrReturns = () => {
         setItrClients(itrRes.data.data);
         setTotalPages(itrRes.data.totalPages || 1);
         setTotalRecords(itrRes.data.totalCount || 0);
+        setServerStats(itrRes.data.stats || null);
       } else {
          setItrClients(itrRes.data || []);
       }
@@ -186,25 +189,21 @@ const ItrReturns = () => {
   };
 
   // Metrics (Based on current page records. For total system sum, backend aggregation needed)
+  // 🔴 Cards poore filtered data ka total dikhate hain (server se), sirf is page ke 10 records ka nahi
   const stats = useMemo(() => {
-    let totalFeeAmount = 0;
-    let totalReceivedAmount = 0;
-
-    itrClients.forEach(c => {
-      totalFeeAmount += Number(c.feeAmount || 0);
-      totalReceivedAmount += Number(c.amountReceived || 0);
-    });
-
+    const s = serverStats || {};
+    const totalFeeAmount = Number(s.totalFeeAmount || 0);
+    const totalReceivedAmount = Number(s.totalReceivedAmount || 0);
     return {
-      total: totalRecords, 
-      pending: itrClients.filter(c => (c.itrStatus || 'Documents Pending') === 'Documents Pending').length,
-      processing: itrClients.filter(c => c.itrStatus === 'Processing').length,
-      completed: itrClients.filter(c => ['Filed', 'E-Verified', 'Refund Issued'].includes(c.itrStatus)).length,
+      total: totalRecords,
+      pending: s.pending || 0,
+      processing: s.processing || 0,
+      completed: s.completed || 0,
       totalFeeAmount,
       totalReceivedAmount,
       totalPendingAmount: totalFeeAmount - totalReceivedAmount
     };
-  }, [itrClients, totalRecords]);
+  }, [serverStats, totalRecords]);
 
   // EXCEL EXPORT (Full Download)
   const handleExportExcel = async () => {
@@ -744,7 +743,7 @@ const ItrReturns = () => {
             <Calculator size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Billed</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Billed</p>
             <h3 className="text-lg font-black text-slate-800 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalFeeAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -753,7 +752,7 @@ const ItrReturns = () => {
             <CheckCircle2 size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Received</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Received</p>
             <h3 className="text-lg font-black text-emerald-600 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalReceivedAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -762,7 +761,7 @@ const ItrReturns = () => {
             <Wallet size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Dues</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Dues</p>
             <h3 className="text-lg font-black text-rose-600 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalPendingAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>

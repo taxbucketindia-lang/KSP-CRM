@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom'; 
@@ -45,7 +46,7 @@ const Clients = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
 
   const initialForm = {
     assesseeName: '', dob: '', pan: '', district: '', state: '', pincode: '',

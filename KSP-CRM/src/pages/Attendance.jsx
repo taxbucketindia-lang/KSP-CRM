@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
+import { computeMonthAttendance, computePay, computeOpeningLeaves, dateKey } from '../utils/payroll';
 import { 
   CalendarDays, Search, Building2, UserCircle, Save, 
   Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle, UserMinus, Award
@@ -24,6 +25,8 @@ const Attendance = () => {
 
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
   const [sheetData, setSheetData] = useState([]);
+  const [empRecords, setEmpRecords] = useState([]); // Selected employee ki saari attendance (sandwich rule ke liye)
+  const [allSalaries, setAllSalaries] = useState([]); // Leave carry forward ke liye saved salary months
   const [todayTeamAtt, setTodayTeamAtt] = useState([]);
 
   const checkIsLate = (inTimeStr, shiftStartStr) => {
@@ -100,6 +103,9 @@ const Attendance = () => {
         const todaysRecords = attRes.data.filter(a => a.date && a.date.startsWith(localTodayStr));
         setTodayTeamAtt(todaysRecords);
 
+        const salRes = await axios.get(`${import.meta.env.VITE_API_URL}/hr/salary`, { headers }).catch(() => ({ data: [] }));
+        setAllSalaries(salRes.data || []);
+
       } catch (error) {
         toast.error("Failed to load company data");
       }
@@ -120,6 +126,7 @@ const Attendance = () => {
         const headers = { Authorization: `Bearer ${user.token}` };
         const res = await axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance?employee=${selectedEmployee}&company=${companyFilter}`, { headers });
         
+        setEmpRecords(res.data || []);
         const [year, month] = selectedMonth.split('-');
         const daysInMonth = new Date(year, month, 0).getDate();
         const empDetails = employees.find(e => e._id === selectedEmployee);
@@ -309,40 +316,38 @@ const Attendance = () => {
 
   const activeEmployeeData = employees.find(e => e._id === selectedEmployee);
 
+  // 🔴 Summary ab wahi rules use karta hai jo Salary page karta hai (utils/payroll.js)
   const summary = useMemo(() => {
-    let totalDays = sheetData.length;
-    let present = 0, absent = 0, halfDay = 0, leave = 0, wfh = 0, holiday = 0, weeklyOff = 0;
-    let totalLateMarks = 0;
-
-    sheetData.forEach(row => {
-      if (row.status === 'Present') present++;
-      else if (row.status === 'Absent') absent++;
-      else if (row.status === 'Half Day') halfDay++;
-      else if (row.status === 'Leave') leave++;
-      else if (row.status === 'WFH') wfh++;
-      else if (row.status === 'Holiday') holiday++;
-      else if (row.status === 'Weekly Off') weeklyOff++;
-
-      if (row.isLate) totalLateMarks++;
+    const isOffboarded = ['Resigned', 'Terminated', 'Absconded'].includes(activeEmployeeData?.status);
+    const att = computeMonthAttendance({
+      monthStr: selectedMonth,
+      records: [
+        ...empRecords.filter(r => !dateKey(r.date).startsWith(selectedMonth)),
+        ...sheetData.filter(row => row.status)
+      ],
+      shiftStartTime: activeEmployeeData?.shiftStartTime || '09:30',
+      joiningDate: activeEmployeeData?.joiningDate,
+      lastWorkingDate: isOffboarded ? activeEmployeeData.lastWorkingDate : null
     });
 
-    const paidDays = present + wfh + holiday + weeklyOff + (halfDay * 0.5);
-    const lopDays = absent + leave + (halfDay * 0.5); 
-    
-    // 🔴 FETCH LIVE LEAVE BALANCE FROM EMPLOYEE
-    const dbLeaveBalance = activeEmployeeData?.paidLeaveBalance || 0;
-    
-    // 🔴 FIX: ONLY deduct explicitly marked "Leave" statuses
-    const explicitLeavesTaken = leave; 
-    const leavesUsed = Math.min(dbLeaveBalance + 1, explicitLeavesTaken); // Max they can use is what they have + 1 earned this month
-    const remainingLeaveBalance = Math.max(0, dbLeaveBalance + 1 - leavesUsed);
+    // 🔴 Is month ki total paid leaves (carry forward + 1) wahi hisaab jo Salary page use karta hai
+    const openingLeaves = activeEmployeeData ? computeOpeningLeaves({
+      emp: activeEmployeeData,
+      records: empRecords,
+      salaries: allSalaries.filter(s => (s.employee?._id || s.employee) === activeEmployeeData._id),
+      monthStr: selectedMonth
+    }) : 1;
+    const pay = computePay({ att, openingLeaves });
 
     return { 
-      totalDays, present, absent, halfDay, leave, wfh, holiday, weeklyOff, 
-      paidDays, lopDays, totalLateMarks, 
-      remainingLeaveBalance, dbLeaveBalance, leavesUsed 
+      totalDays: sheetData.length, 
+      present: att.present + att.autoHalfDay, absent: att.absent, halfDay: att.halfDay, leave: att.leave, 
+      wfh: att.wfh, holiday: att.holiday, weeklyOff: att.weeklyOff, 
+      paidDays: pay.paidDays, lopDays: pay.lopDays, totalLateMarks: att.totalLates, 
+      latePenaltyDays: pay.latePenaltyDays, sandwichLopDays: att.sandwichLopDays,
+      remainingLeaveBalance: pay.closingLeaves, openingLeaves, leavesUsed: pay.paidLeavesGranted 
     };
-  }, [sheetData, activeEmployeeData]);
+  }, [sheetData, activeEmployeeData, empRecords, allSalaries, selectedMonth]);
 
   const teamTodayStats = useMemo(() => {
     let present = [];
@@ -539,7 +544,7 @@ const Attendance = () => {
             <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200 shadow-sm border-l-4 border-l-indigo-500">
               <p className="text-[9px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1" title="Remaining / Total in Database"><Award size={10}/> Leaves Available</p>
               <h3 className="text-xl font-black text-indigo-700 mt-1">
-                 {summary.remainingLeaveBalance} <span className="text-[10px] text-indigo-500 font-medium">/ {summary.dbLeaveBalance + 1} Total</span>
+                 {summary.remainingLeaveBalance} <span className="text-[10px] text-indigo-500 font-medium">/ {summary.openingLeaves} Total</span>
               </h3>
               <div className="text-[8px] font-bold text-indigo-400 uppercase mt-0.5">Used: {summary.leavesUsed}</div>
             </div>
@@ -554,6 +559,9 @@ const Attendance = () => {
             <div className="bg-rose-50 p-3 rounded-2xl border border-rose-200 shadow-sm">
               <p className="text-[9px] font-bold uppercase tracking-wider text-rose-600">LOP Days</p>
               <h3 className="text-xl font-black text-rose-700 mt-1">{summary.lopDays}</h3>
+              {(summary.latePenaltyDays > 0 || summary.sandwichLopDays > 0) && (
+                <div className="text-[8px] font-bold text-rose-400 uppercase mt-0.5">Late: {summary.latePenaltyDays} | Sandwich: {summary.sandwichLopDays}</div>
+              )}
             </div>
           </div>
         )}

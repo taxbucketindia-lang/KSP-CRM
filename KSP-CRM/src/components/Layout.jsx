@@ -496,6 +496,7 @@
 
 
 
+import { isAdminRole } from '../utils/roles';
 import { useContext, useState, useEffect, useRef } from 'react'; 
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
@@ -528,7 +529,7 @@ const Layout = () => {
 
   useEffect(() => {
     const syncPermissions = async () => {
-      if (!user?.token || user?.role === 'Admin') return; 
+      if (!user?.token || isAdminRole(user?.role)) return; 
       
       try {
         const { data } = await axios.get(`${import.meta.env.VITE_API_URL}/users/me`, {
@@ -606,7 +607,7 @@ const Layout = () => {
       category: 'Main',
       items: [
         { path: '/', name: 'Dashboard', icon: LayoutDashboard },
-        ...(user?.role !== 'Admin' ? [
+        ...(!isAdminRole(user?.role) ? [
           { path: '/my-portal', name: 'My Portal', icon: CalendarClock },
           { path: '/todo', name: 'Success List', icon: ListTodo },
         ] : []),
@@ -617,7 +618,7 @@ const Layout = () => {
       ]
     },
     // 🔴 1. Marketing & Sales
-    ...(user?.role === 'Admin' || activePermissions.includes('MARKETING_SALES') ? [{
+    ...(isAdminRole(user?.role) || activePermissions.includes('MARKETING_SALES') ? [{
       category: 'Marketing & Sales',
       icon: Megaphone,
       items: [
@@ -630,7 +631,7 @@ const Layout = () => {
       ]
     }] : []),
     // 🔴 2. Service Team
-    ...(user?.role === 'Admin' || activePermissions.includes('SERVICE_TEAM') ? [{
+    ...(isAdminRole(user?.role) || activePermissions.includes('SERVICE_TEAM') ? [{
       category: 'Service Team',
       icon: Wrench,
       items: [
@@ -670,7 +671,7 @@ const Layout = () => {
       ]
     }] : []),
     // 🔴 3. HR & Ops
-    ...(user?.role === 'Admin' || activePermissions.includes('HR_OPS') ? [{
+    ...(isAdminRole(user?.role) || activePermissions.includes('HR_OPS') ? [{
       category: 'HR & Ops',
       icon: BriefcaseBusiness,
       items: [
@@ -684,7 +685,7 @@ const Layout = () => {
       ]
     }] : []),
     // 🔴 4. Finance
-    ...(user?.role === 'Admin' || activePermissions.includes('FINANCE') ? [{
+    ...(isAdminRole(user?.role) || activePermissions.includes('FINANCE') ? [{
       category: 'Finance',
       icon: Landmark,
       items: [
@@ -695,7 +696,7 @@ const Layout = () => {
       ]
     }] : []),
     // 🔴 5. IT Department
-    ...(user?.role === 'Admin' || activePermissions.includes('IT_DEPT') ? [{
+    ...(isAdminRole(user?.role) || activePermissions.includes('IT_DEPT') ? [{
       category: 'IT Department',
       icon: Laptop,
       items: [
@@ -706,7 +707,7 @@ const Layout = () => {
       ]
     }] : []),
     // 🔴 6. Executive
-    ...(user?.role === 'Admin' || activePermissions.includes('EXECUTIVE') ? [{
+    ...(isAdminRole(user?.role) || activePermissions.includes('EXECUTIVE') ? [{
       category: 'Executive',
       items: [
         { path: '/ceo-panel', name: 'CEO Dashboard', icon: Target }
@@ -872,7 +873,7 @@ const Layout = () => {
                 </div>
               </div>
             </div>
-            {user?.role === 'Admin' && (
+            {isAdminRole(user?.role) && (
               <button 
                 onClick={() => navigate('/settings')} 
                 className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors shrink-0"

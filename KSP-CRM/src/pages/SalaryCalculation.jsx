@@ -679,16 +679,20 @@ import {
 // IMPORT PDF LIBRARIES
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { computeMonthAttendance, computePay, computeOpeningLeaves } from '../utils/payroll';
 
 const SalaryCalculation = () => {
   const { user } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [salarySheet, setSalarySheet] = useState([]);
+  const [allSalaries, setAllSalaries] = useState([]);
 
   const today = new Date();
   const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
+
+  const sameEmployee = (record, empId) => record.employee?._id === empId || record.employee === empId;
 
   const fetchSalaryData = async (isForceRecalculate = false) => {
     if (!selectedMonth) return;
@@ -696,25 +700,26 @@ const SalaryCalculation = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
       const [year, month] = selectedMonth.split('-');
-      const daysInMonth = new Date(year, month, 0).getDate();
-      const endOfMonthDate = new Date(year, month, 0); 
+      const endOfMonthDate = new Date(year, month, 0);
 
-      // 1. Fetch Data
+      // 1. Fetch Data (saare months ki salary chahiye taaki leave carry forward sahi month se uthe)
       const [empRes, attRes, salRes] = await Promise.all([
         axios.get(`${import.meta.env.VITE_API_URL}/hr/employees`, { headers }),
         axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance`, { headers }),
-        axios.get(`${import.meta.env.VITE_API_URL}/hr/salary?monthYear=${selectedMonth}`, { headers })
+        axios.get(`${import.meta.env.VITE_API_URL}/hr/salary`, { headers })
       ]);
 
       const allEmployees = empRes.data || [];
       const allAttendance = attRes.data || [];
-      const savedSalaries = salRes.data || [];
+      const everySalary = salRes.data || [];
+      const savedSalaries = everySalary.filter(s => s.monthYear === selectedMonth);
+      setAllSalaries(everySalary);
 
       const monthAttendance = allAttendance.filter(a => a.date && a.date.startsWith(selectedMonth));
 
       // 2. Filter Employees
       const validEmps = allEmployees.filter(emp => {
-        const hasSavedSalary = savedSalaries.some(s => s.employee?._id === emp._id || s.employee === emp._id);
+        const hasSavedSalary = savedSalaries.some(s => sameEmployee(s, emp._id));
         if (hasSavedSalary) return true;
         if (emp.joiningDate && new Date(emp.joiningDate) > endOfMonthDate) return false;
         if (['Active', 'Notice Period'].includes(emp.status)) return true;
@@ -724,71 +729,27 @@ const SalaryCalculation = () => {
                 const lwdYearMonth = `${lwd.getFullYear()}-${String(lwd.getMonth() + 1).padStart(2, '0')}`;
                 if (lwdYearMonth >= selectedMonth) return true;
             } else {
-               const hasAttThisMonth = monthAttendance.some(a => a.employee?._id === emp._id || a.employee === emp._id);
+               const hasAttThisMonth = monthAttendance.some(a => sameEmployee(a, emp._id));
                if (hasAttThisMonth) return true;
             }
         }
         return false;
       });
 
-      // 3. Generate Sheet Logic with Carry Forward
+      // 3. Generate Sheet (saare rules utils/payroll.js me hain)
       const sheet = validEmps.map(emp => {
-        const empAtt = monthAttendance.filter(a => a.employee?._id === emp._id || a.employee === emp._id);
-          
-        let present = 0, absent = 0, halfDay = 0, leave = 0, wfh = 0, holiday = 0, weeklyOff = 0;
-        let totalLates = 0;
-        let autoHalfDays = 0;
+        const empAtt = allAttendance.filter(a => sameEmployee(a, emp._id));
+        const empSalaries = everySalary.filter(s => sameEmployee(s, emp._id));
+        const savedRecord = empSalaries.find(s => s.monthYear === selectedMonth);
 
-        let daysMap = {};
-        for(let d=1; d<=daysInMonth; d++) {
-           let dStr = `${year}-${month}-${String(d).padStart(2,'0')}`;
-           daysMap[dStr] = 'Not Marked';
-        }
-        
-        empAtt.forEach(row => {
-          if (row.date) daysMap[row.date.substring(0,10)] = row.status;
-
-          if (row.status === 'Present') present++;
-          else if (row.status === 'Absent') absent++;
-          else if (row.status === 'Half Day') {
-              halfDay++;
-              if (row.remarks?.includes('Auto-Half Day')) autoHalfDays++;
-          }
-          else if (row.status === 'Leave') leave++;
-          else if (row.status === 'WFH') wfh++;
-          else if (row.status === 'Holiday') holiday++;
-          else if (row.status === 'Weekly Off') weeklyOff++;
-          
-          if (row.isLate || row.remarks?.includes('Late entry') || row.remarks?.includes('Auto-Half Day')) {
-             totalLates++;
-          }
+        const calc = computeMonthAttendance({
+          monthStr: selectedMonth,
+          records: empAtt,
+          shiftStartTime: emp.shiftStartTime || '09:30',
+          joiningDate: emp.joiningDate,
+          lastWorkingDate: ['Resigned', 'Terminated', 'Absconded'].includes(emp.status) ? emp.lastWorkingDate : null
         });
 
-        // Sandwich Rule Calculation
-        let sandwichLopDays = 0;
-        for(let d=2; d<=daysInMonth-1; d++) {
-           let prevDate = `${year}-${month}-${String(d-1).padStart(2,'0')}`;
-           let currDate = `${year}-${month}-${String(d).padStart(2,'0')}`;
-           let nextDate = `${year}-${month}-${String(d+1).padStart(2,'0')}`;
-
-           let currStatus = daysMap[currDate];
-           let prevStatus = daysMap[prevDate];
-           let nextStatus = daysMap[nextDate];
-
-           if (currStatus === 'Weekly Off' || currStatus === 'Holiday') {
-               const isPrevAbsent = ['Absent', 'Leave', 'Not Marked'].includes(prevStatus);
-               const isNextAbsent = ['Absent', 'Leave', 'Not Marked'].includes(nextStatus);
-
-               if (isPrevAbsent && isNextAbsent) {
-                   sandwichLopDays++;
-               }
-           }
-        }
-
-        const rawAtt = { present, absent, halfDay, leave, wfh, holiday, weeklyOff, autoHalfDays };
-
-        const savedRecord = savedSalaries.find(s => s.employee?._id === emp._id || s.employee === emp._id);
-        
         const fullEmpDetails = {
            department: emp.department || 'N/A',
            designation: emp.designation || 'N/A',
@@ -806,23 +767,33 @@ const SalaryCalculation = () => {
            tds: emp.salaryStructure?.tds || 0
         };
 
-        // 🔴 FIX: LEAVE CARRY FORWARD & ACCRUAL CALCULATION
-        const openingBalance = Number(emp.paidLeaveBalance || 0);
-        const totalAvailableLeaves = openingBalance + 1; // +1 earned this month
-        
-        const realHalfDays = rawAtt.halfDay - rawAtt.autoHalfDays;
-        const realPresent = rawAtt.present + rawAtt.autoHalfDays;
-        const totalMarkedDays = realPresent + wfh + holiday + weeklyOff + realHalfDays + absent + leave;
-        const unmarkedDays = Math.max(0, daysInMonth - totalMarkedDays);
+        // 🔴 LEAVE CARRY FORWARD: joining wale month se har month +1, Leave / Absent par use hoti hai (utils/payroll.js)
+        // Month finalize na bhi hua ho toh bhi leave judti rahti hai, aur dobara Sync / Finalize karne par dobara nahi judti.
+        const openingLeaves = computeOpeningLeaves({ emp, records: empAtt, salaries: empSalaries, monthStr: selectedMonth });
 
-        const explicitLeavesTaken = leave; 
-        
-        const paidLeavesGranted = Math.min(totalAvailableLeaves, explicitLeavesTaken);
-        const closingLeaveBalance = totalAvailableLeaves - paidLeavesGranted;
-        const unpaidLeaves = Math.max(0, explicitLeavesTaken - paidLeavesGranted);
+        const gross = savedRecord && !isForceRecalculate ? (savedRecord.salarySnapshot?.gross || 0) : (emp.salaryStructure?.gross || 0);
+        const latesForgiven = Number(savedRecord?.adjustments?.latesForgiven || 0);
+        const pay = computePay({ att: calc, gross, openingLeaves, latesForgiven });
+
+        const liveSummary = {
+          totalDays: calc.daysInMonth,
+          paidDays: pay.paidDays,
+          lopDays: pay.lopDays,
+          totalLates: calc.totalLates,
+          penalizedLates: pay.penalizedLates,
+          latePenaltyDays: pay.latePenaltyDays,
+          sandwichLopDays: calc.sandwichLopDays,
+          openingLeaves,
+          paidLeavesGranted: pay.paidLeavesGranted,
+          unpaidLeaves: pay.unpaidLeaves,
+          closingLeaves: pay.closingLeaves
+        };
 
         if (savedRecord && !isForceRecalculate) {
           // If already saved, load the exact values that were saved at that time
+          const savedSummary = Object.fromEntries(
+            Object.entries(savedRecord.attendanceSummary || {}).filter(([, v]) => v !== undefined && v !== null)
+          );
           return {
             ...savedRecord,
             employeeId: emp._id,
@@ -830,33 +801,13 @@ const SalaryCalculation = () => {
             empCode: emp.empId,
             status: emp.status,
             lastWorkingDate: emp.lastWorkingDate,
-            empDetails: fullEmpDetails, 
-            attendanceSummary: {
-              ...savedRecord.attendanceSummary,
-              totalLates,
-              sandwichLopDays: savedRecord.attendanceSummary.sandwichLopDays || sandwichLopDays,
-              raw: rawAtt,
-              // Ensuring leave balance data flows to UI properly
-              openingLeaves: savedRecord.attendanceSummary.openingLeaves ?? totalAvailableLeaves,
-              paidLeavesGranted: savedRecord.attendanceSummary.paidLeavesGranted ?? paidLeavesGranted,
-              closingLeaves: savedRecord.attendanceSummary.closingLeaves ?? closingLeaveBalance
-            },
+            empDetails: fullEmpDetails,
+            calc,
+            attendanceSummary: { ...liveSummary, ...savedSummary },
             isSaved: true
           };
         } else {
           // New/Draft Calculation
-          const latesForgiven = savedRecord?.adjustments?.latesForgiven || 0;
-          const totalAllowedLates = 3 + parseInt(latesForgiven, 10);
-          const penalizedLates = Math.max(0, totalLates - totalAllowedLates);
-          const latePenaltyDays = penalizedLates * 0.5;
-
-          const totalLopDays = unmarkedDays + absent + unpaidLeaves + (realHalfDays * 0.5) + latePenaltyDays + sandwichLopDays;
-          const finalPaidDays = Math.max(0, daysInMonth - totalLopDays);
-
-          const gross = emp.salaryStructure?.gross || 0;
-          const perDaySalary = gross / daysInMonth;
-          const lopDeduction = Math.round(perDaySalary * totalLopDays) || 0;
-
           let existingAdj = savedRecord ? savedRecord.adjustments : { lopDeduction: 0, otherDeduction: 0, incentiveBonus: 0, reimbursement: 0, latesForgiven: 0 };
 
           return {
@@ -868,8 +819,9 @@ const SalaryCalculation = () => {
             status: emp.status,
             lastWorkingDate: emp.lastWorkingDate,
             monthYear: selectedMonth,
-            isSaved: false, 
+            isSaved: false,
             empDetails: fullEmpDetails,
+            calc,
             salarySnapshot: {
               basic: fullEmpDetails.basic,
               hra: fullEmpDetails.hra,
@@ -882,32 +834,21 @@ const SalaryCalculation = () => {
               tds: fullEmpDetails.tds,
               gross: gross
             },
-            attendanceSummary: {
-              totalDays: daysInMonth,
-              paidDays: finalPaidDays, 
-              lopDays: totalLopDays,
-              totalLates: totalLates,
-              penalizedLates: Math.max(0, totalLates - 3),
-              sandwichLopDays: sandwichLopDays,
-              openingLeaves: totalAvailableLeaves, // Passed here for UI
-              paidLeavesGranted: paidLeavesGranted, // Passed here for UI
-              closingLeaves: closingLeaveBalance, // Passed here for UI
-              raw: rawAtt 
-            },
+            attendanceSummary: liveSummary,
             adjustments: {
-              lopDeduction: lopDeduction, 
+              lopDeduction: pay.lopDeduction,
               otherDeduction: existingAdj.otherDeduction || 0,
               incentiveBonus: existingAdj.incentiveBonus || 0,
               reimbursement: existingAdj.reimbursement || 0,
               latesForgiven: latesForgiven
             },
-            netPayable: gross - lopDeduction - fullEmpDetails.pf - fullEmpDetails.esi - fullEmpDetails.pt - fullEmpDetails.tds + (existingAdj.incentiveBonus || 0) + (existingAdj.reimbursement || 0) - (existingAdj.otherDeduction || 0)
+            netPayable: gross - pay.lopDeduction - fullEmpDetails.pf - fullEmpDetails.esi - fullEmpDetails.pt - fullEmpDetails.tds + (existingAdj.incentiveBonus || 0) + (existingAdj.reimbursement || 0) - (existingAdj.otherDeduction || 0)
           };
         }
       });
 
       setSalarySheet(sheet.filter(row => row !== undefined));
-      if (isForceRecalculate) toast.success("Synced with Leave Carry-Forward Rules!");
+      if (isForceRecalculate) toast.success("Synced with latest Attendance & Leave Rules!");
     } catch (error) {
       toast.error("Failed to fetch salary details.");
     } finally {
@@ -923,7 +864,7 @@ const SalaryCalculation = () => {
   const handleAdjustmentChange = (index, field, value) => {
     const updatedSheet = [...salarySheet];
     const val = Number(value) || 0;
-    
+
     updatedSheet[index].adjustments[field] = val;
 
     const row = updatedSheet[index];
@@ -931,34 +872,18 @@ const SalaryCalculation = () => {
     const adj = row.adjustments;
     const att = row.attendanceSummary;
 
-    if (field === 'latesForgiven') {
-        const raw = att.raw || { present: 0, absent: 0, halfDay: 0, leave: 0, wfh: 0, holiday: 0, weeklyOff: 0, autoHalfDays: 0 };
-        const realHalfDays = raw.halfDay - (raw.autoHalfDays || 0);
-        const realPresent = raw.present + (raw.autoHalfDays || 0);
+    if (field === 'latesForgiven' && row.calc) {
+        // Late maaf karte hi LOP dobara calculate hota hai
+        const pay = computePay({ att: row.calc, gross: snap.gross, openingLeaves: att.openingLeaves, latesForgiven: val });
 
-        const totalMarkedDays = realPresent + raw.wfh + raw.holiday + raw.weeklyOff + realHalfDays + raw.absent + raw.leave;
-        const unmarkedDays = Math.max(0, att.totalDays - totalMarkedDays);
-
-        const explicitLeavesTaken = raw.leave; 
-        const unpaidLeaves = Math.max(0, explicitLeavesTaken - (att.paidLeavesGranted || 0));
-
-        const totalAllowedLates = 3 + val;
-        const penalizedLates = Math.max(0, (att.totalLates || 0) - totalAllowedLates);
-        const latePenaltyDays = penalizedLates * 0.5;
-
-        // Recalculate LOP
-        const totalLopDays = unmarkedDays + raw.absent + unpaidLeaves + (realHalfDays * 0.5) + latePenaltyDays + (att.sandwichLopDays || 0);
-        const finalPaidDays = Math.max(0, att.totalDays - totalLopDays);
-
-        const perDaySalary = snap.gross / att.totalDays;
-        const lopDeduction = Math.round(perDaySalary * totalLopDays) || 0;
-
-        att.paidDays = finalPaidDays;
-        att.lopDays = totalLopDays;
-        adj.lopDeduction = lopDeduction;
+        att.paidDays = pay.paidDays;
+        att.lopDays = pay.lopDays;
+        att.penalizedLates = pay.penalizedLates;
+        att.latePenaltyDays = pay.latePenaltyDays;
+        adj.lopDeduction = pay.lopDeduction;
     }
 
-    row.netPayable = 
+    row.netPayable =
       snap.gross - (snap.pf||0) - (snap.esi||0) - (snap.pt||0) - (snap.tds||0) + adj.incentiveBonus + adj.reimbursement - adj.lopDeduction - adj.otherDeduction;
 
     setSalarySheet(updatedSheet);
@@ -969,7 +894,7 @@ const SalaryCalculation = () => {
     setSaving(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      
+
       const payload = salarySheet.map(row => ({
         employee: row.employeeId || row.employee._id,
         companyName: row.companyName || 'SkyEdge Taxbucket India Private Limited',
@@ -983,16 +908,19 @@ const SalaryCalculation = () => {
 
       // 1. Save salary record
       await axios.post(`${import.meta.env.VITE_API_URL}/hr/salary`, { records: payload }, { headers });
-      
+
       // 2. UPDATE EMPLOYEE LEAVE BALANCE IN DATABASE
+      // Sirf tab jab yeh us employee ka sabse naya salary month ho (purana month dobara save karne se balance kharab na ho)
       for (const row of salarySheet) {
         const empId = row.employeeId || row.employee._id;
+        const hasLaterMonth = allSalaries.some(s => sameEmployee(s, empId) && s.monthYear > row.monthYear);
+        if (hasLaterMonth) continue;
         const closingLeaves = row.attendanceSummary?.closingLeaves || 0;
-        await axios.put(`${import.meta.env.VITE_API_URL}/hr/employees/${empId}`, { paidLeaveBalance: closingLeaves }, { headers }).catch(() => {});
+        await axios.put(`${import.meta.env.VITE_API_URL}/hr/employees/${empId}`, { paidLeaveBalance: closingLeaves, leaveBalanceAsOf: row.monthYear }, { headers }).catch(() => {});
       }
 
       toast.success("Salary Sheet Finalized & Leave Balance Updated!");
-      fetchSalaryData(); 
+      fetchSalaryData();
     } catch (error) {
       toast.error("Failed to save salary");
     } finally {
@@ -1231,7 +1159,11 @@ const SalaryCalculation = () => {
           </div>
           <div className="flex items-center gap-2 text-emerald-600 mt-1">
              <Award size={16} className="shrink-0"/>
-             <span><strong>Leave Accrual:</strong> +1 Paid Leave added every month. Unused leaves automatically carry forward.</span>
+             <span><strong>Paid Leave:</strong> +1 every month from joining. Used automatically on Leave / Absent. Unused leaves carry forward.</span>
+          </div>
+          <div className="flex items-center gap-2 text-rose-500 mt-1">
+             <AlertCircle size={16} className="shrink-0"/>
+             <span><strong>Sandwich Rule:</strong> Absent / Leave on both sides of a Sunday or Holiday = that off day is cut too. All other Sundays & Holidays are paid.</span>
           </div>
         </div>
       </div>
@@ -1331,8 +1263,11 @@ const SalaryCalculation = () => {
                         <br/>
                         <div className="flex flex-col text-[8px] leading-tight text-slate-500 mt-1">
                            <span>Total Lates: {att.totalLates} <span className="text-emerald-500 font-bold">(3 Free)</span></span>
-                           {att.penalizedLates > 0 && <span className="text-rose-500 font-bold">Late Penalty: {att.penalizedLates * 0.5}</span>}
+                           {(att.latePenaltyDays ?? att.penalizedLates * 0.5) > 0 && <span className="text-rose-500 font-bold">Late Penalty: {att.latePenaltyDays ?? att.penalizedLates * 0.5}</span>}
                            {att.sandwichLopDays > 0 && <span className="text-rose-600 font-bold">Sandwich LOP: {att.sandwichLopDays}</span>}
+                           {row.calc && (row.calc.notMarked + row.calc.notEmployed) > 0 && <span>Not Marked: {row.calc.notMarked + row.calc.notEmployed}</span>}
+                           {att.unpaidLeaves > 0 && <span>Unpaid Leave / Absent: {att.unpaidLeaves}</span>}
+                           {row.calc?.halfDay > 0 && <span>Half Days: {row.calc.halfDay}</span>}
                         </div>
                       </td>
                       

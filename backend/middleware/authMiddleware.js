@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { isCeo } from '../utils/roles.js';
 
 export const protect = async (req, res, next) => {
   let token;
@@ -19,7 +20,8 @@ export const protect = async (req, res, next) => {
 
 export const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    // CEO sabse upar hai, use har route ka access hai
+    if (!isCeo(req.user) && !roles.includes(req.user.role)) {
       return res.status(403).json({ message: `Role ${req.user.role} is not authorized to access this route` });
     }
     next();

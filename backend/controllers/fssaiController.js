@@ -1,5 +1,6 @@
 import FssaiWorkspace from '../models/FssaiWorkspace.js';
 import ClientMaster from '../models/ClientMaster.js';
+import { getListStats, num, countIf, statusIn } from '../utils/listStats.js';
 
 // @desc    Get all FSSAI workspaces (WITH PAGINATION)
 export const getFssaiWorkspaces = async (req, res) => {
@@ -34,6 +35,7 @@ export const getFssaiWorkspaces = async (req, res) => {
     let workspaces = [];
     let totalCount = 0;
     let totalPages = 1;
+    let stats = null;
 
     // Excel Export ke time pe `fetchAll` true hoga toh bina limit ke list bhejni hai
     if (fetchAll === 'true') {
@@ -72,6 +74,15 @@ export const getFssaiWorkspaces = async (req, res) => {
         }
       }
 
+      // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
+      stats = await getListStats(FssaiWorkspace, filter, {
+        active: countIf({ $not: [statusIn('fssaiStatus', ['License Expired', 'Error/Mismatch'])] }),
+        expired: countIf(statusIn('fssaiStatus', ['License Expired'])),
+        filed: countIf(statusIn('fssaiStatus', ['Filed'])),
+        totalFee: { $sum: num('feeAmount') },
+        totalReceived: { $sum: num('amountReceived') }
+      });
+
       // Pagination Logic
       const skip = (parseInt(page) - 1) * parseInt(limit);
       totalCount = await FssaiWorkspace.countDocuments(filter);
@@ -90,7 +101,8 @@ export const getFssaiWorkspaces = async (req, res) => {
       data: workspaces,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

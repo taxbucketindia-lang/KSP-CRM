@@ -14,6 +14,7 @@ const attendanceSchema = new mongoose.Schema({
     enum: ['Present', 'Absent', 'Half Day', 'Leave', 'WFH', 'Holiday', 'Weekly Off'],
     required: true
   },
+  isLate: { type: Boolean, default: false },
   remarks: { type: String }
 }, { timestamps: true });
 

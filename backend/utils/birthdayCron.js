@@ -50,5 +50,5 @@ export const startBirthdayCron = () => {
      } catch (error) {
          console.error("❌ Birthday Cron Error:", error.message);
      }
-  });
+  }, { timezone: 'Asia/Kolkata' });
 };

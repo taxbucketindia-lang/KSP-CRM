@@ -1,5 +1,6 @@
 import ItrReturn from '../models/ItrReturn.js';
 import ClientMaster from '../models/ClientMaster.js';
+import { getListStats, num, countIf, statusIn } from '../utils/listStats.js';
 
 // 🔴 HELPER FUNCTION: Smart Find, Create OR UPDATE Client
 const findOrCreateClient = async (clientData) => {
@@ -87,46 +88,23 @@ export const getItrReturns = async (req, res) => {
       ];
     }
 
-    // Other Filters
-    if (status && status !== 'ALL') {
-      if (status === 'Documents Pending') {
-         filter.$or = [{ itrStatus: status }, { itrStatus: { $exists: false } }];
-      } else {
-         filter.itrStatus = status;
-      }
-    }
-    
-    if (verification && verification !== 'ALL') {
-      if (verification === 'Pending') {
-         filter.$or = [{ verificationMethod: verification }, { verificationMethod: { $exists: false } }];
-      } else {
-         filter.verificationMethod = verification;
-      }
-    }
+    // Other Filters (khali / purane records ko default value maana jata hai)
+    const withDefault = (value, defaultValue) => (value === defaultValue ? { $in: [value, null, ''] } : value);
 
-    if (processed && processed !== 'ALL') {
-       if (processed === 'Pending') {
-          filter.$or = [{ itrProcessedStatus: processed }, { itrProcessedStatus: { $exists: false } }];
-       } else {
-          filter.itrProcessedStatus = processed;
-       }
-    }
+    if (status && status !== 'ALL') filter.itrStatus = withDefault(status, 'Documents Pending');
+    if (verification && verification !== 'ALL') filter.verificationMethod = withDefault(verification, 'Pending');
+    if (processed && processed !== 'ALL') filter.itrProcessedStatus = withDefault(processed, 'Pending');
+    if (returnType && returnType !== 'ALL') filter.returnType = withDefault(returnType, 'Original');
+    if (feeStatus && feeStatus !== 'ALL') filter.feeStatus = withDefault(feeStatus, 'Dues');
 
-    if (returnType && returnType !== 'ALL') {
-       if (returnType === 'Original') {
-           filter.$or = [{ returnType: returnType }, { returnType: { $exists: false } }];
-       } else {
-           filter.returnType = returnType;
-       }
-    }
-
-    if (feeStatus && feeStatus !== 'ALL') {
-       if (feeStatus === 'Dues') {
-           filter.$or = [{ feeStatus: feeStatus }, { feeStatus: { $exists: false } }];
-       } else {
-           filter.feeStatus = feeStatus;
-       }
-    }
+    // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
+    const stats = await getListStats(ItrReturn, filter, {
+      pending: countIf(statusIn('itrStatus', ['Documents Pending', ''], 'Documents Pending')),
+      processing: countIf(statusIn('itrStatus', ['Processing'])),
+      completed: countIf(statusIn('itrStatus', ['Filed', 'E-Verified', 'Refund Issued'])),
+      totalFeeAmount: { $sum: num('feeAmount') },
+      totalReceivedAmount: { $sum: num('amountReceived') }
+    });
 
     let itrRecords = [];
     let totalPages = 1;
@@ -159,7 +137,8 @@ export const getItrReturns = async (req, res) => {
       data: itrRecords,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats
     });
 
   } catch (error) {

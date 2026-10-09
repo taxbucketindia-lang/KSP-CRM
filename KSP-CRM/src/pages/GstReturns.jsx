@@ -1,6 +1,9 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
+import { formatIstDateTime } from '../utils/time';
+import RemarkTimeline, { parseRemarkEntries } from '../components/RemarkTimeline';
 import toast, { Toaster } from 'react-hot-toast';
 import * as XLSX from 'xlsx'; 
 import ExcelJS from 'exceljs'; 
@@ -41,6 +44,7 @@ const GstReturns = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [serverStats, setServerStats] = useState(null); // Poore filtered data ke totals (server se)
   const itemsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
@@ -66,7 +70,7 @@ const GstReturns = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
 
   const initialForm = {
     pan: '', 
@@ -85,30 +89,24 @@ const GstReturns = () => {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  const getFilteredGstRemarks = (remarksStr) => {
-    if (!remarksStr) return '';
-    const blocks = remarksStr.split(/(?=\n\n--------------------------------------\n|\n?📅 )/);
-    const filtered = blocks.filter(block => {
-      const lower = block.toLowerCase();
-      return (
-        lower.includes('(gst return note)') ||
-        lower.includes('workspace note') ||
-        lower.includes('imported client') ||
-        lower.includes('gst workspace')
-      );
-    });
-    return filtered.join('').trim();
-  };
+  // GST ke apne notes (dusre module ke remarks yahan nahi dikhte)
+  const getGstNoteEntries = (remarksStr) => parseRemarkEntries(remarksStr).filter(entry => {
+    const text = entry.searchText;
+    return (
+      text.includes('gst return note') ||
+      text.includes('gst note') ||          // Remarks popup se add hua note
+      text.includes('workspace note') ||
+      text.includes('imported client') ||
+      text.includes('gst workspace') ||
+      entry.lines.some(line => line.startsWith('💬')) // Edit form ka "Custom Remarks"
+    );
+  });
 
-  const getFilteredFeeHistory = (remarksStr) => {
-    if (!remarksStr) return [];
-    const blocks = remarksStr.split(/(?=\n\n--------------------------------------\n|\n?📅 )/);
-    const feeBlocks = blocks.filter(block => {
-      const l = block.toLowerCase();
-      return l.includes('payment received') || l.includes('fee') || l.includes('balance') || l.includes('dues');
-    });
-    return feeBlocks;
-  };
+  // Fee / payment se jude updates
+  const getFeeHistoryEntries = (remarksStr) => parseRemarkEntries(remarksStr).filter(entry => {
+    const text = entry.searchText;
+    return text.includes('payment received') || text.includes('fee') || text.includes('balance') || text.includes('dues');
+  });
 
   // 🔴 FETCH DATA WITH PAGINATION
   const fetchData = async () => {
@@ -143,12 +141,13 @@ const GstReturns = () => {
         setGstClients(gstRes.data.data);
         setTotalPages(gstRes.data.totalPages || 1);
         setTotalRecords(gstRes.data.totalCount || 0);
+        setServerStats(gstRes.data.stats || null);
       } else {
          setGstClients(gstRes.data || []);
       }
 
       // Collect states from active records for the filter dropdown
-      const states = activeGstRecords.map(c => c.state).filter(Boolean);
+      const states = Array.isArray(gstRes.data?.states) ? gstRes.data.states : activeGstRecords.map(c => c.state).filter(Boolean);
       setUniqueStates([...new Set(states)].sort());
 
       const existingGstins = activeGstRecords.filter(g => g.gstin).map(g => g.gstin.toUpperCase());
@@ -224,25 +223,21 @@ const GstReturns = () => {
   };
 
   // Calculations for current page data
+  // 🔴 Cards poore filtered data ka total dikhate hain (server se), sirf is page ke 10 records ka nahi
   const stats = useMemo(() => {
-    let totalFeeAmount = 0;
-    let totalReceivedAmount = 0;
-
-    gstClients.forEach(c => {
-      totalFeeAmount += Number(c.feeAmount || 0);
-      totalReceivedAmount += Number(c.amountReceived || 0);
-    });
-
+    const s = serverStats || {};
+    const totalFeeAmount = Number(s.totalFeeAmount || 0);
+    const totalReceivedAmount = Number(s.totalReceivedAmount || 0);
     return {
       total: totalRecords,
-      pending: gstClients.filter(c => (c.gstStatus || 'Documents Pending') === 'Documents Pending').length,
-      processing: gstClients.filter(c => c.gstStatus === 'Processing').length,
-      completed: gstClients.filter(c => c.gstStatus === 'Filed').length,
+      pending: s.pending || 0,
+      processing: s.processing || 0,
+      completed: s.completed || 0,
       totalFeeAmount,
       totalReceivedAmount,
       totalPendingAmount: totalFeeAmount - totalReceivedAmount
     };
-  }, [gstClients, totalRecords]);
+  }, [serverStats, totalRecords]);
 
   // EXCEL EXPORT (Full Download via backend request)
   const handleExportExcel = async () => {
@@ -582,7 +577,7 @@ const GstReturns = () => {
 
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const dateStamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' });
+      const dateStamp = formatIstDateTime(new Date());
       const authorInfo = user?.name ? `${user.name}` : 'User';
 
       const entry = `\n\n--------------------------------------\n📅 ${dateStamp} | 👤 ${authorInfo} (GST Note)\n💬 ${newRemarkText.trim()}`;
@@ -607,7 +602,7 @@ const GstReturns = () => {
 
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const dateStamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' });
+      const dateStamp = formatIstDateTime(new Date());
       const authorInfo = user?.name ? `${user.name}` : 'User';
       
       let finalAmountReceived = Number(formData.amountReceived || 0);
@@ -648,10 +643,13 @@ const GstReturns = () => {
               }
             }
 
-            if(changes.length > 0 || newRemark.trim()) {
+            if (changes.length > 0) {
               let auditBlock = `\n\n--------------------------------------\n📅 ${dateStamp} | 👤 ${authorInfo}\n🔄 Fee & Ledger Updates:\n - ${changes.join('\n - ')}`;
               if (newRemark.trim()) auditBlock += `\n💬 Note: ${newRemark.trim()}`;
               finalRemarks += auditBlock;
+            } else if (newRemark.trim()) {
+              // Sirf remark likha hai (fee me koi badlav nahi): ise GST Note ki tarah save karo
+              finalRemarks += `\n\n--------------------------------------\n📅 ${dateStamp} | 👤 ${authorInfo} (GST Note)\n💬 ${newRemark.trim()}`;
             }
         }
       } else {
@@ -773,7 +771,7 @@ const GstReturns = () => {
             <Calculator size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Billed Fees</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Billed Fees</p>
             <h3 className="text-lg font-black text-slate-800 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalFeeAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -782,7 +780,7 @@ const GstReturns = () => {
             <CheckCircle2 size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Received</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Received</p>
             <h3 className="text-lg font-black text-emerald-600 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalReceivedAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -791,7 +789,7 @@ const GstReturns = () => {
             <Wallet size={18} />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Page Pending Dues</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Pending Dues</p>
             <h3 className="text-lg font-black text-rose-600 flex items-center"><IndianRupee size={14} className="mr-0.5" />{stats.totalPendingAmount.toLocaleString('en-IN')}</h3>
           </div>
         </div>
@@ -904,19 +902,21 @@ const GstReturns = () => {
                   />
                 </th>
                 <th className="py-4 px-5">Client / Trade Name</th>
-                <th className='py-4 px-5'>PAN Number</th>
+                <th className="py-4 px-5">PAN Number</th>
                 <th className="py-4 px-5">GSTIN</th>
                 <th className="py-4 px-5">Taxpayer Type</th>
                 <th className="py-4 px-5">Aadhaar KYC</th>
+                <th className="py-4 px-5">Filing Status</th>
+                <th className="py-4 px-5 text-right">Fee Due</th>
                 <th className="py-4 px-5">Added By</th>
                 <th className="py-4 px-5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
-                <tr><td colSpan="8" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading GST workflow...</td></tr>
+                <tr><td colSpan="10" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading GST workflow...</td></tr>
               ) : gstClients.length === 0 ? (
-                <tr><td colSpan="8" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No active GST clients.</td></tr>
+                <tr><td colSpan="10" className="text-center py-16 text-slate-400"><AlertCircle size={36} className="mb-3 text-slate-300 mx-auto"/> No GST clients found for these filters.</td></tr>
               ) : (
                 gstClients.map((client) => {
                   const isSelected = selectedIds.includes(client._id);
@@ -947,7 +947,7 @@ const GstReturns = () => {
                         </div>
                       </td>
 
-                      <td className="py-4 px-2">
+                      <td className="py-4 px-5">
                         <div className="font-mono text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-1 rounded-md inline-block uppercase shadow-sm">
                            {client.pan || 'N/A'}
                         </div>
@@ -971,6 +971,22 @@ const GstReturns = () => {
                           {client.aadhaarKycStatus === 'Yes' ? 'Verified' : 'Pending'}
                         </div>
                       </td>
+
+                      <td className="py-4 px-5">
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border whitespace-nowrap ${getStatusStyle(client.gstStatus)}`}>
+                          {client.gstStatus || 'Documents Pending'}
+                        </span>
+                      </td>
+
+                      <td className="py-4 px-5 text-right whitespace-nowrap">
+                        {(() => {
+                          const due = Number(client.feeAmount || 0) - Number(client.amountReceived || 0);
+                          if (!Number(client.feeAmount)) return <span className="text-[11px] font-semibold text-slate-400">-</span>;
+                          return due > 0
+                            ? <span className="text-xs font-black text-rose-600">₹{due.toLocaleString('en-IN')}</span>
+                            : <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">Paid</span>;
+                        })()}
+                      </td>
                       
                       <td className="py-4 px-5">
                         <div className="flex items-center gap-2">
@@ -990,6 +1006,9 @@ const GstReturns = () => {
                           </button>
                           <button onClick={() => handleOpenRemarks(client)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white rounded-lg transition-all border border-amber-200 shadow-sm" title="Remarks & Notes">
                             <MessageSquare size={14} strokeWidth={2.5}/> Note
+                            {getGstNoteEntries(client.remarks).length > 0 && (
+                              <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 rounded-full">{getGstNoteEntries(client.remarks).length}</span>
+                            )}
                           </button>
                         </div>
                       </td>
@@ -1641,10 +1660,8 @@ const GstReturns = () => {
                      </div>
                   </div>
 
-                  <div className="text-xs text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto custom-scrollbar font-medium leading-relaxed bg-slate-50 rounded-xl p-3 border border-slate-100">
-                    {clientForHistory.remarks && getFilteredFeeHistory(clientForHistory.remarks).length > 0
-                      ? getFilteredFeeHistory(clientForHistory.remarks).join('\n\n')
-                      : <span className="text-slate-400 italic">No specific fee update logs found. Updates added during edits will appear here.</span>}
+                  <div className="max-h-60 overflow-y-auto custom-scrollbar bg-slate-50 rounded-xl p-4 border border-slate-100">
+                    <RemarkTimeline entries={getFeeHistoryEntries(clientForHistory.remarks)} emptyText="No fee update logs found. Updates added during edits will appear here." />
                   </div>
                 </div>
               )}
@@ -1674,10 +1691,12 @@ const GstReturns = () => {
             </div>
             
             <div className="overflow-y-auto p-6 space-y-4 custom-scrollbar">
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/80 text-xs text-slate-700 font-medium whitespace-pre-wrap min-h-[140px] max-h-[220px] overflow-y-auto shadow-inner leading-relaxed custom-scrollbar">
-                {clientForRemarks.remarks && getFilteredGstRemarks(clientForRemarks.remarks) 
-                  ? getFilteredGstRemarks(clientForRemarks.remarks) 
-                  : <span className="text-slate-400 italic">No GST specific notes recorded yet.</span>}
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Notes History</p>
+                <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full">{getGstNoteEntries(clientForRemarks.remarks).length} note(s) · newest first</span>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/80 min-h-[140px] max-h-[320px] overflow-y-auto custom-scrollbar">
+                <RemarkTimeline entries={getGstNoteEntries(clientForRemarks.remarks)} emptyText="No GST specific notes recorded yet." />
               </div>
 
               <form onSubmit={handleAddRemarkSubmit} className="space-y-3 pt-2">

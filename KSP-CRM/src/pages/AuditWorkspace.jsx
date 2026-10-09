@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -181,7 +182,7 @@ const AuditWorkspace = () => {
 
     const timestamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const empName = user.name || 'User';
-    const empRole = user.role === 'Admin' ? 'Admin' : 'Staff';
+    const empRole = isAdminRole(user.role) ? 'Admin' : 'Staff';
     
     const formattedNewRemark = `➤ ${empName} (${empRole}) - [${timestamp}]\n${quickRemarksModal.newRemark.trim()}`;
     const existingRemarks = quickRemarksModal.audit.remarks || '';
@@ -527,7 +528,7 @@ const AuditWorkspace = () => {
                         </button>
                         
                         {/* Only Admin can delete an audit engagement entirely */}
-                        {user?.role === 'Admin' && (
+                        {isAdminRole(user?.role) && (
                           <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Delete Audit">
                             <Trash2 size={16} strokeWidth={2.5}/>
                           </button>

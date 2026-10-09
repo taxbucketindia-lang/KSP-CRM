@@ -387,6 +387,7 @@ const DevTask = () => {
                         <p className="text-sm text-slate-600">{task.description}</p>
                         <div className="flex items-center gap-4 text-xs text-slate-500 mt-2">
                           <span className="flex items-center gap-1.5 font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded"><User size={14}/> {task.assignedTo}</span>
+                          {task.assignedByName && <span className="font-medium text-slate-500">Assigned by: <strong className="text-slate-700">{task.assignedByName}</strong></span>}
                         </div>
                       </div>
 

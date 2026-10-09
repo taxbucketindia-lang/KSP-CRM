@@ -18,7 +18,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     // 🔴 NAYA FIX: 'HR' aur 'Accountant' ko is list mein add kar diya gaya hai
-    enum: ['Admin', 'Manager', 'Sales/Executive', 'Accounts', 'Accountant', 'HR', 'Developer'],
+    enum: ['CEO', 'Admin', 'Manager', 'Sales/Executive', 'Accounts', 'Accountant', 'HR', 'Developer'],
     default: 'Sales/Executive'
   },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' } 

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
+import { isCeoRole } from '../utils/roles';
+import { computeLeaveStatus, localTodayKey } from '../utils/payroll';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   Users, Search, Plus, X, Briefcase, Mail, Phone, 
@@ -12,6 +14,8 @@ const EmployeeMaster = () => {
   const { user } = useContext(AuthContext);
   
   const [employees, setEmployees] = useState([]);
+  // 🔴 Har employee ki is month ki paid leave (total / used / remaining), attendance se calculate hoti hai
+  const [leaveData, setLeaveData] = useState({ attendance: [], salaries: [] });
   const [loading, setLoading] = useState(true);
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,6 +23,9 @@ const EmployeeMaster = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  // 🔴 NAYA: CEO / Admin jaisa login jiska HR record abhi nahi bana (save par usi login se link hoga)
+  const [linkUserId, setLinkUserId] = useState(null);
+  const [originalCarry, setOriginalCarry] = useState(0); // Edit form khulte waqt ki carry forward leaves
 
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewingEmployee, setViewingEmployee] = useState(null);
@@ -51,8 +58,14 @@ const EmployeeMaster = () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/hr/employees`, { headers });
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/hr/employees?includeLoginOnly=true`, { headers });
       setEmployees(res.data || []);
+
+      const [attRes, salRes] = await Promise.all([
+        axios.get(`${import.meta.env.VITE_API_URL}/hr/attendance`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${import.meta.env.VITE_API_URL}/hr/salary`, { headers }).catch(() => ({ data: [] }))
+      ]);
+      setLeaveData({ attendance: attRes.data || [], salaries: salRes.data || [] });
     } catch (error) {
       toast.error("Failed to load employees");
     } finally {
@@ -63,6 +76,22 @@ const EmployeeMaster = () => {
   useEffect(() => {
     fetchEmployees();
   }, [user.token]);
+
+  const leaveByEmployee = useMemo(() => {
+    const monthStr = localTodayKey().substring(0, 7);
+    const sameEmp = (record, id) => (record.employee?._id || record.employee) === id;
+    const map = {};
+    employees.forEach(emp => {
+      if (emp.isLoginOnly) return;
+      map[emp._id] = computeLeaveStatus({
+        emp,
+        records: leaveData.attendance.filter(a => sameEmp(a, emp._id)),
+        salaries: leaveData.salaries.filter(s => sameEmp(s, emp._id)),
+        monthStr
+      });
+    });
+    return map;
+  }, [employees, leaveData]);
 
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
@@ -93,8 +122,19 @@ const EmployeeMaster = () => {
       };
 
       if (editingId) {
+        // 🔴 Leave balance tabhi bhejo jab HR ne use sach me badla ho; warna attendance wala hisaab hi chalega
+        if (Number(formData.paidLeaveBalance || 0) === Number(originalCarry)) {
+          delete payload.paidLeaveBalance;
+        } else {
+          // Yeh pichle month ke end ka balance hai, is month ki +1 iske upar judegi
+          const [y, m] = localTodayKey().split('-').map(Number);
+          payload.leaveBalanceAsOf = new Date(Date.UTC(y, m - 2, 1)).toISOString().substring(0, 7);
+        }
         await axios.put(`${import.meta.env.VITE_API_URL}/hr/employees/${editingId}`, payload, { headers });
         toast.success("Employee Updated Successfully!");
+      } else if (linkUserId) {
+        await axios.post(`${import.meta.env.VITE_API_URL}/hr/employees`, { ...payload, userId: linkUserId }, { headers });
+        toast.success("HR details saved!");
       } else {
         if (formData.password.length < 6) return toast.error("Password must be at least 6 characters.");
         await axios.post(`${import.meta.env.VITE_API_URL}/hr/employees`, payload, { headers });
@@ -111,7 +151,10 @@ const EmployeeMaster = () => {
   };
 
   const handleEdit = (emp) => {
-    setEditingId(emp._id);
+    setEditingId(emp.isLoginOnly ? null : emp._id);
+    setLinkUserId(emp.isLoginOnly ? emp.userId._id : null);
+    const carryForward = leaveByEmployee[emp._id] ? leaveByEmployee[emp._id].openingLeaves - 1 : (emp.paidLeaveBalance || 0);
+    setOriginalCarry(carryForward);
     const parseDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
 
     setFormData({
@@ -129,7 +172,7 @@ const EmployeeMaster = () => {
       basic: emp.salaryStructure?.basic || 0,
       hra: emp.salaryStructure?.hra || 0,
       otherAllowance: emp.salaryStructure?.otherAllowance || 0,
-      paidLeaveBalance: emp.paidLeaveBalance || 0, // 🔴 NAYA: Load Leave Balance
+      paidLeaveBalance: carryForward, // 🔴 NAYA: Load Leave Balance
       pan: emp.pan || '', uanEsi: emp.uanEsi || '',
       bankName: emp.bankName || '', accountNo: emp.accountNo || '', ifscCode: emp.ifscCode || '', upiId: emp.upiId || '',
       status: emp.status || 'Active', remarks: emp.remarks || '',
@@ -144,6 +187,7 @@ const EmployeeMaster = () => {
 
   const openNewModal = () => {
     setEditingId(null);
+    setLinkUserId(null);
     setFormData(initialForm);
     setIsModalOpen(true);
   };
@@ -259,6 +303,8 @@ const EmployeeMaster = () => {
               ) : (
                 filteredEmployees.map((emp) => {
                   const isCurrentUser = emp.userId?._id === user._id || emp.email === user.email;
+                  // CEO account ko sirf CEO hi edit kar sakta hai
+                  const isLocked = isCeoRole(emp.userId?.role) && !isCeoRole(user?.role);
                   return (
                   <tr key={emp._id} className="hover:bg-slate-50/70 transition-colors group">
                     <td className="py-3 px-5">
@@ -271,7 +317,8 @@ const EmployeeMaster = () => {
                             {emp.name}
                             {isCurrentUser && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold uppercase">You</span>}
                           </p>
-                          <p className="text-[10px] font-mono text-slate-500 bg-slate-100 inline-block px-1 rounded mt-0.5">{emp.empId}</p>
+                          {emp.empId && <p className="text-[10px] font-mono text-slate-500 bg-slate-100 inline-block px-1 rounded mt-0.5">{emp.empId}</p>}
+                          {emp.isLoginOnly && <p className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 inline-block px-1.5 py-0.5 rounded mt-0.5 ml-1">HR details pending</p>}
                         </div>
                       </div>
                     </td>
@@ -305,8 +352,11 @@ const EmployeeMaster = () => {
                     {/* 🔴 NAYA: LEAVE BALANCE COLUMN */}
                     <td className="py-3 px-5 text-center">
                        <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg text-xs font-black shadow-sm">
-                         <Award size={12}/> {emp.paidLeaveBalance || 0} Days
+                         <Award size={12}/> {leaveByEmployee[emp._id]?.remaining ?? (emp.paidLeaveBalance || 0)} Days
                        </span>
+                         {leaveByEmployee[emp._id] && (
+                           <p className="text-[9px] font-bold text-slate-400 mt-1">Total {leaveByEmployee[emp._id].openingLeaves} | Used {leaveByEmployee[emp._id].used}</p>
+                         )}
                     </td>
 
                     <td className="py-3 px-5">
@@ -329,16 +379,20 @@ const EmployeeMaster = () => {
 
                     <td className="py-3 px-5 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => handleView(emp)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent" title="View Profile">
-                          <Eye size={16}/>
-                        </button>
-                        <button onClick={() => setResetPassModal({ open: true, employee: emp })} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors border border-transparent" title="Reset Password">
-                          <KeyRound size={16}/>
-                        </button>
-                        <button onClick={() => handleEdit(emp)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Employee">
+                        {!emp.isLoginOnly && (
+                          <>
+                            <button onClick={() => handleView(emp)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent" title="View Profile">
+                              <Eye size={16}/>
+                            </button>
+                            <button disabled={isLocked} onClick={() => setResetPassModal({ open: true, employee: emp })} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors border border-transparent disabled:opacity-30 disabled:cursor-not-allowed" title={isLocked ? "Only the CEO can manage this account" : "Reset Password"}>
+                              <KeyRound size={16}/>
+                            </button>
+                          </>
+                        )}
+                        <button disabled={isLocked} onClick={() => handleEdit(emp)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent disabled:opacity-30 disabled:cursor-not-allowed" title={isLocked ? "Only the CEO can manage this account" : emp.isLoginOnly ? "Add HR Details" : "Edit Employee"}>
                           <Edit size={16}/>
                         </button>
-                        {!isCurrentUser ? (
+                        {!isCurrentUser && !isLocked && !emp.isLoginOnly ? (
                           <button onClick={() => confirmDelete(emp)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Employee">
                             <Trash2 size={16}/>
                           </button>
@@ -421,8 +475,8 @@ const EmployeeMaster = () => {
                     </div>
                     {/* 🔴 NAYA: LEAVE BALANCE IN PROFILE VIEW */}
                     <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Carry Forward Leaves</p>
-                      <p className="text-sm font-black text-amber-700 flex items-center gap-1"><Award size={14}/> {viewingEmployee.paidLeaveBalance || 0} Days</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Paid Leaves Available (This Month)</p>
+                      <p className="text-sm font-black text-amber-700 flex items-center gap-1"><Award size={14}/> {leaveByEmployee[viewingEmployee._id]?.remaining ?? (viewingEmployee.paidLeaveBalance || 0)} Days</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Joining Date</p>
@@ -566,7 +620,7 @@ const EmployeeMaster = () => {
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
               <div>
                 <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <Users className="text-blue-600" size={20}/> {editingId ? 'Edit Employee Details' : 'Onboard New Employee'}
+                  <Users className="text-blue-600" size={20}/> {editingId ? 'Edit Employee Details' : linkUserId ? 'Add HR Details to Existing Login' : 'Onboard New Employee'}
                 </h2>
               </div>
               <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
@@ -596,13 +650,13 @@ const EmployeeMaster = () => {
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Official Email (Login ID) *</label>
                       <input type="email" required value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"/>
                     </div>
-                    {!editingId && (
+                    {!editingId && !linkUserId && (
                       <div>
                         <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><KeyRound size={12}/> Initial Password *</label>
                         <input type="text" required minLength="6" placeholder="Set temporary password" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"/>
                       </div>
                     )}
-                    <div className={editingId ? "md:col-span-2" : ""}>
+                    <div className={editingId || linkUserId ? "md:col-span-2" : ""}>
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">System Access Role *</label>
                       <select required value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-white">
                         <option value="Sales/Executive">Sales / Executive</option>
@@ -611,6 +665,7 @@ const EmployeeMaster = () => {
                         <option value="Manager">Manager</option>
                         <option value="Developer">Developer</option>
                         <option value="Admin">Admin (Full Access)</option>
+                        {isCeoRole(user?.role) && <option value="CEO">CEO (Top Level)</option>}
                       </select>
                     </div>
                   </div>
@@ -643,8 +698,9 @@ const EmployeeMaster = () => {
                     </div>
                     {/* 🔴 NAYA: OPENING LEAVE BALANCE INPUT */}
                     <div>
-                      <label className="block text-[11px] font-bold uppercase text-amber-700 mb-1 flex items-center gap-1"><Award size={12}/> Opening Leave Balance</label>
+                      <label className="block text-[11px] font-bold uppercase text-amber-700 mb-1 flex items-center gap-1"><Award size={12}/> Carry Forward Leaves</label>
                       <input type="number" min="0" value={formData.paidLeaveBalance} onChange={(e) => setFormData({...formData, paidLeaveBalance: e.target.value})} className="w-full p-2.5 border border-amber-200 bg-amber-50/50 rounded-xl text-sm font-bold text-amber-800"/>
+                      <p className="text-[9px] font-semibold text-amber-600 mt-1">Leaves carried into this month. This month's +1 is added automatically.</p>
                     </div>
 
                     <div>
@@ -793,7 +849,7 @@ const EmployeeMaster = () => {
               <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">Cancel</button>
                 <button type="submit" className="px-8 py-2.5 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-all flex items-center gap-2">
-                  <CheckCircle2 size={18} /> {editingId ? 'Update Employee' : 'Onboard Employee'}
+                  <CheckCircle2 size={18} /> {editingId ? 'Update Employee' : linkUserId ? 'Save HR Details' : 'Onboard Employee'}
                 </button>
               </div>
             </form>

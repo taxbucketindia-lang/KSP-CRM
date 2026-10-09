@@ -37,6 +37,10 @@ const employeeSchema = new mongoose.Schema({
     default: 0 
   },
 
+  // 🔴 paidLeaveBalance kis month ke END ka balance hai ("YYYY-MM"). Iske baad ke months attendance se ginte hain.
+  // Khali ho toh paidLeaveBalance joining se pehle ka opening balance maana jata hai.
+  leaveBalanceAsOf: { type: String },
+
   pan: { type: String },
   uanEsi: { type: String },
   

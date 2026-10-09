@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { IndianRupee, Plus, Receipt, Calendar, User, FileText, Loader2, Filter, Edit, Trash2 } from 'lucide-react';
 import axios from 'axios';
@@ -8,7 +9,7 @@ const OfficeExpense = () => {
   const { user } = useContext(AuthContext);
 
   // 🔴 NAYA: Check if user is Admin
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
   const [editingId, setEditingId] = useState(null); // Track which expense is being edited
 
   // Form State

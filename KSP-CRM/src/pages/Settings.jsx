@@ -366,6 +366,7 @@
 
 
 
+import { isAdminRole, isCeoRole } from '../utils/roles';
 import { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -475,8 +476,8 @@ const Settings = () => {
   };
 
   const openPermissionModal = (emp) => {
-    if (emp.role === 'Admin') {
-      return showToast("Admin already has full access to all modules.", "error");
+    if (isAdminRole(emp.role)) {
+      return showToast(`${emp.role} already has full access to all modules.`, "error");
     }
     setPermModal({ 
       open: true, 
@@ -509,7 +510,7 @@ const Settings = () => {
     }
   };
 
-  if (user?.role !== 'Admin') {
+  if (!isAdminRole(user?.role)) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center">
         <ShieldAlert size={48} className="text-rose-500 mb-4" />
@@ -574,7 +575,9 @@ const Settings = () => {
                     ) : (
                       employees.map((emp) => {
                         const isCurrentUser = emp._id === user._id;
-                        const isAdmin = emp.role === 'Admin';
+                        const isAdmin = isAdminRole(emp.role);
+                        // CEO account ko sirf CEO hi manage kar sakta hai
+                        const isLocked = isCeoRole(emp.role) && !isCeoRole(user?.role);
                         return (
                           <tr key={emp._id} className={`hover:bg-slate-50 transition-colors ${emp.status === 'Inactive' ? 'opacity-60 bg-slate-50/50' : ''}`}>
                             <td className="py-4 px-5 font-mono text-xs font-bold text-blue-600">{emp.empId || 'EMP---'}</td>
@@ -601,16 +604,16 @@ const Settings = () => {
                                 <button 
                                   onClick={() => openPermissionModal(emp)} 
                                   className={`p-2 rounded-lg transition-colors border border-transparent ${isAdmin ? 'text-slate-300 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50'}`} 
-                                  title={isAdmin ? "Admin has all permissions" : "Manage Tab Access"}
+                                  title={isAdmin ? `${emp.role} has all permissions` : "Manage Tab Access"}
                                 >
                                   <SlidersHorizontal size={16} />
                                 </button>
-                                
-                                <button onClick={() => setResetPassModal({ open: true, employee: emp })} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Reset Password">
+
+                                <button disabled={isLocked} onClick={() => setResetPassModal({ open: true, employee: emp })} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400" title={isLocked ? "Only the CEO can manage this account" : "Reset Password"}>
                                   <KeyRound size={16} />
                                 </button>
-                                
-                                {!isCurrentUser ? (
+
+                                {!isCurrentUser && !isLocked ? (
                                   <>
                                     <button onClick={() => handleToggleStatus(emp)} className={`p-2 rounded-lg transition-colors ${emp.status === 'Active' ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`} title={emp.status === 'Active' ? 'Deactivate Account' : 'Re-activate Account'}>
                                       <Power size={16} />

@@ -10,6 +10,11 @@ const generateToken = (id) => {
 export const registerUser = async (req, res) => {
   const { name, email, password, role } = req.body;
 
+  // Yeh route public hai, isliye yahan se CEO account nahi ban sakta (scripts/createCeo.js use karein)
+  if (role === 'CEO') {
+    return res.status(403).json({ message: 'CEO account cannot be created from this route' });
+  }
+
   const userExists = await User.findOne({ email });
   if (userExists) {
     return res.status(400).json({ message: 'User already exists' });

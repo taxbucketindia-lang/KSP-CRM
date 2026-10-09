@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -30,7 +31,7 @@ const BAs = () => {
   const [baToDelete, setBaToDelete] = useState(null);
 
   // 🔴 Check if current user is Admin
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
 
   const initialForm = {
     name: '',

@@ -1,3 +1,5 @@
+import { isAdminRole, isCeoRole } from '../utils/roles';
+import { formatIstDate, formatIstTime, istToday, toIstInputValue, istInputToIso } from '../utils/time';
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -48,11 +50,17 @@ const WorkManagement = () => {
   const [eodToView, setEodToView] = useState(null);
   const [taskToEdit, setTaskToEdit] = useState(null);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
+  const isCeo = isCeoRole(user?.role);
+  const myId = user?._id || user?.id;
+
+  // 🔴 HIERARCHY: CEO -> sirf Admins ko assign karega, Admin -> employees ko (CEO ko nahi)
+  const assignableEmployees = employees.filter(emp => emp._id !== myId && (isCeo ? emp.role === 'Admin' : emp.role !== 'CEO'));
+  const isMyTask = (task) => !!task && task.assignedTo?._id === myId;
 
   const initialForm = {
     taskTitle: '',
-    taskDate: new Date().toISOString().split('T')[0],
+    taskDate: istToday(),
     clientId: '', serviceCategory: 'GST', subService: '',
     taskDescription: '', assignedTo: '', priority: 'Medium',
     dueDate: '', reviewer: ''
@@ -243,6 +251,8 @@ const WorkManagement = () => {
         delete payload.clientId;
       }
       if (!payload.reviewer) delete payload.reviewer;
+      // Due time India ka hai: server ke timezone se farak na pade isliye pakka instant bhejte hain
+      payload.dueDate = istInputToIso(payload.dueDate);
 
       await axios.post(`${import.meta.env.VITE_API_URL}/tasks`, payload, { headers });
       
@@ -277,11 +287,11 @@ const WorkManagement = () => {
     e.preventDefault();
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToEdit._id}`, editForm, { headers });
+      await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToEdit._id}`, { ...editForm, dueDate: istInputToIso(editForm.dueDate) }, { headers });
       toast.success("Task updated & re-assigned successfully!");
       setIsEditModalOpen(false);
       fetchTasks();
-    } catch (error) { toast.error("Failed to update task details"); }
+    } catch (error) { toast.error(error.response?.data?.message || "Failed to update task details"); }
   };
 
   const handleDeleteTask = async (taskId) => {
@@ -291,7 +301,7 @@ const WorkManagement = () => {
         await axios.delete(`${import.meta.env.VITE_API_URL}/tasks/${taskId}`, { headers });
         toast.success("Task deleted successfully!");
         fetchTasks();
-      } catch (error) { toast.error("Failed to delete task"); }
+      } catch (error) { toast.error(error.response?.data?.message || "Failed to delete task"); }
     }
   };
 
@@ -352,7 +362,7 @@ const WorkManagement = () => {
       taskTitle: task.taskTitle || '',
       assignedTo: task.assignedTo?._id || '',
       priority: task.priority || 'Medium',
-      dueDate: task.dueDate ? new Date(task.dueDate).toISOString().slice(0,16) : '',
+      dueDate: toIstInputValue(task.dueDate),
       taskDescription: task.taskDescription || '',
       reviewer: task.reviewer?._id || ''
     });
@@ -360,6 +370,7 @@ const WorkManagement = () => {
   };
 
   const taskViewIsOverdue = isTaskOverdue(taskToView);
+  const isReviewMode = isAdmin && !isMyTask(taskToUpdate);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
@@ -461,14 +472,10 @@ const WorkManagement = () => {
                     <tr key={report._id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-4 px-5 whitespace-nowrap align-top">
                         <span className="font-bold text-slate-800 block">
-                          {new Date(report.createdAt).toLocaleDateString('en-IN', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric'
-                          })}
+                          {formatIstDate(report.createdAt, { day: 'numeric', month: 'short', year: 'numeric' })}
                         </span>
                         <div className="text-[10px] text-slate-500 mt-1">
-                          {new Date(report.createdAt).toLocaleTimeString('en-IN')}
+                          {formatIstTime(report.createdAt)}
                         </div>
                       </td>
 
@@ -694,6 +701,7 @@ const WorkManagement = () => {
                                 <div className="font-bold text-blue-600 font-mono text-xs bg-blue-50 border border-blue-100 px-2 py-0.5 rounded inline-block mb-1">
                                   {task.taskId} 
                                   {isOverdue && <span className="ml-2 text-[9px] text-rose-600 bg-rose-100 px-1 rounded-full border border-rose-200">Overdue</span>}
+                                  {isCeoRole(task.assignedBy?.role) && <span className="ml-2 text-[9px] text-amber-700 bg-amber-100 px-1 rounded-full border border-amber-200">From CEO</span>}
                                 </div>
                                 <div className="text-[11px] font-bold text-slate-800">{task.serviceCategory} <ChevronRight className="inline" size={10}/> {task.subService}</div>
                               </td>
@@ -723,7 +731,7 @@ const WorkManagement = () => {
                                     <Flag size={10} className="inline mr-1"/> {task.priority}
                                   </span>
                                   <span className={`text-[11px] font-bold flex items-center gap-1 border px-1.5 py-0.5 rounded ${isOverdue ? 'text-rose-700 bg-rose-100 border-rose-200' : 'text-rose-600 bg-rose-50 border-rose-100'}`}>
-                                    <Calendar size={12}/> Due: {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN') : 'N/A'}
+                                    <Calendar size={12}/> Due: {task.dueDate ? `${formatIstDate(task.dueDate)}, ${formatIstTime(task.dueDate)}` : 'N/A'}
                                   </span>
                                 </div>
                               </td>
@@ -876,7 +884,7 @@ const WorkManagement = () => {
                                     <span className="text-[10px] font-bold text-slate-600 truncate w-20">{task.assignedTo?.name}</span>
                                   </div>
                                   <span className={`text-[10px] font-bold flex items-center gap-1 cursor-pointer ${isOverdue ? 'text-rose-700 bg-rose-100 px-1 rounded' : 'text-rose-500'}`}>
-                                    <Calendar size={10}/> {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN', {month:'short', day:'numeric'}) : 'N/A'}
+                                    <Calendar size={10}/> {task.dueDate ? formatIstDate(task.dueDate, {month:'short', day:'numeric'}) : 'N/A'}
                                   </span>
                                 </div>
 
@@ -1012,10 +1020,8 @@ const WorkManagement = () => {
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-600 mb-1.5 flex items-center gap-1"><User size={12}/> Assign To *</label>
                   <select name="assignedTo" required value={formData.assignedTo} onChange={(e) => setFormData({...formData, assignedTo: e.target.value})} className="w-full text-sm font-bold border border-indigo-200 bg-indigo-50/50 rounded-xl p-3 focus:ring-2 focus:ring-indigo-500/20 text-indigo-800 shadow-sm">
-                    <option value="">-- Select Employee --</option>
-                    {employees
-                      .filter(emp => emp._id !== user?._id && emp._id !== user?.id) 
-                      .map(emp => (
+                    <option value="">{isCeo ? '-- Select Admin --' : '-- Select Employee --'}</option>
+                    {assignableEmployees.map(emp => (
                       <option key={emp._id} value={emp._id}>{emp.name} ({emp.role})</option>
                     ))}
                   </select>
@@ -1138,7 +1144,7 @@ const WorkManagement = () => {
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
               <div>
                 <h2 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
-                  <Activity className="text-indigo-600" size={20}/> {isAdmin ? 'Review & Comment' : 'Update Task Progress'}
+                  <Activity className="text-indigo-600" size={20}/> {isReviewMode ? 'Review & Comment' : 'Update Task Progress'}
                 </h2>
                 <p className="text-xs text-slate-500 font-mono mt-1">{taskToUpdate.taskId} • {taskToUpdate.taskTitle || taskToUpdate.clientName}</p>
               </div>
@@ -1163,7 +1169,7 @@ const WorkManagement = () => {
                   onChange={(e) => setUpdateForm({...updateForm, status: e.target.value})} 
                   className="w-full text-sm font-bold border border-blue-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500/20 shadow-sm text-slate-800"
                 >
-                  {isAdmin ? (
+                  {isReviewMode ? (
                     <>
                       <option value={taskToUpdate.currentStatus}>Keep Status: {taskToUpdate.currentStatus}</option>
                       <option value="Pending Government">🏛️ Pending Government</option>
@@ -1208,7 +1214,7 @@ const WorkManagement = () => {
                 </div>
               )}
 
-              {!isAdmin && updateForm.status === 'Pending Client' && (
+              {!isReviewMode && updateForm.status === 'Pending Client' && (
                 <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 animate-in slide-in-from-top-2 space-y-4">
                   <h4 className="text-xs font-bold text-amber-800 border-b border-amber-200/50 pb-2">Client Follow-up Required</h4>
                   <div className="grid grid-cols-2 gap-4">
@@ -1253,13 +1259,13 @@ const WorkManagement = () => {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5 flex items-center gap-2">
-                  <MessageSquare size={14} className="text-slate-400"/> {isAdmin ? "Add Manager Review/Comment" : "Add Work Log / Remark"}
+                  <MessageSquare size={14} className="text-slate-400"/> {isReviewMode ? "Add Manager Review/Comment" : "Add Work Log / Remark"}
                 </label>
                 <textarea 
                   rows="3" 
                   value={updateForm.remarks} 
                   onChange={(e) => setUpdateForm({...updateForm, remarks: e.target.value})} 
-                  placeholder={isAdmin ? "Approve remarks or detail the corrections required..." : "E.g. Called client, they will send documents by evening..."} 
+                  placeholder={isReviewMode ? "Approve remarks or detail the corrections required..." : "E.g. Called client, they will send documents by evening..."} 
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none shadow-inner" 
                 />
               </div>
@@ -1299,9 +1305,9 @@ const WorkManagement = () => {
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-indigo-600 mb-1.5 flex items-center gap-1"><User size={12}/> Re-Assign To</label>
                 <select name="assignedTo" required value={editForm.assignedTo} onChange={(e) => setEditForm({...editForm, assignedTo: e.target.value})} className="w-full text-sm font-bold border border-indigo-200 bg-indigo-50/50 rounded-xl p-3 focus:ring-2 focus:ring-indigo-500/20 text-indigo-800 shadow-sm">
-                  <option value="">-- Select Employee --</option>
+                  <option value="">{isCeo ? '-- Select Admin --' : '-- Select Employee --'}</option>
                   {employees
-                    .filter(emp => emp._id !== user?._id && emp._id !== user?.id) 
+                    .filter(emp => assignableEmployees.includes(emp) || emp._id === taskToEdit.assignedTo?._id)
                     .map(emp => (
                     <option key={emp._id} value={emp._id}>{emp.name} ({emp.role})</option>
                   ))}
@@ -1393,7 +1399,7 @@ const WorkManagement = () => {
                   <div className="flex items-center gap-2">
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getPriorityStyle(taskToView.priority)}`}>{taskToView.priority}</span>
                     <span className={`text-[11px] font-bold ${taskViewIsOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
-                      <Calendar size={12} className="inline mr-1 text-slate-400"/>{taskToView.dueDate ? new Date(taskToView.dueDate).toLocaleDateString('en-IN') : 'N/A'}
+                      <Calendar size={12} className="inline mr-1 text-slate-400"/>{taskToView.dueDate ? `${formatIstDate(taskToView.dueDate)}, ${formatIstTime(taskToView.dueDate)}` : 'N/A'}
                     </span>
                   </div>
                 </div>
@@ -1408,7 +1414,7 @@ const WorkManagement = () => {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned By</p>
-                  <p className="font-medium text-slate-600">{taskToView.assignedBy?.name || 'Admin'}</p>
+                  <p className="font-medium text-slate-600">{taskToView.assignedBy?.name || 'Admin'}{taskToView.assignedBy?.role ? ` (${taskToView.assignedBy.role})` : ''}</p>
                 </div>
               </div>
 
@@ -1455,7 +1461,7 @@ const WorkManagement = () => {
                   <BarChart3 className="text-blue-600" size={20}/> EOD Report Details
                 </h2>
                 <span className="text-[11px] text-slate-500 mt-1 block">
-                  Submitted on {new Date(eodToView.createdAt).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'})} at {new Date(eodToView.createdAt).toLocaleTimeString('en-IN')}
+                  Submitted on {formatIstDate(eodToView.createdAt, {day:'numeric', month:'short', year:'numeric'})} at {formatIstTime(eodToView.createdAt)}
                 </span>
               </div>
               <button onClick={() => setIsEodViewModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>

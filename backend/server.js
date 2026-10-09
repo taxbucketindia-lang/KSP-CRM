@@ -1,3 +1,4 @@
+import './config/timezone.js'; // sabse pehle: server ka time India (IST)
 import mongoose from 'mongoose';
 import express from 'express';
 import { startCronJobs } from './utils/cronJobs.js';
@@ -31,6 +32,8 @@ import todoRoutes from './routes/todoRoutes.js';
 import birthdayRoutes from './routes/birthdayRoutes.js';
 import devTaskRoutes from './routes/devTaskRoutes.js';
 import taskHnadoverRoutes from './routes/taskHandoverRoutes.js';
+import meetingRoutes from './routes/meetingRoutes.js';
+import { startMeetingReminderCron } from './utils/meetingReminders.js';
 
 
 dotenv.config();
@@ -70,6 +73,7 @@ app.use('/api/todos', todoRoutes);
 app.use('/api/birthdays', birthdayRoutes);
 app.use('/api/devtasks', devTaskRoutes);
 app.use('/api/taskhandover', taskHnadoverRoutes);
+app.use('/api/meetings', meetingRoutes);
 
 // ==========================================
 // CRON JOB FOR DAILY FOLLOW-UP REMINDERS
@@ -101,7 +105,7 @@ cron.schedule('0 9 * * *', async () => {
   } catch (error) {
     console.error("Error in follow-up cron job:", error);
   }
-});
+}, { timezone: 'Asia/Kolkata' });
 
 mongoose.connection.once('open', async () => {
   try {
@@ -113,6 +117,7 @@ mongoose.connection.once('open', async () => {
   startCronJobs();
   startBirthdayCron();
   startInvoiceReminderCron();
+  startMeetingReminderCron();
 });
 
 const PORT = process.env.PORT || 5000;

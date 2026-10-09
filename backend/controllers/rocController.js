@@ -2,6 +2,7 @@ import RocWorkspace from '../models/RocWorkspace.js';
 import ClientMaster from '../models/ClientMaster.js';
 import Director from '../models/Director.js';
 import RocCompliance from '../models/RocCompliance.js';
+import { getListStats, countIf, statusIn } from '../utils/listStats.js';
 
 // ==========================================
 // 1. ROC WORKSPACE MANAGEMENT
@@ -36,6 +37,13 @@ export const getRocWorkspaces = async (req, res) => {
       filter.clientType = type;
     }
 
+    // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
+    const stats = await getListStats(RocWorkspace, filter, {
+      active: countIf(statusIn('status', ['Active'], 'Active')),
+      startups: countIf({ $eq: ['$startupIndia.isRegistered', true] }),
+      strikeOff: countIf(statusIn('status', ['Strike Off']))
+    });
+
     let workspaces = [];
     let totalCount = 0;
     let totalPages = 1;
@@ -67,7 +75,8 @@ export const getRocWorkspaces = async (req, res) => {
       data: workspaces,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats
     });
 
   } catch (error) {

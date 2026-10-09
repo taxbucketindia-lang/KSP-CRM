@@ -12,7 +12,12 @@ const taskHandoverSchema = new mongoose.Schema({
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     message: String,
     date: { type: Date, default: Date.now }
-  }]
+  }],
+
+  // 🔴 HOURLY REMINDER: jab tak assignee koi update nahi deta, har ghante notification jayega
+  awaitingResponse: { type: Boolean, default: true },
+  lastReminderAt: { type: Date },
+  reminderCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
 export default mongoose.model('TaskHandover', taskHandoverSchema);

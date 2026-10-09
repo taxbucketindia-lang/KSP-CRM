@@ -22,7 +22,7 @@ export const startInvoiceReminderCron = () => {
       // 2. Sirf un Users ko dhundo jo Admin hain YA jinke paas Finance/Invoice ka access hai
       const targetUsers = await User.find({
         $or: [
-          { role: 'Admin' },
+          { role: { $in: ['Admin', 'CEO'] } },
           { permissions: { $in: ['FINANCE', 'INVOICE'] } }
         ]
       });
@@ -61,5 +61,5 @@ export const startInvoiceReminderCron = () => {
     } catch (error) {
       console.error("❌ Error in Invoice Reminder Cron:", error.message);
     }
-  });
+  }, { timezone: 'Asia/Kolkata' });
 };

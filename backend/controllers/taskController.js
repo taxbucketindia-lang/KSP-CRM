@@ -3,6 +3,7 @@ import TaskActivity from '../models/TaskActivity.js';
 import DailyWorkReport from '../models/DailyWorkReport.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
+import { isCeo, isAdminOrAbove, getAssignError } from '../utils/roles.js';
 
 // @desc    Get all Employees for Dropdown
 // @route   GET /api/tasks/employees
@@ -23,14 +24,14 @@ export const getTasks = async (req, res) => {
     let query = {};
     
     // 🔴 ROLE BASED ACCESS LOGIC
-    if (req.user.role !== 'Admin') {
-      // Agar user Admin nahi hai, toh use sirf wahi tasks dikhenge jo use assign huye hain
+    if (!isAdminOrAbove(req.user)) {
+      // Agar user CEO/Admin nahi hai, toh use sirf wahi tasks dikhenge jo use assign huye hain
       query = { assignedTo: req.user._id };
     }
 
     const tasks = await Task.find(query)
       .populate('assignedTo', 'name empId role')
-      .populate('assignedBy', 'name')
+      .populate('assignedBy', 'name role')
       .populate('reviewer', 'name')
       .sort({ createdAt: -1 });
       
@@ -58,6 +59,12 @@ export const createTask = async (req, res) => {
 
     // 🔴 Clean payload: Agar clientId nahi hai toh use empty/undefined kar dein taaki Mongoose validation fail na ho
     const taskData = { ...req.body };
+
+    // 🔴 HIERARCHY: CEO -> Admin, Admin -> Employee
+    const assignee = await User.findById(taskData.assignedTo).select('role');
+    const assignError = getAssignError(req.user, assignee);
+    if (assignError) return res.status(403).json({ message: assignError });
+
     if (!taskData.clientId) {
       delete taskData.clientId;
       delete taskData.clientName;
@@ -86,7 +93,7 @@ export const createTask = async (req, res) => {
       await Notification.create({
         recipient: savedTask.assignedTo,
         title: 'New Task Assigned',
-        message: `Admin has assigned you a new task: ${savedTask.taskTitle || savedTask.clientName || 'Internal Task'}`,
+        message: `${req.user.name} (${req.user.role}) has assigned you a new task: ${savedTask.taskTitle || savedTask.clientName || 'Internal Task'}`,
         link: '/work-management'
       });
     }
@@ -165,7 +172,7 @@ export const updateTaskStatus = async (req, res) => {
 
     // --- RULE #3 LOGIC ---
     if (currentStatus === 'Completed' && task.reviewer) {
-      if (req.user.role !== 'Admin' && req.user._id.toString() !== task.reviewer.toString()) {
+      if (!isAdminOrAbove(req.user) && req.user._id.toString() !== task.reviewer.toString()) {
         return res.status(403).json({ 
           message: "Review is mandatory! Please change status to 'Under Review'." 
         });
@@ -194,7 +201,7 @@ export const updateTaskStatus = async (req, res) => {
     }
 
     if (remarks) {
-      const dateStamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' });
+      const dateStamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit' });
       task.remarks = `${task.remarks || ''}\n\n📅 ${dateStamp} | 👤 ${req.user.name}\n💬 ${remarks}`;
     }
 
@@ -220,12 +227,19 @@ export const updateTaskStatus = async (req, res) => {
 // @route   PUT /api/tasks/:id
 export const updateTaskDetails = async (req, res) => {
   try {
-    if (req.user.role !== 'Admin') return res.status(403).json({ message: "Only Admin can edit tasks" });
+    if (!isAdminOrAbove(req.user)) return res.status(403).json({ message: "Only CEO/Admin can edit tasks" });
     
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
     const oldAssignee = task.assignedTo;
+
+    // Re-assign par bhi wahi hierarchy rule lagega
+    if (req.body.assignedTo && req.body.assignedTo.toString() !== oldAssignee?.toString()) {
+      const assignee = await User.findById(req.body.assignedTo).select('role');
+      const assignError = getAssignError(req.user, assignee);
+      if (assignError) return res.status(403).json({ message: assignError });
+    }
     
     // Update core fields
     task.taskTitle = req.body.taskTitle !== undefined ? req.body.taskTitle : task.taskTitle;
@@ -282,7 +296,7 @@ export const submitEod = async (req, res) => {
 export const getEods = async (req, res) => {
   try {
     let query = {};
-    if (req.user.role !== 'Admin') {
+    if (!isAdminOrAbove(req.user)) {
       query = { employee: req.user._id };
     }
     const eods = await DailyWorkReport.find(query)
@@ -300,11 +314,17 @@ export const getEods = async (req, res) => {
 // @route   DELETE /api/tasks/:id
 export const deleteTask = async (req, res) => {
   try {
-    if (req.user.role !== 'Admin') {
-      return res.status(403).json({ message: "Only Admin can delete tasks" });
+    if (!isAdminOrAbove(req.user)) {
+      return res.status(403).json({ message: "Only CEO/Admin can delete tasks" });
     }
-    const task = await Task.findByIdAndDelete(req.params.id);
+    const task = await Task.findById(req.params.id).populate('assignedBy', 'role');
     if (!task) return res.status(404).json({ message: "Task not found" });
+
+    // CEO ka diya hua task Admin delete nahi kar sakta
+    if (isCeo(task.assignedBy) && !isCeo(req.user)) {
+      return res.status(403).json({ message: "Only the CEO can delete a task assigned by the CEO" });
+    }
+    await task.deleteOne();
     
     res.status(200).json({ message: "Task deleted successfully" });
   } catch (error) {
@@ -322,7 +342,7 @@ export const getPaginatedTasks = async (req, res) => {
 
     let query = {};
     // Role based check
-    if (req.user.role !== 'Admin') {
+    if (!isAdminOrAbove(req.user)) {
       query.assignedTo = req.user._id;
     }
 
@@ -362,7 +382,7 @@ export const getPaginatedTasks = async (req, res) => {
 
     const tasks = await Task.find(query)
       .populate('assignedTo', 'name empId role')
-      .populate('assignedBy', 'name')
+      .populate('assignedBy', 'name role')
       .populate('reviewer', 'name')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -371,7 +391,7 @@ export const getPaginatedTasks = async (req, res) => {
     const totalCount = await Task.countDocuments(query);
 
     // Global Stats (KPI Cards ke liye)
-    let statQuery = req.user.role !== 'Admin' ? { assignedTo: req.user._id } : {};
+    let statQuery = !isAdminOrAbove(req.user) ? { assignedTo: req.user._id } : {};
     const total = await Task.countDocuments(statQuery);
     const inProgress = await Task.countDocuments({ ...statQuery, currentStatus: 'In Progress' });
     const pendingClient = await Task.countDocuments({ ...statQuery, currentStatus: 'Pending Client' });

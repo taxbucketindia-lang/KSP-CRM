@@ -6,6 +6,7 @@ import TdsChallan from '../models/TdsChallan.js';
 import TdsDeductionEntry from '../models/TdsDeductionEntry.js';
 import { TdsSection, TdsDueDate } from '../models/TdsMasterData.js';
 import ClientMaster from '../models/ClientMaster.js';
+import { getListStats, countIf } from '../utils/listStats.js';
 
 // ==========================================
 // 🔴 SECURITY: AES-256 Encryption Setup
@@ -75,6 +76,11 @@ export const getTdsWorkspaces = async (req, res) => {
        }
     }
 
+    // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
+    const stats = await getListStats(TdsWorkspace, filter, {
+      active: countIf({ $eq: ['$isActive', true] })
+    });
+
     let workspaces = [];
     let totalCount = 0;
     let totalPages = 1;
@@ -111,7 +117,8 @@ export const getTdsWorkspaces = async (req, res) => {
       data: workspaces,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats
     });
 
   } catch (error) { 

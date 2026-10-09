@@ -5,6 +5,7 @@ const remarkSchema = new mongoose.Schema({
   employeeName: { type: String, required: true },
   employeeId: { type: String, required: true },
   message: { type: String, required: true },
+  status: { type: String, default: '' }, // Is update ke waqt task ka status (CEO activity feed ke liye)
   date: { type: Date, default: Date.now }
 });
 
@@ -24,6 +25,9 @@ const devTaskSchema = new mongoose.Schema({
   description: { type: String, required: true },
   attachmentUrl: { type: String, default: '' }, // Screenshot/Image URL
   assignedTo: { type: String, required: true },
+  // 🔴 Kisne assign kiya (CEO Dashboard ke leaderboard / activity feed ke liye)
+  assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  assignedByName: { type: String, default: '' },
   startDate: { type: Date },
   dueDate: { type: Date },
   estimatedHours: { type: Number, default: 0 },

@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useLocation } from 'react-router-dom'; 
 import { Printer, FileText, Plus, Trash2, History, Save, Edit, Building2, ToggleLeft, ToggleRight, Send, Mail, MessageCircle, X, CheckCircle2, Loader2, AlertTriangle, IndianRupee, Bell, BellRing, Search, UserCircle, CalendarDays, Wallet } from 'lucide-react';
@@ -28,7 +29,7 @@ const numberToWords = (num) => {
 const InvoiceGenerator = () => {
   const { user } = useContext(AuthContext); 
   const location = useLocation(); 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
 
   const [viewMode, setViewMode] = useState('generator');
 

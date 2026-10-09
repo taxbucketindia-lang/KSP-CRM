@@ -16,7 +16,11 @@ import Notification from '../models/Notification.js';
 export const createDevTask = async (devReq, res) => {
   try {
     const { title, assignedTo } = devReq.body;
-    const newTask = await DevTask.create(devReq.body);
+    const newTask = await DevTask.create({
+      ...devReq.body,
+      assignedBy: devReq.user._id,
+      assignedByName: devReq.user.name
+    });
 
     // 🔴 Task assign hone par turant Notification bhejne ka logic
     if (assignedTo) {
@@ -28,7 +32,7 @@ export const createDevTask = async (devReq, res) => {
       if (assignedUser) {
         const userRole = assignedUser.role || 'Employee';
         // Role ke hisaab se link set kar sakte hain (jaise aapne example me kiya)
-        const targetLink = userRole === 'Admin' ? '/ceo-panel' : '/it/dev-task';
+        const targetLink = ['Admin', 'CEO'].includes(userRole) ? '/ceo-panel' : '/it/dev-task';
 
         await Notification.create({
           recipient: assignedUser._id, // Us employee ki ID
@@ -85,16 +89,18 @@ export const updateDevTask = async (req, res) => {
     }
 
     // Update Status
+    const statusChanged = status && status !== task.status;
     if (status) {
       task.status = status;
     }
 
-    // Add new remark directly if provided
-    if (remarkMessage) {
+    // Har update ek remark ke roop me save hota hai (kisne, kab, kis status par) taaki CEO feed me dikhe
+    if (remarkMessage || statusChanged) {
       task.remarks.push({
-        employeeName: employeeName || 'System',
-        employeeId: employeeId || 'Unknown',
-        message: remarkMessage
+        employeeName: req.user?.name || employeeName || 'System',
+        employeeId: String(req.user?._id || employeeId || 'Unknown'),
+        message: remarkMessage || `Status changed to ${task.status}`,
+        status: task.status
       });
     }
 
@@ -111,9 +117,25 @@ export const updateDevTask = async (req, res) => {
 // @route   PUT /api/devtasks/:id/edit
 export const updateTaskDetails = async (req, res) => {
   try {
+    const existing = await DevTask.findById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Task not found' });
+
+    const update = { ...req.body };
+    // Kisi aur ko re-assign hua toh history me likho (kisne kisko diya)
+    if (req.body.assignedTo && req.body.assignedTo !== existing.assignedTo) {
+      update.$push = {
+        remarks: {
+          employeeName: req.user.name,
+          employeeId: String(req.user._id),
+          message: `Re-assigned from ${existing.assignedTo} to ${req.body.assignedTo}`,
+          status: existing.status
+        }
+      };
+    }
+
     const updatedTask = await DevTask.findByIdAndUpdate(
       req.params.id, 
-      req.body, 
+      update, 
       { new: true, runValidators: true }
     );
     

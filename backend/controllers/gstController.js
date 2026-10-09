@@ -1,5 +1,6 @@
 import GstReturn from '../models/GstReturn.js';
 import ClientMaster from '../models/ClientMaster.js'; 
+import { getListStats, num, countIf, statusIn } from '../utils/listStats.js';
 
 // @desc    Get all GST records (WITH PAGINATION & FILTERS)
 export const getGstReturns = async (req, res) => {
@@ -57,6 +58,18 @@ export const getGstReturns = async (req, res) => {
       filter.gstr3bFilingDate = gstr3b === 'Filed' ? { $exists: true, $ne: null } : { $eq: null };
     }
 
+    // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
+    const stats = await getListStats(GstReturn, filter, {
+      pending: countIf(statusIn('gstStatus', ['Documents Pending', ''], 'Documents Pending')),
+      processing: countIf(statusIn('gstStatus', ['Processing'])),
+      completed: countIf(statusIn('gstStatus', ['Filed'])),
+      totalFeeAmount: { $sum: num('feeAmount') },
+      totalReceivedAmount: { $sum: num('amountReceived') }
+    });
+
+    // State dropdown ke liye saare states (pehle sirf current page ke 10 records se bante the)
+    const states = (await GstReturn.distinct('state')).filter(Boolean).sort();
+
     let gstRecords = [];
     let totalCount = 0;
     let totalPages = 1;
@@ -88,7 +101,9 @@ export const getGstReturns = async (req, res) => {
       data: gstRecords,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats,
+      states
     });
 
   } catch (error) { 

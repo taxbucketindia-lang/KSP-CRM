@@ -2,18 +2,44 @@ import Employee from '../models/Employee.js';
 import Attendance from '../models/Attendance.js';
 import Salary from '../models/Salary.js';
 import User from '../models/User.js';
+import { canManageUser, canGrantRole } from '../utils/roles.js';
 
 // ================= EMPLOYEES =================
 export const createEmployee = async (req, res) => {
   try {
     // 🔴 NAYA: empId ab frontend se aayega
-    const { email, password, role, empId, ...hrData } = req.body;
+    const { email, password, role, empId, userId, ...hrData } = req.body;
 
     if (!empId) return res.status(400).json({ message: 'Employee ID is required.' });
+    if (!canGrantRole(req.user, role)) return res.status(403).json({ message: 'Only the CEO can create a CEO account.' });
 
     // 1. Check if EmpID already exists
     const empExists = await Employee.findOne({ empId });
     if (empExists) return res.status(400).json({ message: 'This Employee ID is already in use.' });
+
+    // 🔴 NAYA: Existing login account (jaise CEO / Admin) ke liye sirf HR record banao, naya login nahi
+    if (userId) {
+      const loginUser = await User.findById(userId);
+      if (!loginUser) return res.status(404).json({ message: 'Portal login account not found.' });
+      if (!canManageUser(req.user, loginUser)) return res.status(403).json({ message: 'Only the CEO can manage a CEO account.' });
+      if (role && role !== loginUser.role && loginUser._id.equals(req.user._id)) {
+        return res.status(400).json({ message: 'You cannot change your own role.' });
+      }
+      if (await Employee.findOne({ userId })) return res.status(400).json({ message: 'HR details already exist for this account.' });
+      if (email && email !== loginUser.email && await User.findOne({ email })) {
+        return res.status(400).json({ message: 'A user with this email already exists.' });
+      }
+
+      const linkedEmp = await Employee.create({ ...hrData, email: email || loginUser.email, empId, userId: loginUser._id });
+
+      if (hrData.name) loginUser.name = hrData.name;
+      if (email) loginUser.email = email;
+      if (role) loginUser.role = role;
+      loginUser.empId = empId;
+      await loginUser.save();
+
+      return res.status(201).json({ message: "HR details added to existing login account!", data: linkedEmp });
+    }
 
     // 2. Check if login email already exists in system
     if (email) {
@@ -50,6 +76,31 @@ export const updateEmployee = async (req, res) => {
   try {
     // 🔴 NAYA: resetPassword variable ko nikal liya gaya hai
     const { role, email, resetPassword, ...employeeData } = req.body; 
+
+    // CEO account / CEO role ko sirf CEO hi chhed sakta hai
+    const existingEmp = await Employee.findById(req.params.id);
+    if (!existingEmp) return res.status(404).json({ message: 'Employee not found' });
+    const linkedUser = await User.findOne({
+       $or: [{ _id: existingEmp.userId }, { email: existingEmp.email }, { empId: existingEmp.empId }]
+    });
+    // Salary finalize hone par sirf leave balance update hota hai, use CEO ke record par bhi chalne do
+    const isLeaveBalanceOnly = Object.keys(req.body).every(key => ['paidLeaveBalance', 'leaveBalanceAsOf'].includes(key));
+
+    // 🔴 HR ne Employee Master se carry forward leaves badli: yeh pichle month ke end ka balance maana jayega,
+    // taaki is month ki +1 uske upar jude
+    if (employeeData.paidLeaveBalance !== undefined && employeeData.leaveBalanceAsOf === undefined
+        && Number(employeeData.paidLeaveBalance) !== Number(existingEmp.paidLeaveBalance || 0)) {
+      const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000); // server UTC par ho tab bhi India ka month
+      const prevMonth = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth() - 1, 1));
+      employeeData.leaveBalanceAsOf = prevMonth.toISOString().substring(0, 7);
+    }
+    if (!isLeaveBalanceOnly && !canManageUser(req.user, linkedUser)) return res.status(403).json({ message: 'Only the CEO can manage a CEO account.' });
+    if (role && role !== linkedUser?.role && !canGrantRole(req.user, role)) {
+      return res.status(403).json({ message: 'Only the CEO can assign the CEO role.' });
+    }
+    if (role && linkedUser && role !== linkedUser.role && linkedUser._id.equals(req.user._id)) {
+      return res.status(400).json({ message: 'You cannot change your own role.' });
+    }
 
     // 1. Employee table update
     const updatedEmp = await Employee.findByIdAndUpdate(
@@ -100,6 +151,9 @@ export const deleteEmployee = async (req, res) => {
     const emp = await Employee.findById(req.params.id);
     if (!emp) return res.status(404).json({ message: 'Employee not found' });
     
+    const linkedUser = emp.userId ? await User.findById(emp.userId) : await User.findOne({ email: emp.email });
+    if (!canManageUser(req.user, linkedUser)) return res.status(403).json({ message: 'Only the CEO can manage a CEO account.' });
+
     if (emp.userId) {
       await User.findByIdAndDelete(emp.userId);
     } else if (emp.email) {
@@ -125,8 +179,30 @@ export const getEmployees = async (req, res) => {
           path: 'userId', 
           select: 'role', 
           strictPopulate: false 
-      }); 
-      
+      });
+
+    // 🔴 NAYA: Employee Master ke liye wo CEO / Admin login bhi bhejo jinka HR record abhi bana hi nahi
+    if (req.query.includeLoginOnly === 'true') {
+      const linkedUserIds = new Set(employees.map(e => String(e.userId?._id || e.userId || '')));
+      const linkedEmails = new Set(employees.map(e => e.email?.toLowerCase()).filter(Boolean));
+
+      const topUsers = await User.find({ role: { $in: ['CEO', 'Admin'] } }).select('name email role empId status');
+      const loginOnly = topUsers
+        .filter(u => !linkedUserIds.has(String(u._id)) && !linkedEmails.has(u.email?.toLowerCase()))
+        .map(u => ({
+          _id: `login-${u._id}`,
+          isLoginOnly: true,
+          userId: { _id: u._id, role: u.role },
+          name: u.name,
+          email: u.email,
+          empId: u.empId || '',
+          role: u.role,
+          status: u.status === 'Inactive' ? 'Inactive' : 'Active'
+        }));
+
+      return res.json([...loginOnly, ...employees]);
+    }
+
     res.json(employees);
   } catch (error) {
     console.error("GET EMPLOYEES ERROR:", error.message);

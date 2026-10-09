@@ -35,6 +35,7 @@ const ClientMaster = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [serverStats, setServerStats] = useState(null); // Poore filtered data ke totals (server se)
   const itemsPerPage = 10;
 
   // Modals
@@ -73,7 +74,8 @@ const ClientMaster = () => {
         type: typeFilter,
         status: statusFilter,
         month: monthFilter,
-        year: yearFilter
+        year: yearFilter,
+        dues: duesFilter
       }).toString();
 
       const [clientsRes, invoicesRes, gstRes] = await Promise.all([
@@ -116,6 +118,7 @@ const ClientMaster = () => {
       setClients(patchedClients);
       setTotalPages(clientsRes.data.totalPages || 1);
       setTotalRecords(clientsRes.data.totalCount || 0);
+      setServerStats(clientsRes.data.stats || null);
 
       setAllInvoices(invoicesRes.data?.data || invoicesRes.data || []);
       setGstData(safeGstData);
@@ -134,7 +137,7 @@ const ClientMaster = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter]);
 
   // Reset to page 1 if any filter is changed
   useEffect(() => {
@@ -197,53 +200,14 @@ const ClientMaster = () => {
   };
 
   // 🔴 FINAL DISPLAY LIST (Sirf Dues filter handle kar raha hai, kyunki trade name patch upar ho gaya)
-  const finalDisplayClients = useMemo(() => {
-    if (duesFilter === 'All') return clients;
+  const finalDisplayClients = clients; // Dues filter server par lag chuka hai, har page par poore records aate hain
 
-    return clients.filter(client => {
-      let matchesDues = true;
-      const clientDue = getClientDueAmount(client);
-      
-      let billed = Number(client.openingBalance || 0);
-      const clientInvs = allInvoices.filter(inv => 
-        (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
-        (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
-        (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
-      );
-      clientInvs.forEach(inv => { billed += Number(inv.totalAmountAfterTax || 0); });
-
-      if (duesFilter === 'Has Dues') matchesDues = clientDue > 0;
-      if (duesFilter === 'Clear') matchesDues = billed > 0 && clientDue <= 0;
-      if (duesFilter === 'No Invoice') matchesDues = billed === 0;
-      
-      return matchesDues;
-    });
-  }, [clients, duesFilter, allInvoices]);
-
-  const globalFinances = useMemo(() => {
-    let billed = 0;
-    let received = 0;
-    let totalOpeningBalance = 0;
-    
-    clients.forEach(c => {
-      totalOpeningBalance += Number(c.openingBalance || 0);
-    });
-
-    allInvoices.forEach(inv => {
-      const invTotal = Number(inv.totalAmountAfterTax || 0);
-      let invReceived = Number(inv.amountReceived || 0);
-      if (inv.paymentStatus === 'Paid' && invReceived === 0) {
-        invReceived = invTotal;
-      }
-      billed += invTotal;
-      received += invReceived;
-    });
-    
-    const finalBilled = billed + totalOpeningBalance;
-    const finalDue = finalBilled - received;
-
-    return { billed: finalBilled, received, due: finalDue };
-  }, [allInvoices, clients]);
+  // 🔴 Cards poore filtered clients ka total dikhate hain (server se), sirf is page ke 10 clients ka nahi
+  const globalFinances = useMemo(() => ({
+    billed: Number(serverStats?.billed || 0),
+    received: Number(serverStats?.received || 0),
+    due: Number(serverStats?.due || 0)
+  }), [serverStats]);
 
   // 🔴 EXCEL EXPORT
   const handleExportExcel = async () => {
@@ -256,6 +220,7 @@ const ClientMaster = () => {
         status: statusFilter,
         month: monthFilter,
         year: yearFilter,
+        dues: duesFilter,
         fetchAll: 'true' 
       }).toString();
 

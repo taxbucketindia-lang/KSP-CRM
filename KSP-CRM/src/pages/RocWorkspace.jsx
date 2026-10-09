@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -15,7 +16,7 @@ import {
 const RocWorkspace = () => {
   const { user } = useContext(AuthContext);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
   
   const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,6 +35,7 @@ const RocWorkspace = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [serverStats, setServerStats] = useState(null); // Poore filtered data ke totals (server se)
   const itemsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
@@ -80,6 +82,7 @@ const RocWorkspace = () => {
         setWorkspaces(res.data.data);
         setTotalPages(res.data.totalPages || 1);
         setTotalRecords(res.data.totalCount || 0);
+        setServerStats(res.data.stats || null);
       } else {
         setWorkspaces(res.data || []);
       }
@@ -203,14 +206,16 @@ const RocWorkspace = () => {
     });
   };
 
+  // 🔴 Cards poore filtered data ka total dikhate hain (server se), sirf is page ke 10 records ka nahi
   const stats = useMemo(() => {
+    const s = serverStats || {};
     return {
       total: totalRecords,
-      active: workspaces.filter(w => w.status === 'Active').length,
-      startups: workspaces.filter(w => w.startupIndia?.isRegistered).length,
-      strikeOff: workspaces.filter(w => w.status === 'Strike Off').length
+      active: s.active || 0,
+      startups: s.startups || 0,
+      strikeOff: s.strikeOff || 0
     };
-  }, [workspaces, totalRecords]);
+  }, [serverStats, totalRecords]);
 
   // EXCEL EXPORT (Full Download via backend request)
   const handleExportExcel = async () => {

@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -13,7 +14,7 @@ import {
 
 const FssaiWorkspace = () => {
   const { user } = useContext(AuthContext);
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
   
   const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +33,7 @@ const FssaiWorkspace = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [serverStats, setServerStats] = useState(null); // Poore filtered data ke totals (server se)
   const itemsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
@@ -82,6 +84,7 @@ const FssaiWorkspace = () => {
         setWorkspaces(res.data.data);
         setTotalPages(res.data.totalPages || 1);
         setTotalRecords(res.data.totalCount || 0);
+        setServerStats(res.data.stats || null);
       } else {
         setWorkspaces(res.data || []);
       }
@@ -167,23 +170,20 @@ const FssaiWorkspace = () => {
     toast.success(`${type} copied!`, { icon: '📋', style: { borderRadius: '10px', background: '#333', color: '#fff' } });
   };
 
+  // 🔴 Cards poore filtered data ka total dikhate hain (server se), sirf is page ke 10 records ka nahi
   const stats = useMemo(() => {
-    let totalFee = 0;
-    let totalReceived = 0;
-    workspaces.forEach(c => {
-      totalFee += Number(c.feeAmount || 0);
-      totalReceived += Number(c.amountReceived || 0);
-    });
-
+    const s = serverStats || {};
+    const totalFee = Number(s.totalFee || 0);
+    const totalReceived = Number(s.totalReceived || 0);
     return {
       total: totalRecords,
-      active: workspaces.filter(w => !['License Expired', 'Error/Mismatch'].includes(w.fssaiStatus)).length,
-      expired: workspaces.filter(w => w.fssaiStatus === 'License Expired').length,
-      filed: workspaces.filter(w => w.fssaiStatus === 'Filed').length,
+      active: s.active || 0,
+      expired: s.expired || 0,
+      filed: s.filed || 0,
       totalFee, totalReceived,
       pendingDues: totalFee - totalReceived
     };
-  }, [workspaces, totalRecords]);
+  }, [serverStats, totalRecords]);
 
   // EXCEL EXPORT (Full Download via backend request)
   const handleExportExcel = async () => {

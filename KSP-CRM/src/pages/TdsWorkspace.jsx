@@ -1,3 +1,4 @@
+import { isAdminRole } from '../utils/roles';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -12,7 +13,7 @@ import {
 const TdsWorkspace = () => {
   const { user } = useContext(AuthContext);
 
-  const isAdmin = user?.role === 'Admin';
+  const isAdmin = isAdminRole(user?.role);
   
   // ==========================================
   // 1. WORKSPACE STATES (M1)
@@ -35,6 +36,7 @@ const TdsWorkspace = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [serverStats, setServerStats] = useState(null); // Poore filtered data ke totals (server se)
   const itemsPerPage = 10;
   
   // ==========================================
@@ -96,6 +98,7 @@ const TdsWorkspace = () => {
         setWorkspaces(res.data.data);
         setTotalPages(res.data.totalPages || 1);
         setTotalRecords(res.data.totalCount || 0);
+        setServerStats(res.data.stats || null);
       } else {
         setWorkspaces(res.data || []);
       }
@@ -374,10 +377,11 @@ const TdsWorkspace = () => {
   // Using paginated spaces directly for display
   const finalDisplayWorkspaces = workspaces;
 
+  // 🔴 Cards poore filtered data ka total dikhate hain (server se), sirf is page ke 10 records ka nahi
   const stats = useMemo(() => ({
     total: totalRecords,
-    active: workspaces.filter(w => w.isActive).length,
-  }), [workspaces, totalRecords]);
+    active: serverStats?.active || 0,
+  }), [serverStats, totalRecords]);
 
   const copyToClipboard = (text, type) => {
     if(!text) return;

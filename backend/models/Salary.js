@@ -17,7 +17,17 @@ const salarySchema = new mongoose.Schema({
   attendanceSummary: {
     totalDays: { type: Number, default: 0 },
     paidDays: { type: Number, default: 0 },
-    lopDays: { type: Number, default: 0 }
+    lopDays: { type: Number, default: 0 },
+
+    // 🔴 Late / Sandwich / Leave carry forward ka hisaab (default nahi diya taaki purane records me yeh khali rahein)
+    totalLates: { type: Number },
+    penalizedLates: { type: Number },
+    latePenaltyDays: { type: Number },
+    sandwichLopDays: { type: Number },
+    openingLeaves: { type: Number },     // pichla balance + is month ki 1 paid leave
+    paidLeavesGranted: { type: Number },
+    unpaidLeaves: { type: Number },
+    closingLeaves: { type: Number }      // agle month carry forward hone wala balance
   },
 
   // Adjustments & Deductions

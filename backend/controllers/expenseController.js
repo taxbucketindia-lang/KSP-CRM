@@ -1,4 +1,5 @@
 import Expense from '../models/Expense.js';
+import { isAdminOrAbove } from '../utils/roles.js';
 
 // @desc    Get all expenses
 // @route   GET /api/expenses
@@ -45,7 +46,7 @@ export const createExpense = async (req, res) => {
 export const updateExpense = async (req, res) => {
   try {
     // 1. Check if user is Admin
-    if (req.user.role !== 'Admin') {
+    if (!isAdminOrAbove(req.user)) {
       return res.status(403).json({ success: false, message: "Security Alert: Only Admins can edit expenses." });
     }
 
@@ -68,7 +69,7 @@ export const updateExpense = async (req, res) => {
 export const deleteExpense = async (req, res) => {
   try {
     // 1. Check if user is Admin
-    if (req.user.role !== 'Admin') {
+    if (!isAdminOrAbove(req.user)) {
       return res.status(403).json({ success: false, message: "Security Alert: Only Admins can delete expenses." });
     }
 
