@@ -6,6 +6,8 @@ import TdsWorkspace from '../models/TdsWorkspace.js';
 import AuditEngagement from '../models/AuditEngagement.js'; 
 import FssaiWorkspace from '../models/FssaiWorkspace.js';
 import Invoice from '../models/Invoice.js';
+import { BusinessHealthMonthly, BusinessHealthSettings } from '../models/BusinessHealth.js';
+import { calculateBusinessHealth, previousMonth } from '../utils/businessHealthEngine.js';
 
 // ==========================================
 // 1. Get All Clients (WITH SERVER-SIDE PAGINATION)
@@ -121,6 +123,7 @@ export const getClients = async (req, res) => {
       const hasAudit = await AuditEngagement.exists({ client_id: client._id, is_active: true });
       const hasTds = await TdsWorkspace.exists({ pan: client.pan }); 
       const hasFssai = await FssaiWorkspace.exists({ clientMasterId: client._id });
+      const hasCfo = await BusinessHealthMonthly.exists({ client: client._id });
 
       return {
         ...client,
@@ -131,6 +134,7 @@ export const getClients = async (req, res) => {
           audit: !!hasAudit, 
           tds: !!hasTds,  
           fssai: !!hasFssai,
+          cfo: !!hasCfo,
         }
       };
     }));
@@ -223,6 +227,45 @@ export const deleteClient = async (req, res) => {
     if (!client) return res.status(404).json({ message: "Client not found." });
     
     res.status(200).json({ message: "Client deleted permanently." });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+// ==========================================
+// 5. Ek client ke saare Connected Workspaces ki poori detail (360° profile ke boxes par click ke liye)
+// ==========================================
+// Portal ke passwords yahan se kabhi nahi bheje jate.
+export const getClientWorkspaces = async (req, res) => {
+  try {
+    const client = await ClientMaster.findById(req.params.id).select('pan name').lean();
+    if (!client) return res.status(404).json({ message: 'Client not found' });
+
+    const [itr, gst, roc, tds, audit, fssai, cfoRecords, cfoSettings] = await Promise.all([
+      ItrReturn.find({ clientMasterId: client._id }).select('-portalPassword').populate('createdBy', 'name').sort({ filingDate: -1, createdAt: -1 }).lean(),
+      GstReturn.find({ clientMasterId: client._id }).select('-portalPassword -portalUsername').populate('createdBy', 'name').sort({ createdAt: -1 }).lean(),
+      RocWorkspace.find({ clientMasterId: client._id }).populate('relationshipManager', 'name').sort({ createdAt: -1 }).lean(),
+      TdsWorkspace.find({ pan: client.pan }).select('-tracesLogin -efilingLogin').sort({ createdAt: -1 }).lean(),
+      AuditEngagement.find({ client_id: client._id, is_active: true }).populate('assigned_executive_id', 'name').sort({ createdAt: -1 }).lean(),
+      FssaiWorkspace.find({ clientMasterId: client._id }).select('-foscosPassword').populate('createdBy', 'name').sort({ createdAt: -1 }).lean(),
+      BusinessHealthMonthly.find({ client: client._id }).sort({ month: 1 }).lean(),
+      BusinessHealthSettings.findOne({ key: 'default' }).lean()
+    ]);
+
+    // CFO / Business Health: har month ka score
+    const byMonth = new Map(cfoRecords.map(r => [r.month, r]));
+    const cfo = cfoRecords.map(record => {
+      const result = calculateBusinessHealth(record, byMonth.get(previousMonth(record.month)), cfoSettings);
+      return {
+        _id: record._id, month: record.month, status: record.status,
+        revenue: record.revenue, pat: record.pat,
+        overallScore: result.overallScore, overallStatus: result.overallStatus,
+        redCount: result.kpis.filter(k => k.status === 'RED').length,
+        yellowCount: result.kpis.filter(k => k.status === 'YELLOW').length,
+        updatedAt: record.updatedAt
+      };
+    }).reverse();
+
+    res.json({ itr, gst, roc, tds, audit, fssai, cfo });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

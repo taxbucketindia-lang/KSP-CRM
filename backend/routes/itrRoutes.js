@@ -10,17 +10,21 @@ import {
 } from '../controllers/itrController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
+import { requirePermission } from '../utils/permissions.js';
+
+// 🔴 Data delete sirf wahi kar sakta hai jiske paas "Delete Records" ka right hai (CEO, Admin, ya jise Admin ne diya)
+const canDelete = requirePermission('DELETE_RECORDS');
+
 const router = express.Router();
 
 // 🔴 FIX: Naya Import route add kiya gaya (Ye sabse upar hona chahiye)
 router.route('/import').post(protect, importItrReturns);
 
-
-router.route('/bulk-delete').post(protect, bulkDeleteItrReturns);
+router.route('/bulk-delete').post(protect, canDelete, bulkDeleteItrReturns);
 router.route('/').get(protect, getItrReturns).post(protect, createItrReturn);
 
 router.route('/:id')
   .put(protect, updateItrReturn)
-  .delete(protect, deleteItrReturn);
+  .delete(protect, canDelete, deleteItrReturn);
 
 export default router;

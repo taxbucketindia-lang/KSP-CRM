@@ -664,7 +664,8 @@ const EmployeeMaster = () => {
                         <option value="Accountant">Accountant</option>
                         <option value="Manager">Manager</option>
                         <option value="Developer">Developer</option>
-                        <option value="Admin">Admin (Full Access)</option>
+                        {/* Admin / CEO sirf CEO bana sakta hai. Jo pehle se Admin hai uska option dikhta rahe taaki form kharab na ho */}
+                        {(isCeoRole(user?.role) || formData.role === 'Admin') && <option value="Admin">Admin (rights given by CEO)</option>}
                         {isCeoRole(user?.role) && <option value="CEO">CEO (Top Level)</option>}
                       </select>
                     </div>

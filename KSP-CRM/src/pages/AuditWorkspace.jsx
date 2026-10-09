@@ -8,9 +8,12 @@ import {
   RefreshCw, Eye, Building2, Calendar, FileDigit, UploadCloud, Users, 
   Settings, CheckSquare, Pencil, Trash2, Loader2, Link, MessageSquare 
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const AuditWorkspace = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   
   // STATES
   const [audits, setAudits] = useState([]);
@@ -528,7 +531,7 @@ const AuditWorkspace = () => {
                         </button>
                         
                         {/* Only Admin can delete an audit engagement entirely */}
-                        {isAdminRole(user?.role) && (
+                        {canDelete && (
                           <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Delete Audit">
                             <Trash2 size={16} strokeWidth={2.5}/>
                           </button>
@@ -836,7 +839,7 @@ const AuditWorkspace = () => {
                             <td className="p-3">{link.appointment_date ? new Date(link.appointment_date).toLocaleDateString() : 'N/A'}</td>
                             <td className="p-3 text-right">
                               <button onClick={() => openEditAuditor(link)} className="p-1.5 text-slate-400 hover:text-blue-600 mr-1"><Pencil size={14}/></button>
-                              <button onClick={() => deleteChildRecord('links', link._id, 'auditors')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>
+                              {canDelete && <button onClick={() => deleteChildRecord('links', link._id, 'auditors')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>}
                             </td>
                           </tr>
                         ))}
@@ -867,7 +870,7 @@ const AuditWorkspace = () => {
                             <td className="p-3"><span className={`px-2 py-0.5 rounded font-bold uppercase text-[9px] ${udin.udin_status === 'Generated' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{udin.udin_status}</span></td>
                             <td className="p-3 text-right">
                               <button onClick={() => openEditUdin(udin)} className="p-1.5 text-slate-400 hover:text-blue-600 mr-1"><Pencil size={14}/></button>
-                              <button onClick={() => deleteChildRecord('udins', udin._id, 'udins')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>
+                              {canDelete && <button onClick={() => deleteChildRecord('udins', udin._id, 'udins')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>}
                             </td>
                           </tr>
                         ))}
@@ -898,7 +901,7 @@ const AuditWorkspace = () => {
                             <td className="p-3 font-mono">{filing.acknowledgement_srn_no || 'N/A'}</td>
                             <td className="p-3 text-right">
                               <button onClick={() => openEditFiling(filing)} className="p-1.5 text-slate-400 hover:text-blue-600 mr-1"><Pencil size={14}/></button>
-                              <button onClick={() => deleteChildRecord('filings', filing._id, 'filings')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>
+                              {canDelete && <button onClick={() => deleteChildRecord('filings', filing._id, 'filings')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>}
                             </td>
                           </tr>
                         ))}
@@ -928,7 +931,7 @@ const AuditWorkspace = () => {
                             <td className="p-3">{item.received_date ? new Date(item.received_date).toLocaleDateString() : 'N/A'}</td>
                             <td className="p-3 text-right">
                               <button onClick={() => openEditChecklist(item)} className="p-1.5 text-slate-400 hover:text-blue-600 mr-1"><Pencil size={14}/></button>
-                              <button onClick={() => deleteChildRecord('checklists', item._id, 'checklists')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>
+                              {canDelete && <button onClick={() => deleteChildRecord('checklists', item._id, 'checklists')} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button>}
                             </td>
                           </tr>
                         ))}

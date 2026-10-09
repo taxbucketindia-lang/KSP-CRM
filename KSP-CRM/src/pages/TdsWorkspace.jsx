@@ -9,9 +9,12 @@ import {
   IndianRupee, Hash, Loader2, Users, Receipt, Download, MapPin, Upload, Trash2,
   ArrowRight, FileDigit, Pencil, Copy
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const TdsWorkspace = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
 
   const isAdmin = isAdminRole(user?.role);
   
@@ -506,7 +509,7 @@ const TdsWorkspace = () => {
                           <button onClick={() => handleEditWorkspace(ws)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Deductor">
                             <Pencil size={16}/>
                           </button>
-                          {isAdmin && (
+                          {canDelete && (
                             <button onClick={() => handleDeleteWorkspace(ws._id, ws.companyName)} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Deductor">
                               <Trash2 size={16}/>
                             </button>
@@ -733,7 +736,7 @@ const TdsWorkspace = () => {
                         <div key={ret._id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all group flex flex-col justify-between relative">
                           
                           {/* 🔴 DELETE BUTTON FOR RETURN */}
-                          {isAdmin && (
+                          {canDelete && (
                             <button 
                               onClick={async () => {
                                 if(window.confirm('Are you sure you want to delete this return layer?')) {

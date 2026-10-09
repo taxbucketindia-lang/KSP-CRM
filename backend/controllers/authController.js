@@ -1,6 +1,7 @@
 // backend/controllers/authController.js
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
+import { getEffectivePermissions } from '../utils/permissions.js';
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
@@ -10,9 +11,10 @@ const generateToken = (id) => {
 export const registerUser = async (req, res) => {
   const { name, email, password, role } = req.body;
 
-  // Yeh route public hai, isliye yahan se CEO account nahi ban sakta (scripts/createCeo.js use karein)
-  if (role === 'CEO') {
-    return res.status(403).json({ message: 'CEO account cannot be created from this route' });
+  // Yeh route public hai, isliye yahan se CEO / Admin account nahi ban sakta
+  // (CEO: scripts/createCeo.js, Admin: sirf CEO Settings se banata hai)
+  if (role === 'CEO' || role === 'Admin') {
+    return res.status(403).json({ message: 'CEO / Admin account cannot be created from this route' });
   }
 
   const userExists = await User.findOne({ email });
@@ -51,7 +53,7 @@ export const loginUser = async (req, res) => {
       email: user.email,
       role: user.role,
       token: generateToken(user._id),
-      permissions: user.permissions || [],
+      permissions: getEffectivePermissions(user), // asli rights (tab + khaas kaam)
     });
   } else {
     res.status(401).json({ message: 'Invalid email or password' });

@@ -1,7 +1,7 @@
 import express from 'express';
 import { 
-  getEmployees, createEmployee, updateEmployeeStatus, 
-  resetEmployeePassword, deleteEmployee, updateEmployeePermissions,
+  getEmployees, getManageableUsers, createEmployee, updateEmployeeStatus, 
+  resetEmployeePassword, deleteEmployee, updateEmployeePermissions, updateUserRole,
   getMe
 } from '../controllers/userController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
@@ -12,7 +12,7 @@ router.route('/me').get(protect, getMe);
 
 // --- EMPLOYEE MANAGEMENT ROUTES (Admin Only) ---
 // Fetch all employees
-router.route('/employees').get(protect, authorize('Admin'), getEmployees);
+router.route('/employees').get(protect, authorize('Admin'), getManageableUsers);
 
 router.route('/all-developers').get(protect, getEmployees);
 router.route('/empls').get(protect, getEmployees);
@@ -29,6 +29,9 @@ router.route('/:id/reset-password').put(protect, authorize('Admin'), resetEmploy
 
 // 🔴 NAYA ROUTE: Update employee access permissions
 router.route('/:id/permissions').put(protect, authorize('Admin'), updateEmployeePermissions);
+
+// Role badalna (Admin banana / hatana sirf CEO; controller me check hai)
+router.route('/:id/role').put(protect, authorize('Admin'), updateUserRole);
 
 // Delete employee
 router.route('/:id').delete(protect, authorize('Admin'), deleteEmployee);

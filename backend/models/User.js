@@ -13,7 +13,13 @@ const userSchema = new mongoose.Schema({
   },
   
   // 🔴 Isko Array banaya gaya hai taaki multiple module access store ho sakein
-  permissions: [{ type: String }], 
+  permissions: [{ type: String }],
+
+  // 🔴 ACCESS RIGHTS (dekho utils/permissions.js)
+  // Admin ke liye: false = sirf chuninda rights (CEO ne set kiye), warna poora access
+  fullAccess: { type: Boolean },
+  // 2 = rights naye tab-wise system se set ho chuke hain (purane group wale rights ab nahi maane jate)
+  permsVersion: { type: Number },
   
   role: {
     type: String,

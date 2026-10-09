@@ -23,7 +23,7 @@ export const startInvoiceReminderCron = () => {
       const targetUsers = await User.find({
         $or: [
           { role: { $in: ['Admin', 'CEO'] } },
-          { permissions: { $in: ['FINANCE', 'INVOICE'] } }
+          { permissions: { $in: ['FINANCE', 'INVOICE', 'INVOICES'] } }
         ]
       });
 
@@ -47,8 +47,11 @@ export const startInvoiceReminderCron = () => {
 
         // Har Target User (Admin + Finance) ko notification push karo
         for (const user of targetUsers) {
+          await Notification.deleteMany({ recipient: user._id, kind: 'invoice-reminder', refId: String(invoice._id) });
           await Notification.create({
             recipient: user._id,
+            kind: 'invoice-reminder',
+            refId: String(invoice._id),
             title: `💰 Payment Pending: ${clientName}`,
             message: `Invoice ${invoice.invoiceNo} has a pending balance of ₹${due.toLocaleString('en-IN')}. Please follow up.`,
             link: '/invoice-generator' // Click karne par Invoice page khulega

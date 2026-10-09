@@ -11,9 +11,12 @@ import {
   Trash2, Eye, Edit, ShieldCheck, CalendarDays, IndianRupee, Key, Download, Upload, Activity ,
   CheckSquare, Users, Phone, Mail, MapPin, FileText, ClipboardList, Send, MessageSquare, Loader2, Copy, ExternalLink
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const FssaiWorkspace = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   const isAdmin = isAdminRole(user?.role);
   
   const [workspaces, setWorkspaces] = useState([]);
@@ -632,7 +635,7 @@ const FssaiWorkspace = () => {
               <button onClick={handleExportExcel} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm">
                 <Download size={14} strokeWidth={2.5}/> Export Selected
               </button>
-              {isAdmin && (
+              {canDelete && (
                 <button onClick={handleBulkDelete} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-lg transition-colors shadow-sm">
                   <Trash2 size={14} strokeWidth={2.5}/> Delete Selected
                 </button>
@@ -1153,7 +1156,7 @@ const FssaiWorkspace = () => {
             
             <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
               <div>
-                 {isAdmin ? (
+                 {canDelete ? (
                    <button 
                      onClick={() => { setIsViewModalOpen(false); setDeleteModal({ open: true, client: viewingData }); }} 
                      className="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-transparent hover:border-rose-200 flex items-center gap-1.5"
@@ -1236,7 +1239,7 @@ const FssaiWorkspace = () => {
       )}
 
       {/* DELETE CONFIRMATION MODAL */}
-      {deleteModal.open && isAdmin && (
+      {deleteModal.open && canDelete && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 p-8 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
             <div className="mx-auto h-16 w-16 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100 mb-2">

@@ -1909,6 +1909,9 @@ if (rawInTime) {
             <p className="text-sm text-slate-300 mt-1 font-medium">
               {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Live overview of TaxBucket operations and financials.
             </p>
+            <button onClick={() => navigate('/business-health')} className="mt-4 inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors">
+              <Activity size={14} className="text-emerald-400"/> Client Business Health Reports <ArrowUpRight size={14}/>
+            </button>
           </div>
 
           <div className="grid grid-cols-3 gap-3 shrink-0">

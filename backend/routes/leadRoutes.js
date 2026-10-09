@@ -2,6 +2,11 @@ import express from 'express';
 import { createLead, getLeads, updateLead, deleteLead, importLeads } from '../controllers/leadController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
+import { requirePermission } from '../utils/permissions.js';
+
+// 🔴 Data delete sirf wahi kar sakta hai jiske paas "Delete Records" ka right hai (CEO, Admin, ya jise Admin ne diya)
+const canDelete = requirePermission('DELETE_RECORDS');
+
 const router = express.Router();
 
 // 'protect' ensure karega ki token valid hai
@@ -23,6 +28,6 @@ router.route('/:id')
   // 🔴 FIX: Update se bhi authorize hata diya taaki Shiva jaise employees remarks add ya status update kar sakein
   .put(protect, updateLead)
   // Delete karne ki power sirf Admin/Manager ke paas rahegi
-  .delete(protect, authorize('Admin', 'Manager'), deleteLead);
+  .delete(protect, canDelete, deleteLead);
 
 export default router;

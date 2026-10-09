@@ -3,7 +3,12 @@ import TaskActivity from '../models/TaskActivity.js';
 import DailyWorkReport from '../models/DailyWorkReport.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
-import { isCeo, isAdminOrAbove, getAssignError } from '../utils/roles.js';
+import { isCeo, getAssignError } from '../utils/roles.js';
+import { can } from '../utils/permissions.js';
+
+// 🔴 "Assign Task" right: task dena, edit / re-assign / delete karna aur sabke tasks dekhna.
+// CEO ke paas hamesha hai; Admin ko CEO deta hai; employee ko Admin deta hai.
+const canManageTasks = (user) => can(user, 'WORK_ASSIGN');
 
 // @desc    Get all Employees for Dropdown
 // @route   GET /api/tasks/employees
@@ -24,8 +29,8 @@ export const getTasks = async (req, res) => {
     let query = {};
     
     // 🔴 ROLE BASED ACCESS LOGIC
-    if (!isAdminOrAbove(req.user)) {
-      // Agar user CEO/Admin nahi hai, toh use sirf wahi tasks dikhenge jo use assign huye hain
+    if (!canManageTasks(req.user)) {
+      // Jiske paas Assign Task ka right nahi, toh use sirf wahi tasks dikhenge jo use assign huye hain
       query = { assignedTo: req.user._id };
     }
 
@@ -58,6 +63,8 @@ export const createTask = async (req, res) => {
     const generatedTaskId = `TSK-${nextIdCounter}`;
 
     // 🔴 Clean payload: Agar clientId nahi hai toh use empty/undefined kar dein taaki Mongoose validation fail na ho
+    if (!canManageTasks(req.user)) return res.status(403).json({ message: "You do not have the right to assign tasks" });
+
     const taskData = { ...req.body };
 
     // 🔴 HIERARCHY: CEO -> Admin, Admin -> Employee
@@ -93,6 +100,7 @@ export const createTask = async (req, res) => {
       await Notification.create({
         recipient: savedTask.assignedTo,
         title: 'New Task Assigned',
+        kind: 'task-assigned',
         message: `${req.user.name} (${req.user.role}) has assigned you a new task: ${savedTask.taskTitle || savedTask.clientName || 'Internal Task'}`,
         link: '/work-management'
       });
@@ -172,7 +180,7 @@ export const updateTaskStatus = async (req, res) => {
 
     // --- RULE #3 LOGIC ---
     if (currentStatus === 'Completed' && task.reviewer) {
-      if (!isAdminOrAbove(req.user) && req.user._id.toString() !== task.reviewer.toString()) {
+      if (!canManageTasks(req.user) && req.user._id.toString() !== task.reviewer.toString()) {
         return res.status(403).json({ 
           message: "Review is mandatory! Please change status to 'Under Review'." 
         });
@@ -227,7 +235,7 @@ export const updateTaskStatus = async (req, res) => {
 // @route   PUT /api/tasks/:id
 export const updateTaskDetails = async (req, res) => {
   try {
-    if (!isAdminOrAbove(req.user)) return res.status(403).json({ message: "Only CEO/Admin can edit tasks" });
+    if (!canManageTasks(req.user)) return res.status(403).json({ message: "You do not have the right to edit tasks" });
     
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
@@ -265,6 +273,7 @@ export const updateTaskDetails = async (req, res) => {
       await Notification.create({
         recipient: task.assignedTo,
         title: 'Task Re-Assigned To You',
+        kind: 'task-assigned',
         message: `A task has been re-assigned to you: ${task.taskTitle || task.clientName || 'Internal Task'}`,
         link: '/work-management'
       });
@@ -296,7 +305,7 @@ export const submitEod = async (req, res) => {
 export const getEods = async (req, res) => {
   try {
     let query = {};
-    if (!isAdminOrAbove(req.user)) {
+    if (!canManageTasks(req.user)) {
       query = { employee: req.user._id };
     }
     const eods = await DailyWorkReport.find(query)
@@ -314,8 +323,8 @@ export const getEods = async (req, res) => {
 // @route   DELETE /api/tasks/:id
 export const deleteTask = async (req, res) => {
   try {
-    if (!isAdminOrAbove(req.user)) {
-      return res.status(403).json({ message: "Only CEO/Admin can delete tasks" });
+    if (!canManageTasks(req.user)) {
+      return res.status(403).json({ message: "You do not have the right to delete tasks" });
     }
     const task = await Task.findById(req.params.id).populate('assignedBy', 'role');
     if (!task) return res.status(404).json({ message: "Task not found" });
@@ -342,7 +351,7 @@ export const getPaginatedTasks = async (req, res) => {
 
     let query = {};
     // Role based check
-    if (!isAdminOrAbove(req.user)) {
+    if (!canManageTasks(req.user)) {
       query.assignedTo = req.user._id;
     }
 
@@ -391,7 +400,7 @@ export const getPaginatedTasks = async (req, res) => {
     const totalCount = await Task.countDocuments(query);
 
     // Global Stats (KPI Cards ke liye)
-    let statQuery = !isAdminOrAbove(req.user) ? { assignedTo: req.user._id } : {};
+    let statQuery = !canManageTasks(req.user) ? { assignedTo: req.user._id } : {};
     const total = await Task.countDocuments(statQuery);
     const inProgress = await Task.countDocuments({ ...statQuery, currentStatus: 'In Progress' });
     const pendingClient = await Task.countDocuments({ ...statQuery, currentStatus: 'Pending Client' });

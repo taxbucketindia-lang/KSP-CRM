@@ -12,9 +12,12 @@ import {
   Mail, MapPin, Eye, History, UserCircle, Briefcase, Lock, ShieldUser, MessageSquare,
   Download, Upload, CalendarClock, Send 
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const Clients = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   const location = useLocation();
 
   const [clients, setClients] = useState([]);
@@ -959,7 +962,7 @@ const Clients = () => {
             </div>
 
             <div className="flex justify-between items-center p-5 border-t border-slate-100 bg-white rounded-b-3xl">
-              {isAdmin ? (
+              {canDelete ? (
                 <button 
                   onClick={() => {
                     setIsViewModalOpen(false);

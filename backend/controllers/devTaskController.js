@@ -37,6 +37,7 @@ export const createDevTask = async (devReq, res) => {
         await Notification.create({
           recipient: assignedUser._id, // Us employee ki ID
           title: '🚀 New Dev Task Assigned',
+          kind: 'devtask',
           message: `You have been assigned a new task: "${title}". Please check your Dev Tasks panel.`,
           link: targetLink
         });

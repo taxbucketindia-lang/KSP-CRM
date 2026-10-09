@@ -13,14 +13,14 @@
 
 // export default router;
 
-
-
-
-
-
 import express from 'express';
 import { getClients, createClient, convertLeadToClient, deleteClient, updateClient, importClients } from '../controllers/clientController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
+
+import { requirePermission } from '../utils/permissions.js';
+
+// 🔴 Data delete sirf wahi kar sakta hai jiske paas "Delete Records" ka right hai (CEO, Admin, ya jise Admin ne diya)
+const canDelete = requirePermission('DELETE_RECORDS');
 
 const router = express.Router();
 
@@ -36,6 +36,6 @@ router.route('/convert/:leadId')
 
 router.route('/:id')
   .put(protect, authorize('Admin', 'Manager', 'Sales/Executive'), updateClient)
-  .delete(protect, authorize('Admin', 'Manager'), deleteClient);
+  .delete(protect, canDelete, deleteClient);
 
 export default router;

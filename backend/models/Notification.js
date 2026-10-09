@@ -10,7 +10,10 @@ const notificationSchema = new mongoose.Schema({
   // Task Handover se judi notification (purane reminder hatane ke liye)
   handover: { type: mongoose.Schema.Types.ObjectId, ref: 'TaskHandover' },
   meeting: { type: mongoose.Schema.Types.ObjectId, ref: 'Meeting' }, // Calendar meeting ka reminder
-  kind: { type: String }
+  // kind = notification kahan se aaya (task-assigned, handover-reminder, meeting-reminder, todo-reminder, invoice-reminder, devtask...)
+  kind: { type: String },
+  // Jis record ka reminder hai uski ID: naya reminder aane par purana hata dete hain taaki list na bhare
+  refId: { type: String }
 }, { timestamps: true });
 
 export default mongoose.model('Notification', notificationSchema);

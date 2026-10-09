@@ -9,15 +9,20 @@ import {
   getTdsSections, updateTdsWorkspace, deleteTdsReturn, deleteTdsWorkspace,
 } from '../controllers/tdsController.js';
 
+import { requirePermission } from '../utils/permissions.js';
+
+// 🔴 Data delete sirf wahi kar sakta hai jiske paas "Delete Records" ka right hai (CEO, Admin, ya jise Admin ne diya)
+const canDelete = requirePermission('DELETE_RECORDS');
+
 const router = express.Router();
 
 // M1: Workspaces
 router.route('/workspaces').get(protect, getTdsWorkspaces).post(protect, createTdsWorkspace);
 
-router.route('/workspaces/:id').put(protect, updateTdsWorkspace).delete(protect, deleteTdsWorkspace);
+router.route('/workspaces/:id').put(protect, updateTdsWorkspace).delete(protect, canDelete, deleteTdsWorkspace);
 
 router.route('/workspaces/:id').put(protect, updateTdsWorkspace);
-router.route('/returns/:id').delete(protect, deleteTdsReturn);
+router.route('/returns/:id').delete(protect, canDelete, deleteTdsReturn);
 
 // M2: Returns
 router.route('/workspaces/:workspaceId/returns').get(protect, getTdsReturns);
@@ -33,8 +38,5 @@ router.route('/returns/:returnId/entries').get(protect, getDeductionEntries).pos
 
 // M6: Master Data
 router.route('/masters/sections').get(protect, getTdsSections);
-
-
-
 
 export default router;

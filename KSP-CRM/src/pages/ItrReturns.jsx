@@ -13,9 +13,12 @@ import {
   UserCircle, Mail, AlertTriangle, Send, Calculator, CreditCard, Download, Upload, Hash, Navigation,
   Wallet, CheckSquare, Loader2, Edit,
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const ItrReturns = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   
   const [importList, setImportList] = useState([]); 
   const [itrClients, setItrClients] = useState([]); 
@@ -831,7 +834,7 @@ const ItrReturns = () => {
               <button onClick={handleExportExcel} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors shadow-sm">
                 <Download size={14} strokeWidth={2.5}/> Export Selected
               </button>
-              {isAdmin && (
+              {canDelete && (
                 <button onClick={handleBulkDelete} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-lg transition-colors shadow-sm">
                   <Trash2 size={14} strokeWidth={2.5}/> Delete Selected
                 </button>
@@ -952,7 +955,7 @@ const ItrReturns = () => {
                           <button onClick={() => handleOpenRemarks(client)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white rounded-lg transition-all border border-amber-200 shadow-sm" title="Remarks">
                             <MessageSquare size={14} strokeWidth={2.5}/> Note
                           </button>
-                          {isAdmin && (
+                          {canDelete && (
                             <button onClick={() => confirmDelete(client)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors" title="Delete">
                               <Trash2 size={16}/>
                             </button>
@@ -1239,7 +1242,7 @@ const ItrReturns = () => {
             
             <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl">
               <div>
-                 {isAdmin ? (
+                 {canDelete ? (
                    <button 
                      onClick={() => { setIsViewModalOpen(false); confirmDelete(clientToView); }} 
                      className="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-transparent hover:border-rose-200 flex items-center gap-1.5"

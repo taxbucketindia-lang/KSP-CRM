@@ -12,9 +12,12 @@ import {
   CalendarClock, MessageCircle, Trash2, AlertTriangle, UserCheck, 
   Download, Upload, Lock, ShieldUser, MessageSquare, Activity
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const Leads = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   const location = useLocation();
   const [leads, setLeads] = useState([]);
   const [bas, setBas] = useState([]); 
@@ -632,7 +635,7 @@ const Leads = () => {
                             <Pencil size={16} />
                           </button>
 
-                          {isAdmin && (
+                          {canDelete && (
                             <button 
                               onClick={() => confirmDelete(lead)}
                               className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"

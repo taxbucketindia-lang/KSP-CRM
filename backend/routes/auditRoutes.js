@@ -18,6 +18,11 @@ import {
   getDueDates, setDueDate, deleteFiling, deleteChecklistItem,
 } from '../controllers/auditController.js';
 
+import { requirePermission } from '../utils/permissions.js';
+
+// 🔴 Data delete sirf wahi kar sakta hai jiske paas "Delete Records" ka right hai (CEO, Admin, ya jise Admin ne diya)
+const canDelete = requirePermission('DELETE_RECORDS');
+
 const router = express.Router();
 
 router.route('/clients/:id').put(protect, updateAuditClient);
@@ -29,7 +34,7 @@ router.route('/auditors')
 
 router.route('/auditors/:id')
   .put(protect, updateAuditor)
-  .delete(protect, deleteAuditor);
+  .delete(protect, canDelete, deleteAuditor);
 
 // 📄 Audit Engagement (A1) Routes
 router.route('/engagements')
@@ -41,30 +46,29 @@ router.route('/engagements/client/:clientId')
 
 router.route('/engagements/:id')
   .put(protect, updateAuditEngagement)
-  .delete(protect, deleteAuditEngagement);
-
+  .delete(protect, canDelete, deleteAuditEngagement);
 
 // A3: Audit-Auditor Links
 router.route('/links/audit/:auditId').get(protect, getAuditAuditors);
 router.route('/links').post(protect, assignAuditor);
-router.route('/links/:id').put(protect, updateAuditAuditor).delete(protect, removeAuditorLink);
+router.route('/links/:id').put(protect, updateAuditAuditor).delete(protect, canDelete, removeAuditorLink);
 
 // A4: UDINs
 router.route('/udins/audit/:auditId').get(protect, getAuditUdins);
 router.route('/udins').post(protect, createUdin);
-router.route('/udins/:id').put(protect, updateUdin).delete(protect, deleteUdin);
+router.route('/udins/:id').put(protect, updateUdin).delete(protect, canDelete, deleteUdin);
 
 // A5: Filings
 router.route('/filings/audit/:auditId').get(protect, getAuditFilings);
 router.route('/filings').post(protect, createFiling);
 router.route('/filings/:id').put(protect, updateFiling)
-                            .delete(protect, deleteFiling);;
+                            .delete(protect, canDelete, deleteFiling);;
 
 // A6: Checklists
 router.route('/checklists/audit/:auditId').get(protect, getChecklist);
 router.route('/checklists').post(protect, addChecklistItem);
 router.route('/checklists/:id').put(protect, updateChecklistItem)
-                                .delete(protect, deleteChecklistItem);
+                                .delete(protect, canDelete, deleteChecklistItem);
 
 // A7: Due Date Master
 router.route('/due-dates').get(protect, getDueDates).post(protect, setDueDate);

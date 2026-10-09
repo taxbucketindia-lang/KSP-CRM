@@ -7,6 +7,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { toJpeg } from 'html-to-image';
 import jsPDF from 'jspdf';
+import { can } from '../utils/permissions';
 
 const numberToWords = (num) => {
   if (num === 0 || isNaN(num)) return "Zero Rupees Only";
@@ -28,6 +29,8 @@ const numberToWords = (num) => {
 
 const InvoiceGenerator = () => {
   const { user } = useContext(AuthContext); 
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   const location = useLocation(); 
   const isAdmin = isAdminRole(user?.role);
 
@@ -220,48 +223,83 @@ const InvoiceGenerator = () => {
     } catch (error) { toast.error("Failed to delete invoice"); }
   };
 
+  // Payment history se invoice ka total received / status / last payment date dobara banana
+  // (purane invoices me jo rakam history me likhi nahi thi, wo "legacy" me bachi rehti hai)
+  const buildPaymentUpdate = (invoice, history) => {
+    const credit = (list) => list.reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.discount || 0), 0);
+    const legacy = Math.max(0, Number(invoice.amountReceived || 0) - credit(invoice.paymentHistory || []));
+    const amountReceived = legacy + credit(history);
+    const invoiceTotal = Number(invoice.totalAmountAfterTax || 0);
+
+    let paymentStatus = 'Pending';
+    if (amountReceived >= invoiceTotal && invoiceTotal > 0) paymentStatus = 'Paid';
+    else if (amountReceived > 0) paymentStatus = 'Partially Paid';
+
+    const lastDate = history.reduce((latest, p) => (!latest || new Date(p.date) > new Date(latest) ? p.date : latest), null);
+    return { amountReceived, paymentStatus, paymentDate: lastDate || (amountReceived > 0 ? invoice.paymentDate : null), paymentHistory: history };
+  };
+
+  const closePaymentModal = () => setPaymentModal({ open: false, invoice: null, editIndex: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '' });
+
+  // 🔴 NAYA: naya payment record karna YA pehle se dali hui entry ko edit karna (date, mode, discount, amount)
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     setProcessingPayment(true);
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
-      
-      const currentReceived = Number(paymentModal.invoice.amountReceived || 0);
-      const newAmountToAdd = Number(paymentModal.amountReceived);
-      const discountAmt = Number(paymentModal.discount || 0);
-      
-      const invoiceTotal = Number(paymentModal.invoice.totalAmountAfterTax);
-      
-      const totalCreditNow = newAmountToAdd + discountAmt;
-      const updatedTotalReceived = currentReceived + totalCreditNow; 
-      
-      let newStatus = 'Pending';
-      if (updatedTotalReceived >= invoiceTotal) newStatus = 'Paid';
-      else if (updatedTotalReceived > 0) newStatus = 'Partially Paid';
+      const invoice = paymentModal.invoice;
+      const isEdit = paymentModal.editIndex != null;
 
-      const finalPaymentDate = new Date(paymentModal.paymentDate).toISOString();
+      const entry = {
+        date: new Date(paymentModal.paymentDate).toISOString(),
+        amount: Number(paymentModal.amountReceived || 0),
+        mode: paymentModal.mode,
+        discount: Number(paymentModal.discount || 0)
+      };
 
-      const currentHistory = paymentModal.invoice.paymentHistory || [];
-      const updatedHistory = [...currentHistory, {
-         date: finalPaymentDate,
-         amount: newAmountToAdd,
-         mode: paymentModal.mode,
-         discount: discountAmt 
-      }];
+      const currentHistory = invoice.paymentHistory || [];
+      const updatedHistory = isEdit
+        ? currentHistory.map((p, idx) => (idx === paymentModal.editIndex ? { ...p, ...entry } : p))
+        : [...currentHistory, entry];
 
-      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${paymentModal.invoice._id}`, { 
-        amountReceived: updatedTotalReceived, 
-        paymentStatus: newStatus,
-        paymentDate: finalPaymentDate, 
-        paymentHistory: updatedHistory 
-      }, { headers });
+      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${invoice._id}`, buildPaymentUpdate(invoice, updatedHistory), { headers });
 
-      toast.success(`Payment & Adjustments recorded!`);
-      setPaymentModal({ open: false, invoice: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '' });
-      fetchHistory(); 
-    } catch (error) { toast.error("Failed to record payment."); } 
+      toast.success(isEdit ? 'Payment entry updated!' : 'Payment & Adjustments recorded!');
+      closePaymentModal();
+      fetchHistory();
+    } catch (error) { toast.error(error.response?.data?.message || "Failed to save payment."); }
     finally { setProcessingPayment(false); }
   };
+
+  const openEditPayment = (invoice, index) => {
+    const entry = invoice.paymentHistory[index];
+    setPaymentModal({
+      open: true, invoice, editIndex: index,
+      amountReceived: entry.amount ?? '',
+      paymentDate: entry.date ? new Date(entry.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      mode: entry.mode || 'UPI / Online',
+      discount: entry.discount || ''
+    });
+  };
+
+  const handleDeletePayment = async (invoice, index) => {
+    const entry = invoice.paymentHistory[index];
+    if (!window.confirm(`Delete this payment entry of ₹${Number(entry.amount || 0).toLocaleString('en-IN')}? The invoice balance will be updated.`)) return;
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const updatedHistory = invoice.paymentHistory.filter((_, idx) => idx !== index);
+      await axios.put(`${import.meta.env.VITE_API_URL}/invoices/${invoice._id}`, buildPaymentUpdate(invoice, updatedHistory), { headers });
+      toast.success('Payment entry deleted.');
+      fetchHistory();
+    } catch (error) { toast.error(error.response?.data?.message || "Failed to delete payment entry."); }
+  };
+
+  // Edit ke waqt: is entry ko chhod kar baaki kitna clear ho chuka hai
+  const editingPayment = paymentModal.open && paymentModal.editIndex != null ? paymentModal.invoice?.paymentHistory?.[paymentModal.editIndex] : null;
+  const clearedBefore = paymentModal.invoice
+    ? Number(paymentModal.invoice.amountReceived || 0) - (editingPayment ? Number(editingPayment.amount || 0) + Number(editingPayment.discount || 0) : 0)
+    : 0;
+  const PAYMENT_MODES = [['UPI / Online', 'UPI / Online'], ['NEFT / RTGS', 'NEFT / RTGS / IMPS'], ['Cash', 'Cash'], ['Adjust against Adv.', 'Adjust against Adv.']];
 
   const handleSendReminder = (inv) => {
     const total = Number(inv.totalAmountAfterTax || 0);
@@ -1002,11 +1040,13 @@ const InvoiceGenerator = () => {
                         <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
                           <p className="text-[9px] font-black uppercase tracking-wider text-emerald-700 mb-1">Payment Logs:</p>
                           {inv.paymentHistory.map((ph, idx) => (
-                            <p key={idx} className="text-[10px] font-bold text-slate-600 flex flex-wrap items-center gap-1.5 w-fit bg-emerald-50/50 px-2 py-1 rounded border border-emerald-100">
+                            <div key={idx} className="text-[10px] font-bold text-slate-600 flex flex-wrap items-center gap-1.5 w-fit bg-emerald-50/50 px-2 py-1 rounded border border-emerald-100">
                               <CheckCircle2 size={12} className="text-emerald-500"/>
                               Received <span className="text-emerald-700 font-black">₹{Number(ph.amount).toLocaleString('en-IN')}</span> via {ph.mode} on {new Date(ph.date).toLocaleDateString('en-IN')}
                               {ph.discount > 0 && <span className="text-rose-500 ml-1 bg-rose-50 px-1 rounded border border-rose-100">(+ ₹{ph.discount} Discount)</span>}
-                            </p>
+                              <button type="button" onClick={() => openEditPayment(inv, idx)} className="ml-1 p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Edit this payment entry"><Edit size={11}/></button>
+                              {canDelete && <button type="button" onClick={() => handleDeletePayment(inv, idx)} className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors" title="Delete this payment entry"><Trash2 size={11}/></button>}
+                            </div>
                           ))}
                         </div>
                       )}
@@ -1069,7 +1109,7 @@ const InvoiceGenerator = () => {
                          <button onClick={() => loadInvoiceForEdit(inv)} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg text-[10px] font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5">
                            <Edit size={12}/> Edit
                          </button>
-                         {isAdmin && (
+                         {canDelete && (
                            <button onClick={() => handleDeleteInvoice(inv._id)} className="flex-1 bg-rose-100 hover:bg-rose-200 text-rose-700 px-3 py-2 rounded-lg text-[10px] font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5">
                              <Trash2 size={12}/> Delete
                            </button>
@@ -1176,9 +1216,9 @@ const InvoiceGenerator = () => {
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                <IndianRupee className="text-emerald-600" size={20}/> Record Payment
+                <IndianRupee className="text-emerald-600" size={20}/> {editingPayment ? 'Edit Payment Entry' : 'Record Payment'}
               </h3>
-              <button onClick={() => setPaymentModal({open: false, invoice: null, amountReceived: '', paymentDate: '', mode: 'UPI / Online', discount: ''})} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
+              <button onClick={closePaymentModal} className="text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg p-1.5 transition-colors">
                 <X size={16}/>
               </button>
             </div>
@@ -1190,12 +1230,12 @@ const InvoiceGenerator = () => {
                   <span className="text-slate-800 font-mono">₹{paymentModal.invoice.totalAmountAfterTax?.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-xs font-bold text-slate-500">
-                  <span>Already Cleared:</span>
-                  <span className="text-emerald-600 font-mono">₹{paymentModal.invoice.amountReceived?.toLocaleString('en-IN') || 0}</span>
+                  <span>{editingPayment ? 'Other Payments (excluding this entry):' : 'Already Cleared:'}</span>
+                  <span className="text-emerald-600 font-mono">₹{clearedBefore.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-black text-slate-700">
-                  <span>Current Due:</span>
-                  <span className="text-rose-600 font-mono">₹{(paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0)).toLocaleString('en-IN')}</span>
+                  <span>{editingPayment ? 'Due Before This Entry:' : 'Current Due:'}</span>
+                  <span className="text-rose-600 font-mono">₹{(paymentModal.invoice.totalAmountAfterTax - clearedBefore).toLocaleString('en-IN')}</span>
                 </div>
 
                 {Number(paymentModal.discount) > 0 && (
@@ -1207,7 +1247,7 @@ const InvoiceGenerator = () => {
                 {Number(paymentModal.discount) > 0 && (
                   <div className="flex justify-between text-sm font-black text-emerald-700 mt-1">
                     <span>Net Payable Now:</span>
-                    <span className="font-mono">₹{Math.max(0, (paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0) - Number(paymentModal.discount))).toLocaleString('en-IN')}</span>
+                    <span className="font-mono">₹{Math.max(0, (paymentModal.invoice.totalAmountAfterTax - clearedBefore - Number(paymentModal.discount))).toLocaleString('en-IN')}</span>
                   </div>
                 )}
               </div>
@@ -1222,10 +1262,9 @@ const InvoiceGenerator = () => {
                     onChange={(e) => setPaymentModal({...paymentModal, mode: e.target.value})}
                     className="w-full text-sm font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-700 shadow-sm"
                   >
-                    <option value="UPI / Online">UPI / Online</option>
-                    <option value="NEFT / RTGS">NEFT / RTGS / IMPS</option>
-                    <option value="Cash">Cash</option>
-                    <option value="Adjust against Adv.">Adjust against Adv.</option>
+                    {/* Purani entry ka mode list me na ho toh bhi dikhe */}
+                    {!PAYMENT_MODES.some(([value]) => value === paymentModal.mode) && <option value={paymentModal.mode}>{paymentModal.mode}</option>}
+                    {PAYMENT_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1245,13 +1284,13 @@ const InvoiceGenerator = () => {
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Amount Received Now (₹)
+                  {editingPayment ? 'Amount Received (₹)' : 'Amount Received Now (₹)'}
                 </label>
                 <input 
                   type="number"
                   required
                   min="0"
-                  max={paymentModal.invoice.totalAmountAfterTax - (paymentModal.invoice.amountReceived || 0) - Number(paymentModal.discount || 0)}
+                  max={Math.max(0, paymentModal.invoice.totalAmountAfterTax - clearedBefore - Number(paymentModal.discount || 0))}
                   value={paymentModal.amountReceived}
                   onChange={(e) => setPaymentModal({...paymentModal, amountReceived: e.target.value})}
                   placeholder="Enter amount received"
@@ -1271,7 +1310,7 @@ const InvoiceGenerator = () => {
               </div>
 
               <button type="submit" disabled={processingPayment} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center gap-2">
-                {processingPayment ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16} />} Update Balance
+                {processingPayment ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16} />} {editingPayment ? 'Save Changes' : 'Update Balance'}
               </button>
             </form>
           </div>

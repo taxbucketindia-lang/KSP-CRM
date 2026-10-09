@@ -1,4 +1,5 @@
 import { isAdminRole, isCeoRole } from '../utils/roles';
+import { can } from '../utils/permissions';
 import { formatIstDate, formatIstTime, istToday, toIstInputValue, istInputToIso } from '../utils/time';
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
@@ -50,12 +51,18 @@ const WorkManagement = () => {
   const [eodToView, setEodToView] = useState(null);
   const [taskToEdit, setTaskToEdit] = useState(null);
 
-  const isAdmin = isAdminRole(user?.role);
+  // 🔴 "Assign & Manage Tasks" ka right: CEO ke paas hamesha, Admin ko CEO deta hai, employee ko Admin deta hai.
+  // Jiske paas yeh right hai wahi task de / edit / delete kar sakta hai aur sabke tasks dekh sakta hai.
+  const isAdmin = can(user, 'WORK_ASSIGN');
   const isCeo = isCeoRole(user?.role);
+  const isTopRole = isAdminRole(user?.role); // CEO / Admin (EOD report nahi bharte)
   const myId = user?._id || user?.id;
 
   // 🔴 HIERARCHY: CEO -> sirf Admins ko assign karega, Admin -> employees ko (CEO ko nahi)
-  const assignableEmployees = employees.filter(emp => emp._id !== myId && (isCeo ? emp.role === 'Admin' : emp.role !== 'CEO'));
+  // "Assign" right wala employee sirf employees ko de sakta hai (CEO / Admin ko nahi)
+  const assignableEmployees = employees.filter(emp => emp._id !== myId && (
+    isCeo ? emp.role === 'Admin' : isTopRole ? emp.role !== 'CEO' : !isAdminRole(emp.role)
+  ));
   const isMyTask = (task) => !!task && task.assignedTo?._id === myId;
 
   const initialForm = {
@@ -414,7 +421,7 @@ const WorkManagement = () => {
             </button>
           </div>
 
-          {!isAdmin && (
+          {!isTopRole && (
             <button
               onClick={() => setIsEodModalOpen(true)}
               className="inline-flex items-center gap-2 bg-white text-emerald-600 border border-emerald-200 hover:bg-emerald-50 text-sm font-bold px-5 py-2.5 rounded-xl shadow-sm transition-all"

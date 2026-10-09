@@ -12,6 +12,11 @@ import {
   importRocWorkspaces, bulkDeleteRocWorkspaces,
 } from '../controllers/rocController.js';
 
+import { requirePermission } from '../utils/permissions.js';
+
+// 🔴 Data delete sirf wahi kar sakta hai jiske paas "Delete Records" ka right hai (CEO, Admin, ya jise Admin ne diya)
+const canDelete = requirePermission('DELETE_RECORDS');
+
 const router = express.Router();
 
 // Workspace Routes
@@ -21,7 +26,7 @@ router.route('/workspaces')
 
 router.route('/workspaces/:id')
   .put(protect, updateRocWorkspace)
-  .delete(protect, deleteRocWorkspace);
+  .delete(protect, canDelete, deleteRocWorkspace);
 
 // Directors & DSC Routes
 router.post('/directors', protect, addDirector);
@@ -31,6 +36,6 @@ router.get('/directors/:workspaceId', protect, getCompanyDirectors);
 router.post('/compliance', protect, addComplianceTask);
 router.get('/compliance/:workspaceId', protect, getComplianceTasks);
 router.post('/workspaces/import', protect, importRocWorkspaces);
-router.post('/workspaces/bulk-delete', protect, bulkDeleteRocWorkspaces);
+router.post('/workspaces/bulk-delete', protect, canDelete, bulkDeleteRocWorkspaces);
 
 export default router;

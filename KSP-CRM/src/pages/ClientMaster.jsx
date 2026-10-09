@@ -2,6 +2,9 @@ import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import ClientWorkspaceDetail, { WORKSPACES } from '../components/ClientWorkspaceDetail';
+import { downloadClientStatement } from '../utils/statementPdf';
 import * as XLSX from 'xlsx'; 
 import ExcelJS from 'exceljs'; 
 import { saveAs } from 'file-saver';
@@ -12,9 +15,12 @@ import {
   IndianRupee, MessageCircle, Clock, CalendarDays, Filter, Store, 
   BookOpen, Download, ChevronRight, Bell, Loader2
 } from 'lucide-react';
+import { can } from '../utils/permissions';
 
 const ClientMaster = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
+  const canDelete = can(user, 'DELETE_RECORDS');
   
   const [clients, setClients] = useState([]);
   const [allInvoices, setAllInvoices] = useState([]); 
@@ -47,7 +53,10 @@ const ClientMaster = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [clientToView, setClientToView] = useState(null);
   const [activeTab, setActiveTab] = useState('overview'); 
-  const [workspaceDetailModal, setWorkspaceDetailModal] = useState({ open: false, type: '', title: '' });
+  const [workspaceDetailModal, setWorkspaceDetailModal] = useState({ open: false, key: '' });
+  // 🔴 Khule hue client ke saare workspaces ki poori detail (ITR, GST, ROC, TDS, Audit, FSSAI, CFO)
+  const [workspaceData, setWorkspaceData] = useState({ loading: false, data: null });
+  const navigate = useNavigate();
 
   // Initial Form State
   const initialForm = {
@@ -375,10 +384,30 @@ const ClientMaster = () => {
     setIsModalOpen(true);
   };
 
-  const handleOpenView = (client) => {
+  const handleOpenView = async (client) => {
     setClientToView(client);
-    setActiveTab('overview'); 
+    setActiveTab('overview');
     setIsViewModalOpen(true);
+
+    setWorkspaceData({ loading: true, data: null });
+    try {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master/${client._id}/workspaces`, { headers: { Authorization: `Bearer ${user.token}` } });
+      setWorkspaceData({ loading: false, data: res.data });
+    } catch (error) {
+      setWorkspaceData({ loading: false, data: null });
+      toast.error("Could not load workspace details");
+    }
+  };
+
+  // CFO box: seedha us client ki Business Health report par (latest month)
+  const openCfoReport = (month) => {
+    const latest = month || workspaceData.data?.cfo?.[0]?.month;
+    navigate('/business-health', { state: { client: clientToView, month: latest } });
+  };
+
+  const handleWorkspaceClick = (ws) => {
+    if (ws.key === 'cfo') return openCfoReport();
+    setWorkspaceDetailModal({ open: true, key: ws.key });
   };
 
   const sendDueReminder = (client, dueAmount) => {
@@ -439,6 +468,7 @@ const ClientMaster = () => {
         id: `inv-${inv._id}`,
         date: inv.invoiceDate || inv.createdAt,
         type: 'Invoice / Work',
+        ref: inv.invoiceNo,
         particulars: `Invoice Raised (${inv.invoiceNo}) for ${inv.items?.[0]?.description || 'Professional Services'}`,
         debit: billedAmount,
         credit: 0
@@ -459,6 +489,7 @@ const ClientMaster = () => {
             id: `pay-${inv._id}-${idx}`,
             date: ph.date || inv.paymentDate || inv.updatedAt,
             type: 'Payment',
+            ref: inv.invoiceNo,
             particulars: desc,
             debit: 0,
             credit: totalCredit
@@ -474,6 +505,7 @@ const ClientMaster = () => {
             id: `pay-${inv._id}`,
             date: pDate,
             type: 'Payment',
+            ref: inv.invoiceNo,
             particulars: `Payment Received against Invoice ${inv.invoiceNo}`,
             debit: 0,
             credit: actualReceived
@@ -501,6 +533,22 @@ const ClientMaster = () => {
   };
 
   const clientLedger = isViewModalOpen ? generateLedger() : [];
+
+  // 🔴 Statement PDF (pehle is button ke peeche koi kaam likha hi nahi tha)
+  const [downloadingStatement, setDownloadingStatement] = useState(false);
+  const handleDownloadStatement = async () => {
+    if (!clientToView) return;
+    setDownloadingStatement(true);
+    try {
+      await downloadClientStatement(clientToView, clientLedger);
+      toast.success("Statement downloaded!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Could not create the statement PDF");
+    } finally {
+      setDownloadingStatement(false);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6 pb-12">
@@ -636,7 +684,7 @@ const ClientMaster = () => {
                 {loading ? (
                   <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Fetching Page {currentPage}...</td></tr>
                 ) : finalDisplayClients.length === 0 ? (
-                  <tr><td colSpan="6" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No clients found.</td></tr>
+                  <tr><td colSpan="6" className="text-center py-16 text-slate-400"><AlertCircle size={36} className="mb-3 text-slate-300 mx-auto"/> No clients found for these filters.</td></tr>
                 ) : (
                   finalDisplayClients.map((client) => {
                     const clientDue = getClientDueAmount(client); 
@@ -663,6 +711,13 @@ const ClientMaster = () => {
                               <p className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-1">
                                 <Briefcase size={10} /> {client.clientType}
                               </p>
+                              {WORKSPACES.some(ws => client.services?.[ws.key]) && (
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {WORKSPACES.filter(ws => client.services?.[ws.key]).map(ws => (
+                                    <span key={ws.key} className={`text-[8px] font-black tracking-wider px-1.5 py-0.5 rounded ${ws.chip}`}>{ws.short}</span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -715,9 +770,11 @@ const ClientMaster = () => {
                               <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent" title="Edit Client">
                                 <Edit size={16}/>
                               </button>
+                              {canDelete && (
                               <button onClick={() => setDeleteModal({ open: true, client: client })} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent" title="Delete Client">
                                 <Trash2 size={16}/>
                               </button>
+                              )}
                             </div>
                             
                             {clientDue > 0 && (
@@ -890,103 +947,73 @@ const ClientMaster = () => {
                     </div>
                   </div>
 
+                  {/* BUSINESS DETAILS */}
+                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                      <Briefcase size={14}/> Business Details
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        ['Client Type', clientToView.clientType],
+                        ['Constitution', clientToView.constitution],
+                        ['Contact Person', clientToView.contactPerson],
+                        ['CIN / LLPIN', clientToView.cin_llpin],
+                        ['Incorporation Date', clientToView.date_of_incorporation ? new Date(clientToView.date_of_incorporation).toLocaleDateString('en-IN') : ''],
+                        ['Nature of Business', clientToView.nature_of_business],
+                        ['Accounting Method', clientToView.accounting_method],
+                        ['Opening Balance', Number(clientToView.openingBalance) ? `₹${Number(clientToView.openingBalance).toLocaleString('en-IN')}` : ''],
+                        ['Client Since', clientToView.createdAt ? new Date(clientToView.createdAt).toLocaleDateString('en-IN') : '']
+                      ].map(([label, value]) => (
+                        <div key={label} className="min-w-0">
+                          <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">{label}</p>
+                          <p className={`text-sm font-semibold break-words ${value ? 'text-slate-800' : 'text-slate-300'}`}>{value || 'Not added'}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {clientToView.remarks && (
+                      <div className="mt-4 pt-3 border-t border-slate-100">
+                        <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Remarks</p>
+                        <p className="text-sm font-medium text-slate-700 whitespace-pre-wrap break-words">{clientToView.remarks}</p>
+                      </div>
+                    )}
+                  </div>
+
                   {/* CONNECTED WORKSPACES */}
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-sm font-black text-slate-800 mb-5 pb-2 border-b border-slate-100 flex items-center gap-2">
-                      <ShieldCheck size={18} className="text-emerald-600"/> Connected Workspaces (Click to View Activity)
+                    <h3 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2">
+                      <ShieldCheck size={18} className="text-emerald-600"/> Connected Workspaces
                     </h3>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                      {/* ITR Box */}
-                      <button 
-                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'ITR', title: 'Income Tax (ITR) Details' })}
-                        disabled={!clientToView.services?.itr}
-                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.itr ? 'bg-blue-50/50 border-blue-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.itr ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-400'}`}><FileText size={18}/></div>
-                        <span className="text-[11px] font-bold text-slate-700">Income Tax (ITR)</span>
-                        {clientToView.services?.itr ? (
-                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                        ) : (
-                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                        )}
-                      </button>
-                      
-                      {/* GST Box */}
-                      <button 
-                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'GST', title: 'GST Returns Details' })}
-                        disabled={!clientToView.services?.gst}
-                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.gst ? 'bg-indigo-50/50 border-indigo-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.gst ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}><Calculator size={18}/></div>
-                        <span className="text-[11px] font-bold text-slate-700">GST Returns</span>
-                        {clientToView.services?.gst ? (
-                          <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                        ) : (
-                          <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                        )}
-                      </button>
+                    <p className="text-[11px] font-medium text-slate-500 mb-5 pb-3 border-b border-slate-100">Click a box to see the full details and work updates of that service. CFO opens the client's Business Health report.</p>
 
-                      {/* ROC Box */}
-                      <button 
-                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'ROC', title: 'ROC / MCA Services' })}
-                        disabled={!clientToView.services?.roc}
-                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.roc ? 'bg-purple-50/50 border-purple-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.roc ? 'bg-purple-100 text-purple-600' : 'bg-slate-200 text-slate-400'}`}><Building2 size={18}/></div>
-                        <span className="text-[11px] font-bold text-slate-700">ROC / MCA</span>
-                        {clientToView.services?.roc ? (
-                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                        ) : (
-                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                        )}
-                      </button>
-
-                      {/* TDS Box */}
-                      <button 
-                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'TDS', title: 'TDS Returns Activity' })}
-                        disabled={!clientToView.services?.tds}
-                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.tds ? 'bg-orange-50/50 border-orange-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.tds ? 'bg-orange-100 text-orange-600' : 'bg-slate-200 text-slate-400'}`}><Hash size={18}/></div>
-                        <span className="text-[11px] font-bold text-slate-700">TDS Return</span>
-                        {clientToView.services?.tds ? (
-                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                        ) : (
-                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                        )}
-                      </button>
-
-                      {/* Audit Box */}
-                      <button 
-                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'Audit', title: 'Audit Master Activity' })}
-                        disabled={!clientToView.services?.audit}
-                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.audit ? 'bg-amber-50/50 border-amber-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.audit ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}><FileKey size={18}/></div>
-                        <span className="text-[11px] font-bold text-slate-700">Audit Master</span>
-                        {clientToView.services?.audit ? (
-                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                        ) : (
-                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                        )}
-                      </button>
-
-                      {/* FSSAI Box */}
-                      <button 
-                        onClick={() => setWorkspaceDetailModal({ open: true, type: 'FSSAI', title: 'FSSAI / FoSCoS Activity' })}
-                        disabled={!clientToView.services?.fssai}
-                        className={`border rounded-xl p-4 flex flex-col items-center justify-center text-center gap-2 transition-all ${clientToView.services?.fssai ? 'bg-emerald-50/50 border-emerald-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${clientToView.services?.fssai ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}><Store size={18}/></div>
-                        <span className="text-[11px] font-bold text-slate-700">FSSAI / FoSCoS</span>
-                        {clientToView.services?.fssai ? (
-                           <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
-                        ) : (
-                           <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
-                        )}
-                      </button>
-
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                      {WORKSPACES.map(ws => {
+                        const linked = !!clientToView.services?.[ws.key];
+                        const count = workspaceData.data?.[ws.key]?.length;
+                        const clickable = linked || ws.key === 'cfo'; // CFO report kisi bhi client ke liye shuru ki ja sakti hai
+                        const WsIcon = ws.icon;
+                        return (
+                          <button
+                            key={ws.key}
+                            onClick={() => handleWorkspaceClick(ws)}
+                            disabled={!clickable}
+                            title={linked ? `View ${ws.label} details` : ws.key === 'cfo' ? 'Start a Business Health report for this client' : 'Not linked'}
+                            className={`border rounded-xl p-3 flex flex-col items-center justify-center text-center gap-2 transition-all ${linked ? `${ws.box} shadow-sm hover:scale-105 active:scale-95 cursor-pointer` : clickable ? 'bg-white border-dashed border-slate-300 hover:border-rose-300 hover:bg-rose-50/40 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
+                          >
+                            <div className={`h-10 w-10 rounded-full flex items-center justify-center ${linked ? ws.chip : 'bg-slate-200 text-slate-400'}`}><WsIcon size={18}/></div>
+                            <span className="text-[11px] font-bold text-slate-700 leading-tight">{ws.label}</span>
+                            {linked ? (
+                              <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1">
+                                <CheckCircle2 size={10}/> {workspaceData.loading ? 'Active' : count ? `${count} ${ws.key === 'cfo' ? 'report' : 'record'}${count > 1 ? 's' : ''}` : 'Active'}
+                              </span>
+                            ) : ws.key === 'cfo' ? (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-rose-50 text-rose-600 px-2 py-0.5 rounded">Start Report</span>
+                            ) : (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1027,8 +1054,8 @@ const ClientMaster = () => {
                       <h3 className="font-bold text-slate-800 flex items-center gap-2">
                         <BookOpen size={16} className="text-indigo-600"/> Account Ledger
                       </h3>
-                      <button className="flex items-center gap-1.5 text-xs font-bold bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg shadow-sm hover:bg-slate-50">
-                        <Download size={14}/> Download PDF
+                      <button onClick={handleDownloadStatement} disabled={downloadingStatement} className="flex items-center gap-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg shadow-sm disabled:opacity-50 transition-colors">
+                        {downloadingStatement ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} Download Statement (PDF)
                       </button>
                     </div>
 
@@ -1101,76 +1128,26 @@ const ClientMaster = () => {
         </div>
       )}
 
-      {/* WORKSPACE ACTIVITY DETAIL MODAL */}
-      {workspaceDetailModal.open && (() => {
-        const clientInvoices = allInvoices.filter(inv => 
-          (clientToView?.pan && inv.customer?.pan?.toUpperCase() === clientToView.pan?.toUpperCase()) || 
-          (clientToView?.gstin && inv.customer?.gstin?.toUpperCase() === clientToView.gstin?.toUpperCase()) ||
-          (inv.customer?.name?.toLowerCase() === clientToView?.name?.toLowerCase())
+      {/* 🔴 WORKSPACE DETAIL MODAL (ITR / GST / ROC / TDS / Audit / FSSAI ki poori detail) */}
+      {workspaceDetailModal.open && clientToView && (() => {
+        const ws = WORKSPACES.find(w => w.key === workspaceDetailModal.key);
+        if (!ws) return null;
+        const clientInvoices = allInvoices.filter(inv =>
+          (clientToView.pan && inv.customer?.pan?.toUpperCase() === clientToView.pan?.toUpperCase()) ||
+          (clientToView.gstin && inv.customer?.gstin?.toUpperCase() === clientToView.gstin?.toUpperCase()) ||
+          (inv.customer?.name?.toLowerCase() === clientToView.name?.toLowerCase())
         );
-
-        const relatedInvoices = clientInvoices.filter(inv => {
-          const desc = inv.items?.[0]?.description?.toLowerCase() || '';
-          if (workspaceDetailModal.type === 'ITR') return desc.includes('itr') || desc.includes('tax');
-          if (workspaceDetailModal.type === 'GST') return desc.includes('gst');
-          if (workspaceDetailModal.type === 'ROC') return desc.includes('roc') || desc.includes('mca') || desc.includes('company');
-          if (workspaceDetailModal.type === 'TDS') return desc.includes('tds');
-          if (workspaceDetailModal.type === 'Audit') return desc.includes('audit');
-          if (workspaceDetailModal.type === 'FSSAI') return desc.includes('fssai') || desc.includes('food');
-          return true; 
-        });
-
         return (
-        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80 flex justify-between items-center">
-               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                 <ShieldCheck className="text-blue-600"/> {workspaceDetailModal.title}
-               </h3>
-               <button onClick={() => setWorkspaceDetailModal({ open: false, type: '', title: '' })} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
-            </div>
-            
-            <div className="p-6 space-y-6 bg-white">
-               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex justify-between items-center">
-                 <div>
-                   <p className="text-xs font-bold text-slate-500 uppercase">Linked Client</p>
-                   <p className="text-sm font-black text-slate-800">{clientToView?.name}</p>
-                 </div>
-               </div>
-
-               <div>
-                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Related Invoices & Work Log for {workspaceDetailModal.type}</h4>
-                 <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                    {relatedInvoices.length === 0 ? (
-                      <div className="p-4 text-center text-slate-400 bg-slate-50 rounded-lg text-sm border border-dashed border-slate-200">No invoices raised specifically for {workspaceDetailModal.type} yet.</div>
-                    ) : (
-                      relatedInvoices.map(inv => (
-                        <div key={inv._id} className="flex justify-between items-center p-3 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors">
-                          <div>
-                            <p className="text-sm font-bold text-slate-800">{inv.invoiceNo}</p>
-                            <p className="text-[10px] font-bold text-slate-500 mt-0.5">{inv.items?.[0]?.description || 'Service Rendered'}</p>
-                            <p className="text-[10px] text-slate-400 mt-0.5">{new Date(inv.invoiceDate).toLocaleDateString('en-IN')}</p>
-                          </div>
-                          <div className="text-right flex flex-col items-end gap-1.5">
-                            <span className="text-sm font-black text-slate-700">₹{inv.totalAmountAfterTax?.toLocaleString('en-IN')}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${inv.paymentStatus === 'Paid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-                              {inv.paymentStatus}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                 </div>
-               </div>
-            </div>
-
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 text-right">
-               <button onClick={() => setWorkspaceDetailModal({ open: false, type: '', title: '' })} className="px-5 py-2 text-xs font-bold bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl transition-colors shadow-sm">
-                 Close Detail
-               </button>
-            </div>
-          </div>
-        </div>
+          <ClientWorkspaceDetail
+            workspace={ws}
+            records={workspaceData.data?.[ws.key] || []}
+            loading={workspaceData.loading}
+            client={clientToView}
+            invoices={clientInvoices}
+            onClose={() => setWorkspaceDetailModal({ open: false, key: '' })}
+            onOpenWorkspace={(w) => navigate(w.path)}
+            onOpenCfoReport={openCfoReport}
+          />
         );
       })()}
 

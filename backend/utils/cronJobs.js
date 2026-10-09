@@ -73,8 +73,11 @@ export const startCronJobs = () => {
 
         // Jab tak "Task End Date" nahi aati (Yaani task future me hai)
         if (now <= taskEndDate) {
+          await Notification.deleteMany({ recipient: todo.userId._id, kind: 'todo-reminder', refId: String(todo._id) });
           await Notification.create({
             recipient: todo.userId._id, // User ki ID
+            kind: 'todo-reminder',
+            refId: String(todo._id),
             title: '⏰ To-Do Action Required',
             message: `Reminder: Your task "${todo.title}" is pending. Please complete it before ${taskEndDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
             link: targetLink // 🔴 NAYA: Role ke hisaab se sahi page par bhejega
