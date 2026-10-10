@@ -6,6 +6,9 @@ import TdsWorkspace from '../models/TdsWorkspace.js';
 import AuditEngagement from '../models/AuditEngagement.js'; 
 import FssaiWorkspace from '../models/FssaiWorkspace.js';
 import Invoice from '../models/Invoice.js';
+import Client from '../models/Client.js';
+import Task from '../models/Task.js';
+import TaskActivity from '../models/TaskActivity.js';
 import { BusinessHealthMonthly, BusinessHealthSettings } from '../models/BusinessHealth.js';
 import { calculateBusinessHealth, previousMonth } from '../utils/businessHealthEngine.js';
 
@@ -265,7 +268,39 @@ export const getClientWorkspaces = async (req, res) => {
       };
     }).reverse();
 
-    res.json({ itr, gst, roc, tds, audit, fssai, cfo });
+    // 🔴 WORK MANAGEMENT ke tasks jo is client ke liye assign hue.
+    // Task me client ki ID save hoti hai: Client Master wali, ya usi PAN ke Registration (CRM) record wali.
+    const linkedIds = [String(client._id)];
+    if (client.pan) {
+      const crmClients = await Client.find({ pan: client.pan }).select('_id').lean();
+      crmClients.forEach(c => linkedIds.push(String(c._id)));
+    }
+    const taskDocs = await Task.find({ clientId: { $in: linkedIds } })
+      .populate('assignedTo', 'name empId role')
+      .populate('assignedBy', 'name role')
+      .populate('reviewer', 'name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Har task ki history (kab, kisne, kaunsa status): saare tasks ke liye ek hi query
+    const activities = taskDocs.length
+      ? await TaskActivity.find({ task: { $in: taskDocs.map(t => t._id) } }).populate('user', 'name').sort({ createdAt: 1 }).lean()
+      : [];
+    const historyByTask = {};
+    activities.forEach(a => {
+      (historyByTask[String(a.task)] = historyByTask[String(a.task)] || []).push({
+        at: a.createdAt, by: a.user?.name || '', oldStatus: a.oldStatus, newStatus: a.newStatus, remark: a.remark || ''
+      });
+    });
+
+    const now = new Date();
+    const tasks = taskDocs.map(t => ({
+      ...t,
+      isOverdue: !['Completed', 'Cancelled'].includes(t.currentStatus) && !!t.dueDate && now > new Date(t.dueDate),
+      history: historyByTask[String(t._id)] || []
+    }));
+
+    res.json({ itr, gst, roc, tds, audit, fssai, cfo, tasks });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

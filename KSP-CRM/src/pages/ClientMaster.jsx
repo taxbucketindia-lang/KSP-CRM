@@ -4,6 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import ClientWorkspaceDetail, { WORKSPACES } from '../components/ClientWorkspaceDetail';
+import ClientTasksPanel from '../components/ClientTasksPanel';
 import { downloadClientStatement } from '../utils/statementPdf';
 import * as XLSX from 'xlsx'; 
 import ExcelJS from 'exceljs'; 
@@ -1016,6 +1017,14 @@ const ClientMaster = () => {
                       })}
                     </div>
                   </div>
+
+                  {/* 🔴 WORK MANAGEMENT TASKS: is client ke liye assign hue saare tasks, status aur history ke saath */}
+                  <ClientTasksPanel
+                    tasks={workspaceData.data?.tasks || []}
+                    loading={workspaceData.loading}
+                    canOpenWork={can(user, 'WORK_MANAGEMENT')}
+                    onOpenWork={(task) => navigate(`/work-management?search=${encodeURIComponent(task.taskId || '')}`)}
+                  />
                 </div>
               )}
 

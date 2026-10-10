@@ -212,12 +212,13 @@ Lead generated manually via Free GST Health Scan.
         isSandboxSuccess = true;
       }
     } catch (sbErr) {
-      console.error('[SANDBOX API ERROR]', sbErr.message);
+      console.error('[SANDBOX API ERROR]', sbErr.response?.data?.message || sbErr.message);
     }
 
     // 🟢 B. FETCH RETURNS FROM GST INSIGHTS API
     let filingReturns = [];
     let apiReachable = true;
+    let insightsProfile = {}; // GST Insights ke return-filing jawab me aayi basic detail
 
     try {
       const response = await axios.get(`https://gst-insights-api.p.rapidapi.com/getGSTReturnFilingStatus/${gstin}`, {
@@ -228,6 +229,8 @@ Lead generated manually via Free GST Health Scan.
       let rawReturns = [];
       
       if (respData.data && respData.data.fillingData) respData = respData.data;
+      // Isi jawab me legal name, status, registration date wagairah bhi aate hain
+      if (respData && !Array.isArray(respData) && (respData.legalName || respData.status)) insightsProfile = respData;
 
       // 🔴 Extract Nature of Business from Insights API
       if (respData.natureOfBusinessActivity && Array.isArray(respData.natureOfBusinessActivity)) {
@@ -271,33 +274,60 @@ Lead generated manually via Free GST Health Scan.
         });
     }
 
-    // MAP PROFILE FIELDS
-    const legalName = sandboxData.lgnm || businessName || 'Valued Taxpayer';
-    const tradeName = sandboxData.tradeNam || sandboxData.tradeName || legalName;
-    const gstinStatus = sandboxData.sts || (isSandboxSuccess ? 'Active' : 'N/A');
-    const cancellationDate = sandboxData.cxdt || null;
-    const constitution = sandboxData.ctb || 'N/A';
-    const registrationDate = sandboxData.rgdt || 'N/A';
-    const taxpayerType = sandboxData.dty || 'N/A';
-    
+    // 🟢 C. BASIC DETAILS KA BACKUP: Sandbox se profile na mile (subscription khatam / API band) toh
+    // GST Insights ke details API se lo. Sandbox chal raha ho toh yeh extra call nahi jata.
+    let details = {};
+    if (!isSandboxSuccess) {
+      try {
+        const detailRes = await axios.get(`https://gst-insights-api.p.rapidapi.com/getGSTDetailsUsingGST/${gstin.toUpperCase()}`, {
+          headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'gst-insights-api.p.rapidapi.com' },
+        });
+        const body = detailRes.data?.data;
+        details = (Array.isArray(body) ? body[0] : body) || {};
+      } catch (detailErr) {
+        console.error('[GST INSIGHTS DETAILS API ERROR]', detailErr.response?.data?.message || detailErr.message);
+      }
+    }
+
+    // Pata: alag-alag hisse jod kar ek line
+    const joinAddress = (a) => (a ? [a.floorNumber, a.buildingNumber, a.buildingName, a.street, a.locality, a.location, a.district, a.stateCode, a.pincode]
+      .map(part => String(part || '').trim()).filter(Boolean).join(', ') : '');
+    const insightsAddress = details.principalAddress?.address;
+
+    // MAP PROFILE FIELDS (pehle Sandbox, na ho toh GST Insights)
+    const profileFound = isSandboxSuccess || !!(details.legalName || insightsProfile.legalName);
+    const legalName = sandboxData.lgnm || details.legalName || insightsProfile.legalName || businessName || 'Valued Taxpayer';
+    const tradeName = sandboxData.tradeNam || sandboxData.tradeName || details.tradeName || insightsProfile.tradeName || legalName;
+    const gstinStatus = sandboxData.sts || details.status || insightsProfile.status || (isSandboxSuccess ? 'Active' : 'N/A');
+    const cancellationDate = sandboxData.cxdt || details.cancelledDate || null;
+    const constitution = sandboxData.ctb || details.constitutionOfBusiness || 'N/A';
+    const registrationDate = sandboxData.rgdt || details.registrationDate || insightsProfile.registrationDate || 'N/A';
+    const taxpayerType = sandboxData.dty || details.taxType || 'N/A';
+
     let address = 'N/A';
     if (sandboxData.pradr && sandboxData.pradr.addr) {
       const addr = sandboxData.pradr.addr;
       address = `${addr.bno || ''} ${addr.st || ''} ${addr.loc || ''}`.trim();
     } else if (sandboxData.adr) {
       address = sandboxData.adr;
+    } else if (joinAddress(insightsAddress)) {
+      address = joinAddress(insightsAddress);
     }
 
-    const pincode = sandboxData.pradr?.addr?.pncd || sandboxData.pincode || 'N/A';
-    const stateJurisdiction = sandboxData.stj || 'N/A';
-    const centralJurisdiction = sandboxData.ctj || 'N/A';
-    const pan = sandboxData.pan || null;
+    const pincode = sandboxData.pradr?.addr?.pncd || sandboxData.pincode || insightsAddress?.pincode || 'N/A';
+    const stateJurisdiction = sandboxData.stj || details.stateJurisdiction || insightsProfile.stateJurisdictionCode || 'N/A';
+    const centralJurisdiction = sandboxData.ctj || details.centerJurisdiction || insightsProfile.centerJurisdiction || 'N/A';
+    // PAN GSTIN ke andar hi hota hai (3rd se 12th akshar)
+    const pan = sandboxData.pan || (/^[0-9]{2}[A-Z0-9]{10}/i.test(gstin) ? gstin.toUpperCase().slice(2, 12) : null);
+    const additionalList = Array.isArray(details.additionalAddress) ? details.additionalAddress.map(item => joinAddress(item?.address)).filter(Boolean) : [];
+    const additionalPlaces = additionalList.length ? additionalList.join(' | ') : (details.legalName ? 'None' : 'Not available from current data source');
+    if (natureOfBusiness.length === 0 && Array.isArray(details.natureOfBusinessActivity)) natureOfBusiness = details.natureOfBusinessActivity;
     const filingFrequency = estimateFilingFrequency(filingReturns);
 
     // RULE ENGINE
-    const registrationHealth = isSandboxSuccess ? gstinStatusHealth(gstinStatus) : 'Red';
+    const registrationHealth = profileFound ? gstinStatusHealth(gstinStatus) : 'Red';
     const { health: filingHealth, gapMonths } = apiReachable ? returnFilingHealth(filingReturns) : { health: 'Red', gapMonths: null };
-    const dataAvailHealth = isSandboxSuccess ? dataAvailabilityHealth(legalName) : 'Red';
+    const dataAvailHealth = profileFound ? dataAvailabilityHealth(legalName) : 'Red';
     const overallScanStatus = worstOf(registrationHealth, filingHealth, dataAvailHealth);
     const filingPattern = filingPatternFromGap(gapMonths);
 
@@ -329,6 +359,7 @@ Lead generated manually via Free GST Health Scan.
       pincode,
       stateJurisdiction,
       centralJurisdiction,
+      additionalPlaces,
       pan,
       natureOfBusiness, // Array of strings
       filingFrequency, // Derived string

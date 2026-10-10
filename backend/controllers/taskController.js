@@ -1,14 +1,35 @@
+import mongoose from 'mongoose';
 import Task from '../models/Task.js';
 import TaskActivity from '../models/TaskActivity.js';
 import DailyWorkReport from '../models/DailyWorkReport.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
+import Client from '../models/Client.js';
+import ClientMaster from '../models/ClientMaster.js';
 import { isCeo, getAssignError } from '../utils/roles.js';
 import { can } from '../utils/permissions.js';
+import { getListStats, countIf } from '../utils/listStats.js';
 
 // 🔴 "Assign Task" right: task dena, edit / re-assign / delete karna aur sabke tasks dekhna.
 // CEO ke paas hamesha hai; Admin ko CEO deta hai; employee ko Admin deta hai.
 const canManageTasks = (user) => can(user, 'WORK_ASSIGN');
+
+// 🔴 Task me client ki database ID save hoti hai: yahan uski asli Client ID (jaise C-1001) jodte hain.
+// Saare tasks ke liye sirf 2 query (Client Master + Registration CRM), har task par alag query nahi.
+const attachClientCodes = async (tasks) => {
+  const ids = [...new Set(tasks.map(t => String(t.clientId || '')).filter(id => /^[0-9a-fA-F]{24}$/.test(id)))];
+  const list = tasks.map(t => t.toObject());
+  if (ids.length === 0) return list;
+
+  const [masters, crm] = await Promise.all([
+    ClientMaster.find({ _id: { $in: ids } }).select('clientId').lean(),
+    Client.find({ _id: { $in: ids } }).select('clientId').lean()
+  ]);
+  const codeById = {};
+  [...crm, ...masters].forEach(c => { if (c.clientId) codeById[String(c._id)] = c.clientId; });
+
+  return list.map(t => ({ ...t, clientCode: codeById[String(t.clientId || '')] || '' }));
+};
 
 // @desc    Get all Employees for Dropdown
 // @route   GET /api/tasks/employees
@@ -39,8 +60,8 @@ export const getTasks = async (req, res) => {
       .populate('assignedBy', 'name role')
       .populate('reviewer', 'name')
       .sort({ createdAt: -1 });
-      
-    res.json(tasks);
+
+    res.json(await attachClientCodes(tasks));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -399,19 +420,35 @@ export const getPaginatedTasks = async (req, res) => {
 
     const totalCount = await Task.countDocuments(query);
 
-    // Global Stats (KPI Cards ke liye)
-    let statQuery = !canManageTasks(req.user) ? { assignedTo: req.user._id } : {};
-    const total = await Task.countDocuments(statQuery);
-    const inProgress = await Task.countDocuments({ ...statQuery, currentStatus: 'In Progress' });
-    const pendingClient = await Task.countDocuments({ ...statQuery, currentStatus: 'Pending Client' });
-    const underReview = await Task.countDocuments({ ...statQuery, currentStatus: 'Under Review' });
-    const completed = await Task.countDocuments({ ...statQuery, currentStatus: 'Completed' });
+    // 🔴 KPI CARDS: wahi filter jo list par laga hai (search, status, priority, employee, date),
+    // isliye cards ka total hamesha neeche ki list se milta hai. Ek hi halki aggregate query.
+    const statFields = {
+      total: { $sum: 1 },
+      inProgress: countIf({ $eq: ['$currentStatus', 'In Progress'] }),
+      pendingClient: countIf({ $eq: ['$currentStatus', 'Pending Client'] }),
+      underReview: countIf({ $eq: ['$currentStatus', 'Under Review'] }),
+      completed: countIf({ $eq: ['$currentStatus', 'Completed'] }),
+      overdue: countIf({ $and: [{ $lt: ['$dueDate', new Date()] }, { $not: [{ $in: ['$currentStatus', ['Completed', 'Cancelled']] }] }] })
+    };
+    const filterForStats = { ...query };
+    // Aggregate me id apne aap ObjectId nahi banti (find me banti hai)
+    if (typeof filterForStats.assignedTo === 'string' && mongoose.Types.ObjectId.isValid(filterForStats.assignedTo)) {
+      filterForStats.assignedTo = new mongoose.Types.ObjectId(filterForStats.assignedTo);
+    }
+    // Bina filter ke poora hisaab (End of Day report ke liye): user ke saare tasks
+    const overallFilter = !canManageTasks(req.user) ? { assignedTo: req.user._id } : {};
+    const [stats, overallStats] = await Promise.all([
+      getListStats(Task, filterForStats, statFields),
+      getListStats(Task, overallFilter, statFields)
+    ]);
 
     res.json({
       tasks,
+      totalCount,
       totalPages: Math.ceil(totalCount / parseInt(limit)),
       currentPage: parseInt(page),
-      stats: { total, inProgress, pendingClient, underReview, completed }
+      stats,
+      overallStats
     });
 
   } catch (error) {

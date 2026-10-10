@@ -1111,6 +1111,9 @@ import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import MeetingCalendar from '../components/MeetingCalendar';
+import CashFlowPanel from '../components/CashFlowPanel';
+import { isCeoRole } from '../utils/roles';
+import { formatIstDateTime } from '../utils/time';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   TrendingUp, Users, Wallet, AlertOctagon, Trophy, 
@@ -1188,6 +1191,19 @@ const SectionTitle = ({ icon: Icon, title, hint, color = 'bg-slate-100 text-slat
     {children}
   </div>
 );
+
+// 🔴 Work task ke saare reviews ek hi string me jude hote hain: yahan se sirf sabse latest wala nikalta hai
+const latestWorkReview = (remarks) => {
+  const text = String(remarks || '').trim();
+  if (!text) return null;
+  const blocks = text.split('📅').map(b => b.trim()).filter(Boolean);
+  const last = blocks[blocks.length - 1];
+  if (!text.includes('📅')) return { message: last.split(/\n\s*\n/).pop().trim(), when: '', by: '' };
+  const [head, ...rest] = last.split('\n');
+  const [when, by] = head.split('|').map(x => x.replace('👤', '').trim());
+  const message = rest.join('\n').replace('💬', '').trim();
+  return { message: message || head, when: when || '', by: by || '' };
+};
 
 const CeoDashboard = () => {
   const { user } = useContext(AuthContext);
@@ -1490,6 +1506,10 @@ const handleOpenEmployeeDetail = (empStat) => {
               title: t.taskTitle || t.clientName || t.serviceCategory || 'Task',
               description: t.taskDescription, currentStatus: t.currentStatus, dueDate: t.dueDate,
               assignedBy: t.assignedBy?.name, sortTime: new Date(t.updatedAt || t.createdAt),
+              clientName: t.clientName || '', clientId: t.clientCode || '', // asli Client ID (C-1001), database wali nahi
+              service: [t.serviceCategory, t.subService].filter(Boolean).join(' · '),
+              assignedAt: t.assignmentDate || t.createdAt,
+              latestReview: latestWorkReview(t.remarks),
               createdAt: new Date(t.createdAt),
               completedAt: t.currentStatus === 'Completed' ? new Date(t.completionDate || t.updatedAt || t.createdAt) : null,
               isOverdue: !!t.isOverdue && t.currentStatus !== 'Completed'
@@ -1497,9 +1517,14 @@ const handleOpenEmployeeDetail = (empStat) => {
             ...empDevTasks.map(t => ({
               _id: t._id, source: 'Dev', taskId: 'DEV',
               title: t.title,
-              description: t.remarks?.length ? `Last update: ${t.remarks[t.remarks.length - 1].message}` : t.description,
+              description: t.description,
               currentStatus: t.status, dueDate: t.dueDate,
               assignedBy: t.assignedByName, sortTime: new Date(t.updatedAt || t.createdAt),
+              assignedAt: t.createdAt,
+              latestReview: t.remarks?.length ? (() => {
+                const r = t.remarks[t.remarks.length - 1];
+                return { message: r.message, when: r.date ? formatIstDateTime(r.date) : '', by: r.employeeName || '' };
+              })() : null,
               createdAt: new Date(t.createdAt),
               completedAt: t.status === 'Completed' ? new Date([...(t.remarks || [])].reverse().find(r => r.status === 'Completed')?.date || t.updatedAt || t.createdAt) : null,
               isOverdue: isDevOverdue(t)
@@ -1986,6 +2011,9 @@ if (rawInTime) {
         </div>
       </div>
 
+      {/* PERSONAL CASH FLOW: sirf owner (CEO) ko dikhta hai, click par popup panel */}
+      {isCeoRole(user?.role) && <CashFlowPanel />}
+
       {/* CEO SUCCESS LIST WIDGET */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 md:p-6">
         <SectionTitle icon={ListTodo} title="Success List" hint="Your personal to-do list with reminders" color="bg-indigo-50 text-indigo-600">
@@ -2348,7 +2376,7 @@ if (rawInTime) {
           <p className="text-xl font-black text-emerald-700 mt-0.5">{selectedEmployee.completed}</p>
         </div>
         <div className="bg-blue-50/50 p-3 rounded-2xl border border-blue-100 text-center">
-          <p className="text-[10px] font-bold text-blue-600 uppercase">Pending</p>
+          <p className="text-[10px] font-bold text-blue-600 uppercase">Processing</p>
           <p className="text-xl font-black text-blue-700 mt-0.5">{selectedEmployee.pending}</p>
         </div>
         <div className="bg-rose-50/50 p-3 rounded-2xl border border-rose-100 text-center">
@@ -2367,14 +2395,28 @@ if (rawInTime) {
           </div>
         ) : (
           selectedEmployee.tasks.map((task) => (
-            <div key={task._id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between gap-4">
+            <div key={task._id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${task.source === 'Dev' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>{task.source === 'Dev' ? 'DEV TASK' : `#${task.taskId || 'TASK'}`}</span>
                   <h4 className="text-sm font-bold text-slate-800 truncate">{task.title || task.serviceType || 'Task Item'}</h4>
                 </div>
-                <p className="text-xs text-slate-500 line-clamp-1">{task.description || task.clientName || 'No description provided.'}</p>
-                {task.assignedBy && <p className="text-[10px] font-semibold text-slate-400">Assigned by: {task.assignedBy}</p>}
+                {/* Work Management task me client juda ho toh uska naam + ID */}
+                {(task.clientName || task.service) && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {task.clientName && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                        <Users size={10} /> {task.clientName}{task.clientId ? ` (${task.clientId})` : ''}
+                      </span>
+                    )}
+                    {task.service && <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{task.service}</span>}
+                  </div>
+                )}
+                <p className="text-xs text-slate-500 line-clamp-1">{task.description || 'No description provided.'}</p>
+                <p className="text-[10px] font-semibold text-slate-400">
+                  Assigned{task.assignedBy ? ` by ${task.assignedBy}` : ''}{task.assignedAt ? ` on ${formatIstDateTime(task.assignedAt)}` : ''}
+                </p>
               </div>
               <div className="text-right shrink-0">
                 <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${task.currentStatus === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
@@ -2384,6 +2426,19 @@ if (rawInTime) {
                   <p className="text-[10px] font-medium text-slate-400 mt-1">Due: {new Date(task.dueDate).toLocaleDateString('en-IN')}</p>
                 )}
               </div>
+            </div>
+              {/* Sirf sabse latest review (poori history nahi) */}
+              {task.latestReview ? (
+                <div className="mt-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 mb-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Latest Review</span>
+                    <span className="text-[10px] font-semibold text-slate-500">{[task.latestReview.by, task.latestReview.when].filter(Boolean).join(' · ')}</span>
+                  </div>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap break-words line-clamp-3">{task.latestReview.message}</p>
+                </div>
+              ) : (
+                <p className="mt-2 text-[10px] font-medium text-slate-400 italic">No review added yet.</p>
+              )}
             </div>
           ))
         )}

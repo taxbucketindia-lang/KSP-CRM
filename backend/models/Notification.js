@@ -16,4 +16,7 @@ const notificationSchema = new mongoose.Schema({
   refId: { type: String }
 }, { timestamps: true });
 
+// Har user ki latest list jaldi nikle aur purane notification ki safai halki rahe
+notificationSchema.index({ recipient: 1, createdAt: -1 });
+
 export default mongoose.model('Notification', notificationSchema);

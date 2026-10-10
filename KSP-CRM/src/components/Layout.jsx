@@ -2,7 +2,7 @@ import { useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
-import { isAdminRole } from '../utils/roles';
+import { isAdminRole, isCeoRole } from '../utils/roles';
 import { can } from '../utils/permissions';
 import {
   LayoutDashboard, Users, UserCircle, Briefcase, LogOut, Menu,
@@ -139,7 +139,9 @@ const Layout = () => {
     setShowNotifications(false);
     setToasts(prev => prev.filter(t => t._id !== n._id));
     markRead(n);
-    if (n.link) navigate(n.link);
+    // Employee ka calendar My Portal me hai (CEO ka CEO Dashboard me), isliye meeting reminder wahin khulta hai
+    const link = n.kind === 'meeting-reminder' && !isCeoRole(user?.role) ? '/my-portal#my-calendar' : n.link;
+    if (link) navigate(link);
   };
 
   const markAllRead = async () => {
@@ -218,10 +220,12 @@ const Layout = () => {
   };
 
   const mainItems = [
-    { path: '/', name: 'Dashboard', icon: LayoutDashboard },
+    // Home: CEO ko sirf CEO Dashboard, Admin ko Dashboard, employee ko My Portal (employee ko Dashboard nahi dikhta)
+    ...(isCeoRole(user?.role) ? [{ path: '/ceo-panel', name: 'CEO Dashboard', icon: Target }]
+      : isAdminRole(user?.role) ? [{ path: '/', name: 'Dashboard', icon: LayoutDashboard }] : []),
     ...(!isAdminRole(user?.role) ? [
+      // Success List ab My Portal ke andar hai (alag tab nahi)
       { path: '/my-portal', name: 'My Portal', icon: CalendarClock },
-      { path: '/todo', name: 'Success List', icon: ListTodo },
     ] : []),
     { path: '/work-management', name: 'Work Management', icon: ClipboardList, perm: 'WORK_MANAGEMENT' },
     { path: '/taskhandover', name: 'Task Handover', icon: RotateCwFadingClock, perm: 'TASK_HANDOVER' },
@@ -292,7 +296,8 @@ const Layout = () => {
       { name: 'Automation', icon: Zap, placeholder: true }
     ]),
     ...buildSection('Executive', Target, [
-      { path: '/ceo-panel', name: 'CEO Dashboard', icon: Target, perm: 'CEO_DASHBOARD' },
+      // CEO ke liye yeh upar Main me hai (home page), isliye yahan dobara nahi
+      ...(isCeoRole(user?.role) ? [] : [{ path: '/ceo-panel', name: 'CEO Dashboard', icon: Target, perm: 'CEO_DASHBOARD' }]),
       { path: '/business-health', name: 'Client Health Reports', icon: HeartPulse, perm: 'BUSINESS_HEALTH' }
     ])
   ];
@@ -687,6 +692,8 @@ const Layout = () => {
                         </div>
                       )}
                     </div>
+                    {/* Sirf latest 20 rehte hain: purane database se apne aap hat jaate hain */}
+                    <p className="px-4 py-2 border-t border-slate-100 bg-slate-50 text-[10px] font-semibold text-slate-400 text-center">Showing your latest 20 notifications. Older ones are removed automatically.</p>
                   </div>
                 </>
               )}

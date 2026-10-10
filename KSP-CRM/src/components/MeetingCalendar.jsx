@@ -5,7 +5,7 @@ import { AuthContext } from '../context/AuthContext';
 import { formatIstTime, formatIstDate, istDateKey, istToday, toIstInputValue, istInputToIso } from '../utils/time';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Clock, MapPin, Edit, Trash2,
-  CheckCircle2, Circle, Bell, Loader2, Users, PhoneCall, ClipboardList, Star
+  CheckCircle2, Circle, Bell, Loader2, Users, PhoneCall, ClipboardList, Star, Maximize2, Search
 } from 'lucide-react';
 
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -21,7 +21,8 @@ const emptyForm = (dateKey) => ({ title: '', type: 'Meeting', date: dateKey, tim
 
 // 🔴 CALENDAR & MEETINGS: date + time ke saath meeting / kaam set karo.
 // Reminder notification: us din subah 9:30, phir 30 minute pehle, phir 10 minute pehle.
-const MeetingCalendar = () => {
+// openSignal: bahar ke quick button se nayi meeting / reminder ka form kholne ke liye
+const MeetingCalendar = ({ openSignal = 0 }) => {
   const { user } = useContext(AuthContext);
   const headers = { Authorization: `Bearer ${user.token}` };
   const today = istToday();
@@ -35,6 +36,11 @@ const MeetingCalendar = () => {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm(today));
   const [saving, setSaving] = useState(false);
+
+  // 🔴 VIEW ALL: saari meetings / kaam ek badi screen (popup) me
+  const [viewAll, setViewAll] = useState(false);
+  const [allFilter, setAllFilter] = useState('Upcoming'); // 'Upcoming' | 'Past' | 'Done' | 'All'
+  const [allSearch, setAllSearch] = useState('');
 
   const fetchMeetings = async () => {
     try {
@@ -91,11 +97,48 @@ const MeetingCalendar = () => {
       .slice(0, 4);
   }, [meetings]);
 
+  // View All popup: filter + search, date ke hisaab se group
+  const allGroups = useMemo(() => {
+    const now = Date.now();
+    const text = allSearch.trim().toLowerCase();
+    const list = meetings.filter(m => {
+      const time = new Date(m.startAt).getTime();
+      if (allFilter === 'Upcoming' && !(m.status === 'Scheduled' && time >= now)) return false;
+      if (allFilter === 'Past' && !(m.status === 'Scheduled' && time < now)) return false;
+      if (allFilter === 'Done' && m.status !== 'Done') return false;
+      if (text && !`${m.title} ${m.location || ''} ${m.notes || ''} ${m.type}`.toLowerCase().includes(text)) return false;
+      return true;
+    }).sort((a, b) => (allFilter === 'Upcoming' ? new Date(a.startAt) - new Date(b.startAt) : new Date(b.startAt) - new Date(a.startAt)));
+
+    const groups = [];
+    list.forEach(m => {
+      const key = istDateKey(m.startAt);
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.items.push(m); else groups.push({ key, items: [m] });
+    });
+    return { groups, count: list.length };
+  }, [meetings, allFilter, allSearch]);
+
+  const allCounts = useMemo(() => {
+    const now = Date.now();
+    return {
+      Upcoming: meetings.filter(m => m.status === 'Scheduled' && new Date(m.startAt).getTime() >= now).length,
+      Past: meetings.filter(m => m.status === 'Scheduled' && new Date(m.startAt).getTime() < now).length,
+      Done: meetings.filter(m => m.status === 'Done').length,
+      All: meetings.length
+    };
+  }, [meetings]);
+
   const openNew = (dateKey = selectedDate) => {
     setEditingId(null);
     setForm(emptyForm(dateKey < today ? today : dateKey));
     setIsModalOpen(true);
   };
+
+  useEffect(() => {
+    if (openSignal > 0) openNew(today);
+    // eslint-disable-next-line
+  }, [openSignal]);
 
   const openEdit = (meeting) => {
     const local = toIstInputValue(meeting.startAt); // 'YYYY-MM-DDTHH:mm' India time
@@ -197,9 +240,14 @@ const MeetingCalendar = () => {
             <p className="text-[11px] font-medium text-slate-400 flex items-center gap-1"><Bell size={10}/> Reminders: 9:30 AM that day, 30 min before and 10 min before</p>
           </div>
         </div>
-        <button onClick={() => openNew()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
-          <Plus size={14}/> Add Meeting / Task
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setViewAll(true)} title="See everything on a big screen" className="border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all">
+            <Maximize2 size={13}/> View All
+          </button>
+          <button onClick={() => openNew()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
+            <Plus size={14}/> Add Meeting / Task
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -288,6 +336,58 @@ const MeetingCalendar = () => {
           )}
         </div>
       </div>
+
+      {/* VIEW ALL POPUP (add / edit ka form is se upar khulta hai) */}
+      {viewAll && (
+        <div className="fixed inset-0 z-[45] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-2 sm:p-4" onClick={() => setViewAll(false)}>
+          <div className="bg-slate-50 rounded-3xl w-full max-w-3xl h-[92vh] shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white px-4 sm:px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="h-10 w-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0"><CalendarDays size={18}/></span>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-black text-slate-800">Calendar & Meetings</h2>
+                    <p className="text-[11px] text-slate-400 font-medium">{allCounts.Upcoming} upcoming · {allCounts.Past} time passed · {allCounts.Done} done</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => openNew(today)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"><Plus size={14}/> Add</button>
+                  <button onClick={() => setViewAll(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"><X size={18}/></button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <div className="relative flex-1 min-w-[160px]">
+                  <Search size={14} className="absolute left-3 top-2.5 text-slate-400"/>
+                  <input type="text" value={allSearch} onChange={(e) => setAllSearch(e.target.value)} placeholder="Search title, place, notes..." className="w-full text-xs font-semibold border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20"/>
+                </div>
+                <div className="flex bg-slate-100 p-0.5 rounded-xl overflow-x-auto">
+                  {['Upcoming', 'Past', 'Done', 'All'].map(value => (
+                    <button key={value} onClick={() => setAllFilter(value)} className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg whitespace-nowrap transition-all ${allFilter === value ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{value === 'Past' ? 'Time Passed' : value} ({allCounts[value]})</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 custom-scrollbar">
+              {allGroups.count === 0 ? (
+                <div className="text-center py-16 flex flex-col items-center">
+                  <CalendarDays size={40} className="text-slate-200 mb-2"/>
+                  <p className="text-sm font-bold text-slate-500">Nothing found here.</p>
+                </div>
+              ) : allGroups.groups.map(group => (
+                <div key={group.key}>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2">
+                    {new Date(`${group.key}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}
+                    {group.key === today && <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Today</span>}
+                    <span className="flex-1 h-px bg-slate-200"></span>
+                  </p>
+                  <div className="space-y-2">{group.items.map(m => renderMeeting(m))}</div>
+                </div>
+              ))}
+            </div>
+            <div className="bg-white px-4 sm:px-6 py-2.5 border-t border-slate-100 text-[11px] font-semibold text-slate-400">Showing {allGroups.count} item{allGroups.count === 1 ? '' : 's'}</div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: ADD / EDIT */}
       {isModalOpen && (

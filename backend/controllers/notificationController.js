@@ -1,11 +1,26 @@
 import Notification from '../models/Notification.js';
 
-// 1. Logged-in user ki latest notifications (history samet)
+// Har user ke paas sirf sabse naye itne notification rehte hain; usse purane database se apne aap hat jaate hain
+const KEEP_LATEST = 20;
+
+// 1. Logged-in user ki latest 20 notifications
 export const getNotifications = async (req, res) => {
   try {
     const notifications = await Notification.find({ recipient: req.user._id })
-                                            .sort({ createdAt: -1 })
-                                            .limit(40);
+                                            .sort({ createdAt: -1, _id: -1 })
+                                            .limit(KEEP_LATEST);
+
+    // 🔴 AUTO CLEAN: list bhar chuki ho toh 20 se purane (padhe ya bina padhe) database se delete.
+    // Sirf 20th se purane hi hatte hain, isliye abhi-abhi aaya naya notification kabhi nahi hatta.
+    if (notifications.length === KEEP_LATEST) {
+      const oldest = notifications[notifications.length - 1];
+      Notification.deleteMany({
+        recipient: req.user._id,
+        createdAt: { $lte: oldest.createdAt },
+        _id: { $nin: notifications.map(n => n._id) }
+      }).catch(error => console.error('Notification auto-clean failed:', error.message));
+    }
+
     res.status(200).json(notifications);
   } catch (error) {
     res.status(500).json({ message: error.message });

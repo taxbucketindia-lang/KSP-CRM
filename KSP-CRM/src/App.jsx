@@ -3,7 +3,7 @@ import { AuthProvider, AuthContext } from './context/AuthContext';
 import { useContext } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { can, permissionLabel } from './utils/permissions';
-import { isAdminRole } from './utils/roles';
+import { isAdminRole, isCeoRole } from './utils/roles';
 
 // Components
 import Login from './pages/Login';
@@ -60,9 +60,24 @@ const Guard = ({ perm, adminOnly, children }) => {
       <p className="text-sm text-slate-500 mt-2">
         {adminOnly ? 'Only the CEO and Admins can open this page.' : `Ask your Admin for the "${permissionLabel(perm)}" right.`}
       </p>
-      <Link to="/" className="mt-5 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl">Go to Dashboard</Link>
+      <Link to="/" className="mt-5 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl">Go to Home</Link>
     </div>
   );
+};
+
+// 🔴 HOME PAGE role ke hisaab se:
+// CEO -> CEO Dashboard, Admin -> Dashboard, baaki sab employee -> My Portal
+const Home = () => {
+  const { user } = useContext(AuthContext);
+  if (isCeoRole(user?.role)) return <Navigate to="/ceo-panel" replace />;
+  if (isAdminRole(user?.role)) return <Dashboard />;
+  return <Navigate to="/my-portal" replace />;
+};
+
+// Purana Success List page: employee ke liye ab My Portal ke andar hai (purane link / reminder wahin pahunchte hain)
+const TodoHome = () => {
+  const { user } = useContext(AuthContext);
+  return isAdminRole(user?.role) ? <TodoReminder /> : <Navigate to="/my-portal#success-list" replace />;
 };
 
 const guarded = (perm, element) => <Guard perm={perm}>{element}</Guard>;
@@ -77,9 +92,9 @@ function App() {
           {/* Protected Routes Wrapped in Layout */}
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             {/* Sabke liye */}
-            <Route index element={<Dashboard />} />
+            <Route index element={<Home />} />
             <Route path="/my-portal" element={<MyPortal />} />
-            <Route path="/todo" element={<TodoReminder />} />
+            <Route path="/todo" element={<TodoHome />} />
 
             {/* Sirf CEO / Admin */}
             <Route path="settings" element={<Guard adminOnly><Settings /></Guard>} />
