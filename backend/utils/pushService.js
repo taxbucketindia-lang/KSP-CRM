@@ -11,26 +11,50 @@ import User from '../models/User.js';
 export const PUSH_KINDS = ['task-assigned', 'devtask', 'handover-new', 'meeting-reminder'];
 
 let configured = null; // null = abhi check nahi kiya
+let problem = '';      // set up na ho paye toh wajah (status link aur error message me dikhti hai)
+
+// Hosting ke dashboard me value chipkate waqt aksar quotes ya space saath aa jaate hain: unhe hata do
+const envValue = (name) => String(process.env[name] || '').trim().replace(/^["']|["']$/g, '').trim();
 
 const isConfigured = () => {
   if (configured !== null) return configured;
-  const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT } = process.env;
-  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-    console.warn('[PUSH] VAPID keys missing in .env: phone notifications are off.');
+  const publicKey = envValue('VAPID_PUBLIC_KEY');
+  const privateKey = envValue('VAPID_PRIVATE_KEY');
+  const missing = [!publicKey && 'VAPID_PUBLIC_KEY', !privateKey && 'VAPID_PRIVATE_KEY'].filter(Boolean);
+  if (missing.length > 0) {
+    problem = `Missing on the server: ${missing.join(', ')}. Add it in the hosting environment variables and redeploy.`;
+    console.warn('[PUSH]', problem);
     configured = false;
     return false;
   }
   try {
-    webpush.setVapidDetails(VAPID_SUBJECT || 'mailto:admin@example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    // Subject me sirf email likh diya ho toh "mailto:" khud laga do
+    let subject = envValue('VAPID_SUBJECT') || 'mailto:admin@example.com';
+    if (!/^(mailto:|https?:\/\/)/i.test(subject)) subject = `mailto:${subject}`;
+    webpush.setVapidDetails(subject, publicKey, privateKey);
     configured = true;
+    problem = '';
   } catch (error) {
-    console.error('[PUSH] Invalid VAPID keys:', error.message);
+    problem = `The keys are present but not valid: ${error.message}`;
+    console.error('[PUSH]', problem);
     configured = false;
   }
   return configured;
 };
 
-export const getPublicKey = () => (isConfigured() ? process.env.VAPID_PUBLIC_KEY : null);
+export const getPublicKey = () => (isConfigured() ? envValue('VAPID_PUBLIC_KEY') : null);
+
+// Jaanch ke liye: kaun si key server tak pahunchi (sirf haan / na, key ki value kabhi nahi)
+export const getPushStatus = () => {
+  const ready = isConfigured();
+  return {
+    ready,
+    VAPID_PUBLIC_KEY: !!envValue('VAPID_PUBLIC_KEY'),
+    VAPID_PRIVATE_KEY: !!envValue('VAPID_PRIVATE_KEY'),
+    VAPID_SUBJECT: !!envValue('VAPID_SUBJECT'),
+    problem: ready ? '' : problem
+  };
+};
 
 // Ek user ke saare devices par push bhejna. Kitne devices par gaya wo lautata hai.
 export const sendPushToUser = async (userId, payload) => {

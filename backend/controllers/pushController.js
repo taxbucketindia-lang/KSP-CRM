@@ -1,12 +1,15 @@
 import PushSubscription from '../models/PushSubscription.js';
-import { getPublicKey, sendPushToUser } from '../utils/pushService.js';
+import { getPublicKey, sendPushToUser, getPushStatus } from '../utils/pushService.js';
 
 // @route   GET /api/push/public-key   (browser ko subscribe karne ke liye chahiye)
 export const getPushPublicKey = (req, res) => {
   const publicKey = getPublicKey();
-  if (!publicKey) return res.status(503).json({ message: 'Phone notifications are not set up on the server yet.' });
+  if (!publicKey) return res.status(503).json({ message: `Phone notifications are not set up on the server. ${getPushStatus().problem}` });
   res.json({ publicKey });
 };
+
+// @route   GET /api/push/status   (bina login: server par push taiyaar hai ya nahi. Sirf haan / na, koi key nahi dikhti)
+export const getPushSetupStatus = (req, res) => res.json(getPushStatus());
 
 // @route   POST /api/push/subscribe   (is device par notification chalu)
 export const subscribePush = async (req, res) => {
