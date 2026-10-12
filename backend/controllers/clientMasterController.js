@@ -158,9 +158,19 @@ export const getClients = async (req, res) => {
 // ==========================================
 // 2. Create a New Client Manually (With TB- ID Auto Gen)
 // ==========================================
+// Form khali chhodi hui dropdown / date ko '' bhejta hai. Fixed-list wale fields (constitution, accounting method)
+// aur dates me '' galat value maani jaati hai, isliye use "khali" (null) bana dete hain.
+const OPTIONAL_FIELDS = ['constitution', 'accounting_method', 'dob', 'date_of_incorporation', 'assignedRM'];
+const clearEmptyFields = (data) => {
+  OPTIONAL_FIELDS.forEach(field => { if (data[field] === '') data[field] = null; });
+  if (data.clientType === '') delete data.clientType; // khali ho toh default (Individual) lage
+  return data;
+};
+
 export const createClient = async (req, res) => {
   try {
     const { pan, ...otherData } = req.body;
+    clearEmptyFields(otherData);
     
     if (!pan) return res.status(400).json({ message: "PAN Number is strictly required." });
     const uppercasePan = pan.toUpperCase();
@@ -210,6 +220,7 @@ export const createClient = async (req, res) => {
 export const updateClient = async (req, res) => {
   try {
     const { pan, ...updateData } = req.body;
+    clearEmptyFields(updateData);
     if (pan) updateData.pan = pan.toUpperCase();
 
     const updatedClient = await ClientMaster.findByIdAndUpdate(req.params.id, updateData, { new: true });
@@ -234,6 +245,34 @@ export const deleteClient = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+// 🔴 REGISTRATIONS SE IMPORT: jin logon ka registration / filing hamne kiya aur jo ab regular client ban rahe hain.
+// Sirf wahi dikhte hain jo abhi Client Master me nahi hain (PAN se milan). Search server par, 20 tak.
+// @route   GET /api/client-master/registration-candidates?search=
+export const getRegistrationCandidates = async (req, res) => {
+  try {
+    const search = String(req.query.search || '').trim();
+    const masterPans = await ClientMaster.distinct('pan');
+    const filter = { pan: { $nin: masterPans } };
+
+    if (search) {
+      const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const or = [{ assesseeName: regex }, { pan: regex }, { clientId: regex }, { service: regex }, { businessName: regex }, { certificateNo: regex }];
+      if (/^\d{6,12}$/.test(search)) or.push({ mobile: Number(search) }); // mobile number me save hai
+      filter.$or = or;
+    }
+
+    const candidates = await Client.find(filter)
+      .select('clientId assesseeName pan mobile email dob district state pinCode service businessName certificateNo applicationNo feeStatus createdAt')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    res.json(candidates);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // ==========================================
 // 5. Ek client ke saare Connected Workspaces ki poori detail (360° profile ke boxes par click ke liye)
 // ==========================================

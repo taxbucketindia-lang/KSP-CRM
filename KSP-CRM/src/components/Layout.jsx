@@ -10,7 +10,7 @@ import {
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
   Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo,
   AlertCircle, TrendingUp, Code, Globe, Zap, Cake, RotateCwFadingClock, HeartPulse,
-  CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight, BellRing, Smartphone
+  CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight, BellRing, Smartphone, Handshake
 } from 'lucide-react';
 import { getPushState, enablePush, disablePush, syncPush, detachPush, sendTestPush } from '../utils/push';
 import toast from 'react-hot-toast';
@@ -320,12 +320,13 @@ const Layout = () => {
       { path: '/hr/attendance', name: 'Attendance Control', icon: CalendarClock, perm: 'ATTENDANCE' },
       { path: '/hr/salary', name: 'Salary Calculation', icon: IndianRupee, perm: 'SALARY' },
       { path: '/hr/holiday', name: 'Holiday', icon: ClipboardList, perm: 'HOLIDAY' },
-      { path: '/officexpense', name: 'Office Expense', icon: Receipt, perm: 'OFFICE_EXPENSE' },
       { name: 'Leave', icon: FileText, placeholder: true },
       { name: 'Performance', icon: Activity, placeholder: true }
     ]),
     ...buildSection('Finance', Landmark, [
       { path: '/invoice-generator', name: 'Invoices', icon: FileText, perm: 'INVOICES' },
+      { path: '/vendors', name: 'Vendors', icon: Handshake, perm: 'VENDORS' },
+      { path: '/officexpense', name: 'Office Expense', icon: Receipt, perm: 'OFFICE_EXPENSE' },
       { name: 'Collections', icon: IndianRupee, placeholder: true },
       { name: 'Outstanding', icon: AlertCircle, placeholder: true },
       { name: 'BA Commission', icon: Landmark, placeholder: true }

@@ -22,11 +22,16 @@ notificationSchema.index({ recipient: 1, createdAt: -1 });
 // 🔴 PHONE PUSH: naya notification bante hi (kahin se bhi) zaroori wale phone ke notification bar me bhi jaate hain.
 // Kaun se "zaroori" hain wo utils/pushService.js ki PUSH_KINDS list me hai. Push fail ho toh bhi notification save rehta hai.
 notificationSchema.pre('save', function () { this.$locals.wasNew = this.isNew; });
-notificationSchema.post('save', function (doc) {
+// Push ke poora hone ka intezaar karte hain: live server (Vercel) jawab bhejte hi ruk jata hai,
+// isliye bina intezaar ke bheja hua push beech me hi kat sakta hai. Push fail ho toh bhi save nahi rukta.
+notificationSchema.post('save', async function (doc) {
   if (!doc.$locals.wasNew) return;
-  import('../utils/pushService.js')
-    .then(({ pushForNotification }) => pushForNotification(doc))
-    .catch(error => console.error('[PUSH] hook failed:', error.message));
+  try {
+    const { pushForNotification } = await import('../utils/pushService.js');
+    await pushForNotification(doc);
+  } catch (error) {
+    console.error('[PUSH] hook failed:', error.message);
+  }
 });
 
 export default mongoose.model('Notification', notificationSchema);

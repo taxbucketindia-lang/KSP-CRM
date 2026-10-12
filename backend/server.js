@@ -36,6 +36,7 @@ import meetingRoutes from './routes/meetingRoutes.js';
 import businessHealthRoutes from './routes/businessHealthRoutes.js';
 import personalFinanceRoutes from './routes/personalFinanceRoutes.js';
 import pushRoutes from './routes/pushRoutes.js';
+import vendorRoutes from './routes/vendorRoutes.js';
 import { startMeetingReminderCron } from './utils/meetingReminders.js';
 
 
@@ -80,6 +81,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/business-health', businessHealthRoutes);
 app.use('/api/personal-finance', personalFinanceRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/vendors', vendorRoutes);
 
 // ==========================================
 // CRON JOB FOR DAILY FOLLOW-UP REMINDERS

@@ -14,6 +14,60 @@ import {
 } from 'lucide-react';
 import { can } from '../utils/permissions';
 
+// 🔴 HAR SERVICE KI SIRF MAIN JAANKARI. Yahan sirf wahi rakha hai jo registration / filing ke waqt chahiye;
+// poori detail (ITR ka tax hisaab, GST returns wagairah) us service ke apne workspace me hoti hai.
+const AY_OPTIONS = ['AY 2026-27', 'AY 2025-26', 'AY 2024-25', 'AY 2023-24', 'AY 2022-23'];
+const REG_DETAILS = {
+  'ITR Filing': {
+    title: 'ITR Filing Details',
+    fields: [
+      { key: 'itrFiledUpToAY', label: 'Assessment Year', options: AY_OPTIONS },
+      { key: 'portalPassword', label: 'Income Tax Portal Password', placeholder: 'Password', hint: 'User ID is the PAN number.' }
+    ]
+  },
+  'GST Registration': {
+    title: 'GST Registration Details',
+    fields: [
+      { key: 'businessName', label: 'Trade / Business Name', placeholder: 'e.g. Sharma Traders' },
+      { key: 'tempRefNo', label: 'TRN', placeholder: 'Temporary Reference Number', upper: true },
+      { key: 'applicationNo', label: 'ARN', placeholder: 'Application Reference Number', upper: true },
+      { key: 'portalUserId', label: 'GST Portal User ID', placeholder: 'User ID' },
+      { key: 'portalPassword', label: 'GST Portal Password', placeholder: 'Password' },
+      { key: 'certificateNo', label: 'GST Number (GSTIN)', placeholder: 'Enter once the GSTIN is issued', upper: true, hint: 'Leave empty until the registration is approved.' }
+    ]
+  },
+  'Company Registration': {
+    title: 'Company Registration Details',
+    fields: [
+      { key: 'businessName', label: 'Company Name', placeholder: 'Proposed / approved name' },
+      { key: 'applicationNo', label: 'SRN', placeholder: 'Service Request Number', upper: true },
+      { key: 'portalUserId', label: 'MCA User ID', placeholder: 'User ID' },
+      { key: 'portalPassword', label: 'MCA Password', placeholder: 'Password' },
+      { key: 'certificateNo', label: 'CIN', placeholder: 'Enter once the company is incorporated', upper: true, wide: true }
+    ]
+  },
+  'Trademark Registration': {
+    title: 'Trademark Details',
+    fields: [
+      { key: 'businessName', label: 'Brand / Trademark Name', placeholder: 'e.g. TaxBucket' },
+      { key: 'tmClass', label: 'Class', placeholder: 'e.g. 35' },
+      { key: 'applicationNo', label: 'Application No.', placeholder: 'Trademark application number', upper: true },
+      { key: 'certificateNo', label: 'Registration No.', placeholder: 'Enter once it is registered', upper: true }
+    ]
+  },
+  'FSSAI Registration': {
+    title: 'FSSAI Registration Details',
+    fields: [
+      { key: 'businessName', label: 'Business / Outlet Name', placeholder: 'e.g. Sharma Sweets' },
+      { key: 'applicationNo', label: 'Application / Reference No.', placeholder: 'FoSCoS reference number', upper: true },
+      { key: 'portalUserId', label: 'FoSCoS User ID', placeholder: 'User ID' },
+      { key: 'portalPassword', label: 'FoSCoS Password', placeholder: 'Password' },
+      { key: 'certificateNo', label: 'FSSAI Licence No.', placeholder: 'Enter once the licence is issued', upper: true, wide: true }
+    ]
+  }
+};
+const REG_KEYS = ['businessName', 'tempRefNo', 'applicationNo', 'portalUserId', 'portalPassword', 'certificateNo', 'tmClass'];
+
 const Clients = () => {
   const { user } = useContext(AuthContext);
   // 🔴 Data delete sirf "Delete Records" right wala kar sakta hai (CEO, Admin, ya jise Admin ne diya)
@@ -64,7 +118,9 @@ const Clients = () => {
     verificationMethod: 'Pending', itrProcessedStatus: 'Pending',
     itrFiledBy: '', regime: 'New', formNo: 'ITR-1',
     // BANK DETAILS
-    bankName: '', accountNo: '', ifscCode: ''
+    bankName: '', accountNo: '', ifscCode: '',
+    // REGISTRATION KI MAIN JAANKARI (TRN / ARN / ID / password / GSTIN wagairah)
+    businessName: '', tempRefNo: '', applicationNo: '', portalUserId: '', portalPassword: '', certificateNo: '', tmClass: ''
   };
   const [formData, setFormData] = useState(initialForm);
 
@@ -408,6 +464,8 @@ const Clients = () => {
       bankName: client.bankName || '',
       accountNo: client.accountNo || '',
       ifscCode: client.ifscCode || '',
+      businessName: client.businessName || '', tempRefNo: client.tempRefNo || '', applicationNo: client.applicationNo || '',
+      portalUserId: client.portalUserId || '', portalPassword: client.portalPassword || '', certificateNo: client.certificateNo || '', tmClass: client.tmClass || '',
       filingDate: client.filingDate ? new Date(client.filingDate).toISOString().split('T')[0] : '',
       nextReminderDate: client.nextReminderDate ? new Date(client.nextReminderDate).toISOString().split('T')[0] : '',
       feeStatus: client.feeStatus || 'Paid',
@@ -474,6 +532,13 @@ const Clients = () => {
         if (Number(originalData.amountReceived || 0) !== Number(formData.amountReceived || 0)) changes.push(`Amount Received changed: [₹${originalData.amountReceived || 0}] ➔ [₹${formData.amountReceived || 0}]`);
         
         if (originalData.itrProcessedStatus !== formData.itrProcessedStatus) changes.push(`ITR Status changed to [${formData.itrProcessedStatus}]`);
+
+        (REG_DETAILS[formData.service]?.fields || []).filter(field => REG_KEYS.includes(field.key)).forEach(field => {
+          const before = String(originalData[field.key] || '').trim();
+          const after = String(formData[field.key] || '').trim();
+          if (before === after) return;
+          changes.push(field.key === 'portalPassword' ? `${field.label} updated` : `${field.label}: [${before || 'blank'}] ➔ [${after || 'blank'}]`);
+        });
         
         let oldRem = originalData.nextReminderDate ? new Date(originalData.nextReminderDate).toISOString().split('T')[0] : 'None';
         let newRem = formData.nextReminderDate || 'None';
@@ -497,7 +562,11 @@ const Clients = () => {
       const payload = { 
         ...formData, 
         remarks: finalRemarks,
-        itrFiledUpToAY: formData.service === 'ITR Filing' ? formData.itrFiledUpToAY : null,
+        // Number wali fields hamesha capital me
+        tempRefNo: String(formData.tempRefNo || '').trim().toUpperCase(),
+        applicationNo: String(formData.applicationNo || '').trim().toUpperCase(),
+        certificateNo: String(formData.certificateNo || '').trim().toUpperCase(),
+        itrFiledUpToAY: formData.service === 'ITR Filing' ? (formData.itrFiledUpToAY || AY_OPTIONS[0]) : null,
         // 🔴 UPDATED
         filingDate: ['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(formData.service) && formData.filingDate ? formData.filingDate : null,
         nextReminderDate: ['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(formData.service) && formData.nextReminderDate ? formData.nextReminderDate : null,
@@ -869,7 +938,25 @@ const Clients = () => {
                   </div>
                 )}
 
-                {clientToView.service === 'ITR Filing' && (
+                {/* 🔴 REGISTRATION KI MAIN JAANKARI */}
+                {REG_DETAILS[clientToView.service] && (
+                  <div className="col-span-4 bg-indigo-50 rounded-2xl p-4 border border-indigo-100 mt-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5 mb-3">
+                      <FileText size={14} /> {REG_DETAILS[clientToView.service].title}
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 bg-white p-3 rounded-xl border border-indigo-100">
+                      {REG_DETAILS[clientToView.service].fields.map(field => (
+                        <div key={field.key} className="min-w-0">
+                          <span className="text-slate-400 uppercase font-bold block text-[9px]">{field.label}</span>
+                          <span className={`text-sm font-bold break-all ${clientToView[field.key] ? 'text-slate-800' : 'text-slate-300'}`}>{clientToView[field.key] || 'Not added'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ITR ka tax hisaab: ab form me nahi bharte (ITR workspace me hota hai); purane record me bhara ho toh dikhta hai */}
+                {clientToView.service === 'ITR Filing' && [clientToView.totalIncome, clientToView.incomeTax, clientToView.tds, clientToView.tcs, clientToView.selfAdvTax].some(value => Number(value) > 0) && (
                   <div className="col-span-4 bg-indigo-50 rounded-2xl p-4 border border-indigo-100 mt-2 space-y-3">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5">
                       <FileText size={14} /> ITR Assessment & Tax Details
@@ -1063,7 +1150,7 @@ const Clients = () => {
               {editMode && !isAdmin && (
                  <div className="md:col-span-2 flex items-center gap-2 bg-amber-50 text-amber-700 p-3 rounded-xl border border-amber-200 text-xs font-semibold mb-2">
                     <Lock size={16} className="shrink-0" />
-                    Core details are locked for employees. You can only update Fee Details and add Notes. Updates are automatically tracked.
+                    Core details are locked for employees. You can update the registration details (TRN, ARN, ID, GSTIN etc.), Fee Details and add Notes. Updates are automatically tracked.
                  </div>
               )}
 
@@ -1109,7 +1196,7 @@ const Clients = () => {
                   <>
                     <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                       <label className="block text-xs font-bold uppercase tracking-wider text-blue-700 mb-1.5">
-                        {formData.service === 'ITR Filing' ? 'Date of ITR Filing' : formData.service === 'FSSAI Registration' ? 'Date of FSSAI Reg/Renewal' : 'Date of GST Return/Filing'}
+                        {formData.service === 'ITR Filing' ? 'Date of ITR Filing' : formData.service === 'FSSAI Registration' ? 'Date of FSSAI Reg/Renewal' : 'Date of GST Application'}
                       </label>
                       <input type="date" name="filingDate" value={formData.filingDate} onChange={handleChange} 
                         disabled={editMode && !isAdmin}
@@ -1129,102 +1216,6 @@ const Clients = () => {
                   </>
                 )}
                 
-                {/* ITR SPECIFIC NEW BLOCK */}
-                {formData.service === 'ITR Filing' && (
-                  <div className="md:col-span-2 bg-indigo-50/50 border border-indigo-100 rounded-2xl p-5 mt-1 space-y-4 shadow-sm">
-                    <div className="flex items-center gap-2 border-b border-indigo-100 pb-2 mb-2">
-                      <FileText size={18} className="text-indigo-600" />
-                      <h3 className="text-sm font-bold text-indigo-900 tracking-tight">ITR Assessment & Status Details</h3>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">ITR Filed Up To AY</label>
-                        <select name="itrFiledUpToAY" value={formData.itrFiledUpToAY} onChange={handleChange} disabled={editMode && !isAdmin} className={`w-full text-sm border border-indigo-200 bg-white rounded-xl p-2.5 font-medium transition-all focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500`}>
-                          <option value="AY 2025-26">AY 2025-26</option>
-                          <option value="AY 2024-25">AY 2024-25</option>
-                          <option value="AY 2023-24">AY 2023-24</option>
-                          <option value="AY 2022-23">AY 2022-23</option>
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">Form No</label>
-                        <select name="formNo" value={formData.formNo} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 bg-white rounded-xl p-2.5 font-semibold text-indigo-900">
-                          <option value="ITR-1">ITR-1</option>
-                          <option value="ITR-2">ITR-2</option>
-                          <option value="ITR-3">ITR-3</option>
-                          <option value="ITR-4">ITR-4</option>
-                          <option value="ITR-5">ITR-5</option>
-                          <option value="ITR-6">ITR-6</option>
-                          <option value="ITR-7">ITR-7</option>
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">Regime</label>
-                        <select name="regime" value={formData.regime} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 bg-white rounded-xl p-2.5 font-semibold">
-                          <option value="New">New Regime</option>
-                          <option value="Old">Old Regime</option>
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">ITR Filed By</label>
-                        <input type="text" name="itrFiledBy" value={formData.itrFiledBy} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 rounded-xl p-2.5 bg-white font-medium" placeholder="Staff / Name" />
-                      </div>
-                      
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">Verification Method</label>
-                        <select name="verificationMethod" value={formData.verificationMethod} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 bg-white rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 text-slate-700">
-                           <option value="Pending">Pending / Not Verified</option>
-                           <option value="Aadhaar OTP">Aadhaar OTP</option>
-                           <option value="Net Banking / EVC">Net Banking / EVC</option>
-                           <option value="Sent to CPC (Physical)">Sent to CPC (Physical)</option>
-                        </select>
-                      </div>
-                      
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">ITR Processed Status</label>
-                        <select name="itrProcessedStatus" value={formData.itrProcessedStatus} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 bg-white rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 text-slate-700 font-semibold">
-                           <option value="Pending">Pending / Just Filed</option>
-                           <option value="Successfully E-verified">Successfully E-verified</option>
-                           <option value="Processing">Processing</option>
-                           <option value="Processed">Processed</option>
-                           <option value="Processed with Refund">Processed with Refund</option>
-                           <option value="Defective">Defective</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1.5">Total Income (₹)</label>
-                        <input type="number" name="totalIncome" value={formData.totalIncome} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 bg-white" placeholder="0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1.5">Income Tax (₹)</label>
-                        <input type="number" name="incomeTax" value={formData.incomeTax} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 bg-white" placeholder="0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1.5">TDS (₹)</label>
-                        <input type="number" name="tds" value={formData.tds} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 bg-white" placeholder="0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1.5">TCS (₹)</label>
-                        <input type="number" name="tcs" value={formData.tcs} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 bg-white" placeholder="0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1.5">Self / Adv Tax (₹)</label>
-                        <input type="number" name="selfAdvTax" value={formData.selfAdvTax} onChange={handleChange} disabled={editMode && !isAdmin} className="w-full text-sm border border-indigo-200 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500/20 bg-white" placeholder="0" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-indigo-700 mb-1.5">Payable / (Refund) (₹)</label>
-                        <input type="number" name="refund" value={formData.refund} readOnly className="w-full text-sm border border-indigo-300 rounded-xl p-2.5 bg-indigo-100 font-bold text-indigo-900 cursor-not-allowed" placeholder="0" />
-                        <p className="text-[9px] text-slate-500 mt-1 uppercase">Tax - TDS - TCS - Adv Tax</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Assessee Name *</label>
                   <input type="text" name="assesseeName" required value={formData.assesseeName} onChange={handleChange} 
@@ -1252,26 +1243,54 @@ const Clients = () => {
                   />
                 </div>
 
-                {/* BANK DETAILS INPUTS */}
-                <div className="md:col-span-2 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-4">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <CreditCard size={14} className="text-blue-600"/> Bank Account Details
-                  </label>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Bank Name</label>
-                      <input type="text" name="bankName" value={formData.bankName} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="e.g. HDFC Bank" className="w-full text-sm border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-blue-500/20" />
+                {/* 🔴 REGISTRATION KI MAIN JAANKARI: service ke hisaab se (TRN / ARN / ID / password / GSTIN ...) */}
+                {REG_DETAILS[formData.service] && (
+                  <div className="md:col-span-2 bg-indigo-50/50 border border-indigo-100 rounded-2xl p-5 space-y-4 shadow-sm">
+                    <div className="flex items-center gap-2 border-b border-indigo-100 pb-2">
+                      <FileText size={18} className="text-indigo-600" />
+                      <h3 className="text-sm font-bold text-indigo-900 tracking-tight">{REG_DETAILS[formData.service].title}</h3>
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Account No</label>
-                      <input type="text" name="accountNo" value={formData.accountNo} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="Account No" className="w-full text-sm border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-blue-500/20 font-mono" />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">IFSC Code</label>
-                      <input type="text" name="ifscCode" value={formData.ifscCode} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="HDFC0001234" className="w-full text-sm border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-blue-500/20 uppercase font-mono" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {REG_DETAILS[formData.service].fields.map(field => (
+                        <div key={field.key} className={field.wide ? 'md:col-span-2' : ''}>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">{field.label}</label>
+                          {field.options ? (
+                            <select name={field.key} value={formData[field.key] || field.options[0]} onChange={handleChange} className="w-full text-sm border border-indigo-200 bg-white rounded-xl p-2.5 font-semibold text-indigo-900 focus:ring-2 focus:ring-indigo-500/20">
+                              {field.options.map(option => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          ) : (
+                            <input type="text" name={field.key} value={formData[field.key] || ''} onChange={handleChange} placeholder={field.placeholder} autoComplete="off"
+                              className={`w-full text-sm border border-indigo-200 rounded-xl p-2.5 bg-white font-medium focus:ring-2 focus:ring-indigo-500/20 ${field.upper ? 'uppercase font-mono placeholder:normal-case placeholder:font-sans' : ''}`} />
+                          )}
+                          {field.hint && <p className="text-[10px] text-slate-500 mt-1">{field.hint}</p>}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
+                )}
+
+                {/* BANK DETAILS: sirf ITR ke liye (refund ka account). Baaki registrations me zaroori nahi. */}
+                {formData.service === 'ITR Filing' && (
+                  <div className="md:col-span-2 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-4">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <CreditCard size={14} className="text-blue-600"/> Bank Account Details
+                    </label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Bank Name</label>
+                        <input type="text" name="bankName" value={formData.bankName} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="e.g. HDFC Bank" className="w-full text-sm border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-blue-500/20" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Account No</label>
+                        <input type="text" name="accountNo" value={formData.accountNo} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="Account No" className="w-full text-sm border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-blue-500/20 font-mono" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">IFSC Code</label>
+                        <input type="text" name="ifscCode" value={formData.ifscCode} onChange={handleChange} disabled={editMode && !isAdmin} placeholder="HDFC0001234" className="w-full text-sm border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-blue-500/20 uppercase font-mono" />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className={sourceNeedsExtraField ? 'md:col-span-1' : 'md:col-span-2'}>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Client Acquisition Source</label>

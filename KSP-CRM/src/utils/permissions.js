@@ -43,13 +43,16 @@ export const PERMISSION_CATALOG = [
       { key: 'EMPLOYEE_MASTER', label: 'Employee Master', path: '/hr/employees' },
       { key: 'ATTENDANCE', label: 'Attendance Control', path: '/hr/attendance' },
       { key: 'SALARY', label: 'Salary Calculation', path: '/hr/salary' },
-      { key: 'HOLIDAY', label: 'Holiday', path: '/hr/holiday' },
-      { key: 'OFFICE_EXPENSE', label: 'Office Expense', path: '/officexpense' }
+      { key: 'HOLIDAY', label: 'Holiday', path: '/hr/holiday' }
     ]
   },
   {
     group: 'Finance',
-    items: [{ key: 'INVOICES', label: 'Invoices', path: '/invoice-generator' }]
+    items: [
+      { key: 'INVOICES', label: 'Invoices', path: '/invoice-generator' },
+      { key: 'VENDORS', label: 'Vendors', path: '/vendors' },
+      { key: 'OFFICE_EXPENSE', label: 'Office Expense', path: '/officexpense' }
+    ]
   },
   {
     group: 'IT Department',

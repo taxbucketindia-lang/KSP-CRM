@@ -29,6 +29,16 @@ const clientSchema = new mongoose.Schema({
     default: 'Documents Pending' 
   },
   portalPassword: { type: String, default: '' },
+
+  // 🔴 REGISTRATION KI MAIN JAANKARI (har service me inka matlab alag hai, label frontend me hain)
+  // GST Registration: TRN / ARN / Portal ID / GSTIN   |  Company: SRN / CIN   |  Trademark: Application No / Class
+  // FSSAI: Reference No / Licence No                  |  ITR: sirf portal password (ID = PAN)
+  businessName: { type: String, default: '', trim: true },   // Trade / Company / Brand ka naam
+  tempRefNo: { type: String, default: '', trim: true },      // TRN
+  applicationNo: { type: String, default: '', trim: true },  // ARN / SRN / Application No
+  portalUserId: { type: String, default: '', trim: true },
+  certificateNo: { type: String, default: '', trim: true },  // GSTIN / CIN / Licence No / Registration No (ban jane par)
+  tmClass: { type: String, default: '', trim: true },
   feeStatus: { type: String, enum: ['Paid', 'FOC', 'Dues'], default: 'Dues' },
   feeAmount: { type: Number, default: 0 },
   amountReceived: { type: Number, default: 0 },

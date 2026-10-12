@@ -28,7 +28,12 @@ const ClientMaster = () => {
   const [gstData, setGstData] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [fetchingPan, setFetchingPan] = useState(false); 
+  const [fetchingPan, setFetchingPan] = useState(false);
+  // 🔴 REGISTRATIONS SE IMPORT: jinka registration / filing hamne kiya aur ab regular client ban rahe hain
+  const [regSearch, setRegSearch] = useState('');
+  const [regResults, setRegResults] = useState([]);
+  const [regLoading, setRegLoading] = useState(false);
+  const [importedFrom, setImportedFrom] = useState(null);
   
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -329,6 +334,50 @@ const ClientMaster = () => {
     }
   };
 
+  // "Add New Client" khula ho tab Registrations ki list (jo abhi Client Master me nahi hain). Search server par.
+  useEffect(() => {
+    if (!isModalOpen || editingId) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setRegLoading(true);
+      try {
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/client-master/registration-candidates`, { headers: { Authorization: `Bearer ${user.token}` }, params: { search: regSearch.trim() } });
+        if (!cancelled) setRegResults(Array.isArray(res.data) ? res.data : []);
+      } catch {
+        if (!cancelled) setRegResults([]);
+      } finally {
+        if (!cancelled) setRegLoading(false);
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isModalOpen, editingId, regSearch, user.token]);
+
+  // Registration ka record chun kar form bhar dena. PAN wahi rehta hai (usi se Client ID banti hai).
+  const importRegistration = (reg) => {
+    const service = reg.service || '';
+    const number = String(reg.certificateNo || '').toUpperCase();
+    const isGstin = /^[0-9]{2}[A-Z0-9]{13}$/.test(number);
+    setFormData({
+      ...initialForm,
+      pan: (reg.pan || '').toUpperCase(),
+      name: reg.assesseeName || '',
+      tradeName: reg.businessName || '',
+      mobile: reg.mobile ? String(reg.mobile) : '',
+      email: reg.email || '',
+      dob: reg.dob ? new Date(reg.dob).toISOString().split('T')[0] : '',
+      address: reg.district || '',
+      state: reg.state || '',
+      pinCode: reg.pinCode || '',
+      gstin: service === 'GST Registration' && isGstin ? number : '',
+      cin_llpin: service === 'Company Registration' ? number : '',
+      clientType: service === 'Company Registration' ? 'Private Limited' : 'Individual',
+      remarks: `Imported from Registrations: ${service || 'Service'} (${reg.clientId || 'no ID'})`
+    });
+    setImportedFrom(reg);
+    toast.success(`Details of ${reg.assesseeName} filled. Check and save.`);
+  };
+
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (!formData.pan) return toast.error("PAN Number is required!");
@@ -381,6 +430,8 @@ const ClientMaster = () => {
 
   const openNewModal = () => {
     setEditingId(null);
+    setRegSearch('');
+    setImportedFrom(null);
     setFormData(initialForm);
     setIsModalOpen(true);
   };
@@ -1175,6 +1226,47 @@ const ClientMaster = () => {
             </div>
 
             <form onSubmit={handleSave} className="overflow-y-auto p-6 space-y-6 custom-scrollbar">
+
+              {/* 🔴 REGISTRATIONS SE IMPORT: registration / filing ke baad jo client hamse hi aage kaam karwaye */}
+              {!editingId && (
+                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100 rounded-2xl p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-purple-700 flex items-center gap-2"><Download size={14} /> Import from Registrations / Filings</p>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">A client whose registration or filing you did and who now continues with you. Pick them and the details fill in. PAN is compulsory because the Client ID is made from it.</p>
+                    </div>
+                    {importedFrom && <button type="button" onClick={() => { setImportedFrom(null); setFormData(initialForm); }} className="text-[11px] font-bold text-rose-600 hover:underline shrink-0">Clear imported details</button>}
+                  </div>
+
+                  {importedFrom ? (
+                    <div className="flex items-center gap-2 bg-white border border-emerald-200 rounded-xl px-3 py-2">
+                      <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                      <p className="text-xs font-semibold text-slate-700 min-w-0 truncate">Imported <b>{importedFrom.assesseeName}</b> · {importedFrom.service} · {importedFrom.clientId} · PAN {importedFrom.pan}</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input type="text" value={regSearch} onChange={(e) => setRegSearch(e.target.value)} placeholder="Search by name, PAN, mobile, service or GSTIN..." className="w-full pl-9 pr-9 py-2.5 text-sm font-medium border border-purple-200 bg-white rounded-xl outline-none focus:ring-2 focus:ring-purple-500/20" />
+                        {regLoading && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-purple-500" />}
+                      </div>
+                      <div className="mt-2 max-h-44 overflow-y-auto custom-scrollbar space-y-1.5">
+                        {regResults.length === 0 ? (
+                          <p className="text-[11px] font-semibold text-slate-400 text-center py-3">{regLoading ? 'Searching...' : regSearch.trim() ? 'No registration found for this search (or it is already in Client Master).' : 'No registrations are waiting to be added to Client Master.'}</p>
+                        ) : regResults.map(reg => (
+                          <button key={reg._id} type="button" onClick={() => importRegistration(reg)} className="w-full text-left bg-white hover:bg-purple-50 border border-slate-200 hover:border-purple-300 rounded-xl px-3 py-2 flex items-center justify-between gap-3 transition-colors">
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-slate-800 truncate">{reg.assesseeName}{reg.businessName ? <span className="font-medium text-slate-500"> · {reg.businessName}</span> : null}</p>
+                              <p className="text-[11px] font-semibold text-slate-500 truncate"><span className="font-mono">{reg.pan}</span> · {reg.mobile} · {reg.clientId}</p>
+                            </div>
+                            <span className="shrink-0 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">{reg.service || 'Service'}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 

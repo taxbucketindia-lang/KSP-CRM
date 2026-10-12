@@ -9,8 +9,8 @@ export const PERMISSION_GROUPS = {
   'Main': ['WORK_MANAGEMENT', 'WORK_ASSIGN', 'TASK_HANDOVER'],
   'Marketing & Sales': ['LEADS', 'GST_HEALTH', 'FEE_DOCS'],
   'Service Team': ['REGISTRATIONS', 'CLIENT_MASTER', 'ITR', 'GST', 'ROC', 'TDS', 'AUDIT', 'FSSAI', 'BAS', 'BIRTHDAY'],
-  'HR & Ops': ['EMPLOYEE_MASTER', 'ATTENDANCE', 'SALARY', 'HOLIDAY', 'OFFICE_EXPENSE'],
-  'Finance': ['INVOICES'],
+  'HR & Ops': ['EMPLOYEE_MASTER', 'ATTENDANCE', 'SALARY', 'HOLIDAY'],
+  'Finance': ['INVOICES', 'VENDORS', 'OFFICE_EXPENSE'],
   'IT Department': ['DEV_TASKS'],
   'Executive': ['CEO_DASHBOARD', 'BUSINESS_HEALTH'],
   // Tab nahi, khaas kaam: Client Master, ITR, GST, ROC, TDS, Audit, FSSAI, Leads, Registrations, Invoices ka data delete karna
@@ -23,8 +23,10 @@ export const ALL_PERMISSIONS = Object.values(PERMISSION_GROUPS).flat();
 const LEGACY_GROUPS = {
   MARKETING_SALES: PERMISSION_GROUPS['Marketing & Sales'],
   SERVICE_TEAM: PERMISSION_GROUPS['Service Team'],
-  HR_OPS: PERMISSION_GROUPS['HR & Ops'],
-  FINANCE: PERMISSION_GROUPS['Finance'],
+  // Office Expense pehle HR & Ops me tha (ab Finance me dikhta hai). Purane group-right wale logon ka access
+  // waisa hi rakha hai: HR_OPS walon ko milta rahega, FINANCE walon ko sirf jagah badalne se apne aap nahi milega.
+  HR_OPS: [...PERMISSION_GROUPS['HR & Ops'], 'OFFICE_EXPENSE'],
+  FINANCE: PERMISSION_GROUPS['Finance'].filter(key => key !== 'OFFICE_EXPENSE'),
   IT_DEPT: PERMISSION_GROUPS['IT Department'],
   EXECUTIVE: PERMISSION_GROUPS['Executive']
 };

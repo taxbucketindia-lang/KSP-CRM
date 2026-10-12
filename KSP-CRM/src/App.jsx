@@ -36,6 +36,7 @@ import BirthdayWishes from './pages/BirthdayWishes';
 import DevTask from './pages/DevTask';
 import TaskHandoverWorkspace from './pages/TaskHandoverWorkspace';
 import BusinessHealth from './pages/BusinessHealth';
+import Vendors from './pages/Vendors';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useContext(AuthContext);
@@ -129,6 +130,7 @@ function App() {
 
             {/* Finance / IT / Executive */}
             <Route path="/invoice-generator" element={guarded('INVOICES', <InvoiceGenerator />)} />
+            <Route path="/vendors" element={guarded('VENDORS', <Vendors />)} />
             <Route path="/it/dev-task" element={guarded('DEV_TASKS', <DevTask />)} />
             <Route path="/ceo-panel" element={guarded('CEO_DASHBOARD', <CeoDashboard />)} />
             <Route path="/business-health" element={guarded('BUSINESS_HEALTH', <BusinessHealth />)} />
