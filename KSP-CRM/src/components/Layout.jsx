@@ -10,8 +10,10 @@ import {
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
   Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo,
   AlertCircle, TrendingUp, Code, Globe, Zap, Cake, RotateCwFadingClock, HeartPulse,
-  CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight
+  CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight, BellRing, Smartphone
 } from 'lucide-react';
+import { getPushState, enablePush, disablePush, syncPush, detachPush, sendTestPush } from '../utils/push';
+import toast from 'react-hot-toast';
 
 // 🔴 NOTIFICATION KAHAN SE AAYA: har notification ko uska source (tab) dikhate hain.
 // Pehle `kind` (backend ka tag) dekhte hain, purani notifications ke liye link / title se andaza.
@@ -80,6 +82,43 @@ const Layout = () => {
   const [notifications, setNotifications] = useState([]);
   const [notifFilter, setNotifFilter] = useState('all'); // 'all' | 'unread' | source id
   const [toasts, setToasts] = useState([]);              // naye notification ka chhota popup
+  // 🔴 PHONE ALERTS (push): 'unsupported' | 'ios-install' | 'blocked' | 'on' | 'off' | '' (abhi pata nahi)
+  const [pushState, setPushState] = useState('');
+  const [pushBusy, setPushBusy] = useState(false);
+
+  // Login ke baad: is device par push pehle se chalu ho toh use isi login se jod do
+  useEffect(() => {
+    if (!user?.token) return;
+    syncPush(user.token).then(getPushState).then(setPushState);
+  }, [user?.token]);
+
+  const togglePush = async () => {
+    if (pushBusy) return;
+    setPushBusy(true);
+    try {
+      if (pushState === 'on') {
+        await disablePush(user.token);
+        toast.success('Phone alerts turned off on this device');
+      } else {
+        await enablePush(user.token);
+        toast.success('Phone alerts are on for this device');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Could not change phone alerts');
+    } finally {
+      setPushState(await getPushState());
+      setPushBusy(false);
+    }
+  };
+
+  const testPush = async () => {
+    try {
+      const res = await sendTestPush(user.token);
+      toast.success(res.data.message);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not send test');
+    }
+  };
   const knownIdsRef = useRef(null);                      // null = abhi pehli baar load nahi hua
 
   // 🔴 Har page badalne par rights server se taaza: Admin / CEO ne kuch badla ho toh turant dikhe
@@ -168,7 +207,9 @@ const Layout = () => {
   );
 
   // ================= SIDEBAR =================
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Is login ke notification is phone par aana band (agla login apne aap dobara jod leta hai)
+    await detachPush(user?.token);
     logout();
     navigate('/login');
   };
@@ -644,6 +685,32 @@ const Layout = () => {
                         <button onClick={clearRead} disabled={notifications.every(n => !n.isRead)} className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent px-2 py-1.5 rounded-lg" title="Remove notifications you have already read"><Trash2 size={12}/> Clear read</button>
                       </div>
                     </div>
+
+                    {/* 🔴 PHONE ALERTS: CRM band ho tab bhi zaroori notification phone ke notification bar me */}
+                    {pushState && pushState !== 'unsupported' && (
+                      <div className={`px-4 py-2.5 border-b border-slate-100 flex items-center gap-2.5 ${pushState === 'on' ? 'bg-emerald-50/60' : 'bg-blue-50/60'}`}>
+                        <span className={`h-8 w-8 rounded-xl flex items-center justify-center shrink-0 ${pushState === 'on' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {pushState === 'on' ? <BellRing size={15} /> : <Smartphone size={15} />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-black text-slate-800">
+                            {pushState === 'on' ? 'Phone alerts are on' : pushState === 'blocked' ? 'Phone alerts are blocked' : pushState === 'ios-install' ? 'Phone alerts on iPhone' : 'Get alerts on this device'}
+                          </p>
+                          <p className="text-[10px] font-medium text-slate-500 leading-snug">
+                            {pushState === 'on' ? 'New tasks, handovers and meeting reminders reach this device even when the CRM is closed.'
+                              : pushState === 'blocked' ? 'Allow notifications for this site in your browser / phone settings, then reopen the CRM.'
+                              : pushState === 'ios-install' ? 'In Safari tap Share, then "Add to Home Screen". Open the CRM from that icon and enable alerts here.'
+                              : 'New tasks, handovers and meeting reminders will show in your notification bar.'}
+                          </p>
+                        </div>
+                        {pushState === 'on' && <button onClick={testPush} className="shrink-0 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 px-2 py-1 rounded-md">Test</button>}
+                        {(pushState === 'on' || pushState === 'off') && (
+                          <button onClick={togglePush} disabled={pushBusy} className={`shrink-0 text-[10px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-60 ${pushState === 'on' ? 'text-slate-500 hover:bg-slate-200/60' : 'text-white bg-blue-600 hover:bg-blue-700 shadow-sm'}`}>
+                            {pushBusy ? '...' : pushState === 'on' ? 'Turn off' : 'Enable'}
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     {/* Filter: sab / unread / kis tab se aaya */}
                     {notifications.length > 0 && (
