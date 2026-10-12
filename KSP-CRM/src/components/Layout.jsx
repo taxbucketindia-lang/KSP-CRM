@@ -287,7 +287,7 @@ const Layout = () => {
         icon: Users,
         isGroup: true,
         subItems: [
-          { path: '/clients', name: 'All Services', perm: 'REGISTRATIONS' },
+          { path: '/clients', name: 'All Services', pinName: 'All Registrations', perm: 'REGISTRATIONS' },
           { path: '/clients?service=ITR Filing', name: 'ITR Filing', perm: 'REGISTRATIONS' },
           { path: '/clients?service=GST Registration', name: 'GST Registration', perm: 'REGISTRATIONS' },
           { path: '/clients?service=Company Reg', name: 'Company Reg', perm: 'REGISTRATIONS' },
@@ -349,7 +349,7 @@ const Layout = () => {
     ...mainItems.map(item => ({ ...item, section: 'Main' })),
     ...sections.flatMap(section => section.items.flatMap(item => {
       if (item.placeholder) return [];
-      if (item.isGroup) return item.subItems.filter(sub => !sub.placeholder).map(sub => ({ ...sub, icon: item.icon, section: `${section.category} › ${item.name}` }));
+      if (item.isGroup) return item.subItems.filter(sub => !sub.placeholder).map(sub => ({ ...sub, icon: item.icon, fromGroup: item.name, section: `${section.category} › ${item.name}` }));
       return [{ ...item, section: section.category }];
     }))
   ];
@@ -415,9 +415,15 @@ const Layout = () => {
                   {sub.name} <span className="ml-auto text-[8px] font-black uppercase tracking-wider bg-slate-700/60 text-slate-400 px-1.5 py-0.5 rounded">Soon</span>
                 </div>
               ) : (
-                <NavLink key={sub.name} to={sub.path} onClick={() => setMobileOpen(false)} className={`block px-2.5 py-1.5 rounded-md text-[12px] transition-all ${isSubItemActive(sub.path) ? 'bg-blue-500/15 text-blue-300 font-bold' : 'text-slate-400 hover:text-white hover:bg-white/5 font-medium'}`}>
-                  <span className="flex items-center gap-2">{sub.name}{unreadByPath[sub.path] > 0 && <span className="ml-auto min-w-[16px] h-4 px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{unreadByPath[sub.path]}</span>}</span>
-                </NavLink>
+                <div key={sub.name} className="relative group/sub">
+                  <NavLink to={sub.path} onClick={() => setMobileOpen(false)} className={`block pl-2.5 pr-7 py-1.5 rounded-md text-[12px] transition-all ${isSubItemActive(sub.path) ? 'bg-blue-500/15 text-blue-300 font-bold' : 'text-slate-400 hover:text-white hover:bg-white/5 font-medium'}`}>
+                    <span className="flex items-center gap-2">{sub.name}{unreadByPath[sub.path] > 0 && <span className="ml-auto min-w-[16px] h-4 px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{unreadByPath[sub.path]}</span>}</span>
+                  </NavLink>
+                  {/* Pin: dropdown ke andar wale tab ko bhi sabse upar "Pinned" me rakho */}
+                  <button onClick={() => togglePin(sub.path)} className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md transition-opacity ${pins.includes(sub.path) ? 'text-amber-400 opacity-100' : 'text-slate-500 hover:text-amber-400 opacity-0 group-hover/sub:opacity-100 [@media(hover:none)]:opacity-50'}`} title={pins.includes(sub.path) ? 'Unpin' : 'Pin to top'}>
+                    <Star size={11} className={pins.includes(sub.path) ? 'fill-amber-400' : ''} />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -429,18 +435,18 @@ const Layout = () => {
     const pinned = pins.includes(item.path);
     return (
       <div key={item.name} className="relative group/tab">
-        <NavLink to={item.path} end={item.path === '/'} onClick={() => setMobileOpen(false)} className={({ isActive }) => linkClass(isActive)}>
-          {({ isActive }) => (
+        <NavLink to={item.path} end={item.path === '/'} onClick={() => setMobileOpen(false)} title={item.fromGroup ? `${item.fromGroup} › ${item.name}` : undefined} className={({ isActive }) => linkClass(item.fromGroup ? isSubItemActive(item.path) : isActive)}>
+          {({ isActive: routeActive }) => { const isActive = item.fromGroup ? isSubItemActive(item.path) : routeActive; return (
             <>
               {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-blue-400"></span>}
               {Icon && <Icon size={16} className={`shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-200'}`} />}
-              <span className="truncate">{item.name}</span>
+              <span className="truncate">{item.pinName || item.name}</span>
               {unread > 0 && <span className="ml-auto mr-5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center" title={`${unread} new notification(s)`}>{unread > 9 ? '9+' : unread}</span>}
             </>
-          )}
+          ); }}
         </NavLink>
         {/* Pin: is tab ko sabse upar "Pinned" me rakho */}
-        <button onClick={() => togglePin(item.path)} className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-opacity ${pinned ? 'text-amber-400 opacity-100' : 'text-slate-500 hover:text-amber-400 opacity-0 group-hover/tab:opacity-100'}`} title={pinned ? 'Unpin' : 'Pin to top'}>
+        <button onClick={() => togglePin(item.path)} className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-opacity ${pinned ? 'text-amber-400 opacity-100' : 'text-slate-500 hover:text-amber-400 opacity-0 group-hover/tab:opacity-100 [@media(hover:none)]:opacity-50'}`} title={pinned ? 'Unpin' : 'Pin to top'}>
           <Star size={12} className={pinned ? 'fill-amber-400' : ''} />
         </button>
       </div>
