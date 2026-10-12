@@ -4,6 +4,7 @@ import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatIstDateTime } from '../utils/time';
 import RemarkTimeline, { parseRemarkEntries } from '../components/RemarkTimeline';
+import { GstFilingEditor, GstFilingView, seedFilingRecords, validateFilingRecords, toFilingPayload } from '../components/GstFilingTracker';
 import toast, { Toaster } from 'react-hot-toast';
 import * as XLSX from 'xlsx'; 
 import ExcelJS from 'exceljs'; 
@@ -68,7 +69,8 @@ const GstReturns = () => {
 
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [clientForHistory, setClientForHistory] = useState(null);
-  const [historyTab, setHistoryTab] = useState('returns');
+  const [historyTab, setHistoryTab] = useState('profile'); // 'profile' | 'returns' | 'fees'
+  const [showPortalPassword, setShowPortalPassword] = useState(false);
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
@@ -87,6 +89,7 @@ const GstReturns = () => {
     gstStatus: 'Documents Pending', 
     gstr1FilingDate: '', gstr1NextDueDate: '',
     gstr3bFilingDate: '', gstr3bNextDueDate: '',
+    filingRecords: [], // mahine-wise GSTR-1 / GSTR-3B filing ki rows
     feeStatus: 'Yearly', feeAmount: '', amountReceived: '', paymentDate: '',
     newPaymentAmount: '', newPaymentDate: '' 
   };
@@ -535,6 +538,7 @@ const GstReturns = () => {
       gstr1NextDueDate: parseDate(client.gstr1NextDueDate),
       gstr3bFilingDate: parseDate(client.gstr3bFilingDate),
       gstr3bNextDueDate: parseDate(client.gstr3bNextDueDate),
+      filingRecords: seedFilingRecords(client),
       feeStatus: client.feeStatus || 'Yearly',
       feeAmount: client.feeAmount || '',
       amountReceived: client.amountReceived || '',
@@ -552,7 +556,8 @@ const GstReturns = () => {
   
   const handleOpenHistory = (client) => { 
     setClientForHistory(client); 
-    setHistoryTab('returns'); 
+    setShowPortalPassword(false);
+    setHistoryTab('returns');
     setIsHistoryModalOpen(true); 
   };
   
@@ -602,6 +607,8 @@ const GstReturns = () => {
     if (!formData.pan && !formData.gstin) {
       return toast.error("PAN or GSTIN is required to link Master Profile.");
     }
+    const filingError = validateFilingRecords(formData.filingRecords);
+    if (filingError) return toast.error(filingError);
 
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
@@ -666,7 +673,9 @@ const GstReturns = () => {
         paymentDate: finalPaymentDate,
         remarks: finalRemarks,
         crmClientId: importClientId || null, 
-        createdBy: user._id 
+        createdBy: user._id,
+        // Mahine-wise filing rows: backend inse "Filed On" aur "Next Due" khud bana leta hai
+        filingRecords: toFilingPayload(formData.filingRecords)
       };
 
       delete payload.newPaymentAmount;
@@ -910,7 +919,7 @@ const GstReturns = () => {
                 <th className="py-4 px-5">Taxpayer Type</th>
                 <th className="py-4 px-5">Aadhaar KYC</th>
                 <th className="py-4 px-5">Filing Status</th>
-                <th className="py-4 px-5 text-right">Fee Due</th>
+                {/* <th className="py-4 px-5 text-right">Fee Due</th> */}
                 <th className="py-4 px-5">Added By</th>
                 <th className="py-4 px-5 text-right">Actions</th>
               </tr>
@@ -981,7 +990,7 @@ const GstReturns = () => {
                         </span>
                       </td>
 
-                      <td className="py-4 px-5 text-right whitespace-nowrap">
+                      {/* <td className="py-4 px-5 text-right whitespace-nowrap">
                         {(() => {
                           const due = Number(client.feeAmount || 0) - Number(client.amountReceived || 0);
                           if (!Number(client.feeAmount)) return <span className="text-[11px] font-semibold text-slate-400">-</span>;
@@ -989,7 +998,7 @@ const GstReturns = () => {
                             ? <span className="text-xs font-black text-rose-600">₹{due.toLocaleString('en-IN')}</span>
                             : <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">Paid</span>;
                         })()}
-                      </td>
+                      </td> */}
                       
                       <td className="py-4 px-5">
                         <div className="flex items-center gap-2">
@@ -1056,7 +1065,7 @@ const GstReturns = () => {
       {/* FULL VIEW PROFILE MODAL */}
       {isViewModalOpen && clientToView && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-slate-50 rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
+          <div className="bg-slate-50 rounded-3xl w-full max-w-6xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
             
             {/* Sleek Gradient Header */}
             <div className="relative px-8 pt-6 pb-16 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex justify-between items-start overflow-hidden">
@@ -1077,6 +1086,11 @@ const GstReturns = () => {
                     <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
                       GST: {clientToView.gstin || 'N/A'}
                     </span>
+                    {(clientToView.pan || clientToView.clientMasterId?.pan) && (
+                      <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
+                        PAN: {clientToView.pan || clientToView.clientMasterId?.pan}
+                      </span>
+                    )}
                     <span className="flex items-center gap-1.5">
                       <User size={14} className="opacity-70"/> {clientToView.assesseeName}
                     </span>
@@ -1237,6 +1251,69 @@ const GstReturns = () => {
                 <div className="mt-3 text-right">
                    <span className="text-[10px] font-bold text-slate-400 uppercase">Last Payment Date: </span>
                    <span className="text-xs font-bold text-slate-700">{clientToView.paymentDate ? new Date(clientToView.paymentDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+                </div>
+              </div>
+
+              {/* 🔴 BUSINESS DETAILS: jo form me hota hai par yahan nahi dikhta tha */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                  <Building2 size={14}/> Business Details
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+                  {[
+                    ['Assessee / Legal Name', clientToView.assesseeName],
+                    ['Trade Name', clientToView.tradeName],
+                    ['PAN', clientToView.pan || clientToView.clientMasterId?.pan],
+                    ['Client Type (Master)', clientToView.clientMasterId?.clientType],
+                    ['Mobile', clientToView.mobile ? String(clientToView.mobile) : ''],
+                    ['GST Registration Date', clientToView.registrationDate ? new Date(clientToView.registrationDate).toLocaleDateString('en-IN') : ''],
+                    ['GSTR-1 Next Due', clientToView.gstr1NextDueDate ? new Date(clientToView.gstr1NextDueDate).toLocaleDateString('en-IN') : ''],
+                    ['GSTR-3B Next Due', clientToView.gstr3bNextDueDate ? new Date(clientToView.gstr3bNextDueDate).toLocaleDateString('en-IN') : '']
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">{label}</p>
+                      <p className={`text-sm font-bold break-words ${value ? 'text-slate-800' : 'text-slate-300'}`}>{value || 'N/A'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 🔴 MONTHLY RETURN TRACKING: har mahine ki GSTR-3B / GSTR-1 filing, pending ka remark ke saath */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                  <CalendarClock size={14}/> Monthly Return Tracking
+                </h3>
+                <GstFilingView client={clientToView} />
+              </div>
+
+              {/* 🔴 GST NOTES */}
+              {/* <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                  <MessageSquare size={14}/> GST Notes & Remarks ({getGstNoteEntries(clientToView.remarks).length})
+                </h3>
+                <div className="max-h-56 overflow-y-auto custom-scrollbar bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <RemarkTimeline entries={getGstNoteEntries(clientToView.remarks)} emptyText="No GST notes added yet." />
+                </div>
+              </div> */}
+
+              {/* 🔴 RECORD INFO */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                  <Info size={14}/> Record Info
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Added By</p>
+                    <p className="text-sm font-bold text-slate-800">{clientToView.createdBy?.name || 'N/A'}{clientToView.createdBy?.empId ? ` (${clientToView.createdBy.empId})` : ''}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Added On</p>
+                    <p className="text-sm font-bold text-slate-800">{clientToView.createdAt ? formatIstDateTime(clientToView.createdAt) : 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Last Updated</p>
+                    <p className="text-sm font-bold text-slate-800">{clientToView.updatedAt ? formatIstDateTime(clientToView.updatedAt) : 'N/A'}</p>
+                  </div>
                 </div>
               </div>
 
@@ -1434,35 +1511,8 @@ const GstReturns = () => {
 
                   <div className="md:col-span-2 mt-4">
                     <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3 border-b border-slate-200 pb-1">Monthly Return Tracking</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                      
-                      {/* GSTR-1 Block */}
-                      <div className="space-y-3 border-r border-slate-100 pr-4">
-                        <p className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded w-max">GSTR-1 (Outward)</p>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-emerald-600 mb-1">Filed On</label>
-                          <input type="date" name="gstr1FilingDate" value={formData.gstr1FilingDate} onChange={handleChange} className="w-full text-sm font-medium border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500/20" />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-amber-600 mb-1">Next Due (11th)</label>
-                          <input type="date" name="gstr1NextDueDate" value={formData.gstr1NextDueDate} onChange={handleChange} className="w-full text-sm font-medium border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500/20" />
-                        </div>
-                      </div>
-
-                      {/* GSTR-3B Block */}
-                      <div className="space-y-3">
-                        <p className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded w-max">GSTR-3B (Summary)</p>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-emerald-600 mb-1">Filed On</label>
-                          <input type="date" name="gstr3bFilingDate" value={formData.gstr3bFilingDate} onChange={handleChange} className="w-full text-sm font-medium border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500/20" />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-amber-600 mb-1">Next Due (20th)</label>
-                          <input type="date" name="gstr3bNextDueDate" value={formData.gstr3bNextDueDate} onChange={handleChange} className="w-full text-sm font-medium border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500/20" />
-                        </div>
-                      </div>
-
-                    </div>
+                    <p className="text-[11px] font-medium text-slate-500 mb-3">Add every month's return, including past months. If a return is pending, write the reason in Remark. "Filed On" and "Next Due" in the list are worked out from these rows.</p>
+                    <GstFilingEditor records={formData.filingRecords || []} onChange={(rows) => setFormData(prev => ({ ...prev, filingRecords: rows }))} />
                   </div>
 
                 </div>
@@ -1566,13 +1616,13 @@ const GstReturns = () => {
       {/* HISTORY MODAL (WITH TABS) */}
       {isHistoryModalOpen && clientForHistory && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold"><History size={20} /></div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-800 tracking-tight">Client Audit & History</h2>
-                  <p className="text-xs text-slate-500">{clientForHistory.tradeName || clientForHistory.assesseeName}</p>
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold shrink-0"><UserCircle size={20} /></div>
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-slate-800 tracking-tight truncate">{clientForHistory.tradeName || clientForHistory.assesseeName}</h2>
+                  <p className="text-xs text-slate-500 truncate">GST Client Profile · GSTIN {clientForHistory.gstin || 'N/A'}</p>
                 </div>
               </div>
               <button onClick={() => setIsHistoryModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
@@ -1580,6 +1630,9 @@ const GstReturns = () => {
             
             {/* TABS */}
             <div className="flex border-b border-slate-100 bg-white px-6">
+              <button onClick={() => setHistoryTab('profile')} className={`py-3 px-4 text-xs font-bold border-b-2 transition-colors ${historyTab === 'profile' ? 'border-purple-600 text-purple-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                Full Profile
+              </button>
               <button onClick={() => setHistoryTab('returns')} className={`py-3 px-4 text-xs font-bold border-b-2 transition-colors ${historyTab === 'returns' ? 'border-purple-600 text-purple-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
                 Monthly Returns
               </button>
@@ -1590,53 +1643,120 @@ const GstReturns = () => {
 
             <div className="overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50/50">
               
+              {/* 🔴 FULL PROFILE: add / edit form ki saari jaankari ek jagah (sirf dekhne ke liye) */}
+              {historyTab === 'profile' && (() => {
+                const c = clientForHistory;
+                const showDay = (value) => (value ? new Date(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
+                const rupees = (value) => `₹${Number(value || 0).toLocaleString('en-IN')}`;
+                const balance = Number(c.feeAmount || 0) - Number(c.amountReceived || 0);
+                const copy = (value, label) => navigator.clipboard.writeText(String(value)).then(() => toast.success(`${label} copied`)).catch(() => toast.error('Could not copy'));
+                const notes = getGstNoteEntries(c.remarks);
+
+                // Ek khana: label + value (khali ho toh "—"), chahein toh copy button
+                const field = (label, value, options = {}) => (
+                  <div key={label} className={`bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 min-w-0 ${options.wide ? 'sm:col-span-2' : ''}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className={`text-sm font-semibold break-words min-w-0 ${value ? (options.color || 'text-slate-800') : 'text-slate-300'} ${options.mono ? 'font-mono' : ''}`}>{value || '—'}</p>
+                      {options.copy && value && <button onClick={() => copy(value, label)} className="text-[10px] font-bold text-blue-600 hover:underline shrink-0">Copy</button>}
+                    </div>
+                  </div>
+                );
+                const section = (Icon, title, children) => (
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2 border-b border-slate-100 pb-2"><Icon size={14}/> {title}</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">{children}</div>
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700">GST Status: {c.gstStatus || 'Documents Pending'}</span>
+                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-700">{c.taxpayerType || 'Regular'} Taxpayer</span>
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${c.aadhaarKycStatus === 'Yes' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>Aadhaar KYC: {c.aadhaarKycStatus === 'Yes' ? 'Verified' : 'Pending'}</span>
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${balance > 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{balance > 0 ? `Dues: ${rupees(balance)}` : 'No Dues'}</span>
+                      <button onClick={() => { setIsHistoryModalOpen(false); handleOpenEdit(c); }} className="ml-auto inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg shadow-sm"><Pencil size={12}/> Edit Details</button>
+                    </div>
+
+                    {section(Building2, 'Business & Registration', [
+                      field('Assessee / Legal Name', c.assesseeName),
+                      field('Trade Name', c.tradeName),
+                      field('Client ID', c.clientMasterId?.clientId || c.clientId, { mono: true }),
+                      field('GSTIN', c.gstin, { mono: true, copy: true }),
+                      field('PAN', c.pan || c.clientMasterId?.pan, { mono: true, copy: true }),
+                      field('Taxpayer Type', c.taxpayerType),
+                      field('GST Registration Date', showDay(c.registrationDate)),
+                      field('State', c.state),
+                      field('Client Type (Master)', c.clientMasterId?.clientType)
+                    ])}
+
+                    {section(Phone, 'Contact Person', [
+                      field('Authorised Person', c.authorisedPersonName),
+                      field('Mobile', c.mobile ? String(c.mobile) : '', { copy: true }),
+                      field('Email', c.email, { copy: true })
+                    ])}
+
+                    {section(Key, 'GST Portal Login', [
+                      field('Portal Username', c.portalUsername, { mono: true, copy: true }),
+                      <div key="Portal Password" className="bg-rose-50/60 border border-rose-100 rounded-xl px-3 py-2 min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-rose-500">Portal Password</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className={`text-sm font-semibold font-mono break-all min-w-0 ${c.portalPassword ? 'text-slate-800' : 'text-slate-300'}`}>{c.portalPassword ? (showPortalPassword ? c.portalPassword : '••••••••') : '—'}</p>
+                          {c.portalPassword && <button onClick={() => setShowPortalPassword(prev => !prev)} className="text-[10px] font-bold text-blue-600 hover:underline shrink-0">{showPortalPassword ? 'Hide' : 'Show'}</button>}
+                          {c.portalPassword && <button onClick={() => copy(c.portalPassword, 'Portal Password')} className="text-[10px] font-bold text-blue-600 hover:underline shrink-0">Copy</button>}
+                        </div>
+                      </div>,
+                      field('Aadhaar KYC', c.aadhaarKycStatus === 'Yes' ? 'Verified' : 'Pending', { color: c.aadhaarKycStatus === 'Yes' ? 'text-emerald-700' : 'text-amber-700' })
+                    ])}
+
+                    {section(CreditCard, 'Bank Details', [
+                      field('Bank Linked on Portal', c.bankLinkedStatus || 'Not Updated', { color: c.bankLinkedStatus === 'Updated' ? 'text-emerald-700' : 'text-amber-700' }),
+                      field('Bank Name', c.bankName),
+                      field('Account No.', c.accountNo, { mono: true, copy: true }),
+                      field('IFSC Code', c.ifscCode, { mono: true, copy: true })
+                    ])}
+
+                    {section(CalendarClock, 'Returns Summary', [
+                      field('GSTR-1 Last Filed On', showDay(c.gstr1FilingDate), { color: 'text-emerald-700' }),
+                      field('GSTR-1 Next Due', showDay(c.gstr1NextDueDate), { color: 'text-rose-600' }),
+                      field('Months Recorded', String((c.filingRecords || []).length)),
+                      field('GSTR-3B Last Filed On', showDay(c.gstr3bFilingDate), { color: 'text-emerald-700' }),
+                      field('GSTR-3B Next Due', showDay(c.gstr3bNextDueDate), { color: 'text-rose-600' }),
+                      field('Pending Months', String((c.filingRecords || []).filter(r => r.status !== 'Filed').length), { color: (c.filingRecords || []).some(r => r.status !== 'Filed') ? 'text-amber-700' : 'text-slate-800' })
+                    ])}
+
+                    {section(IndianRupee, 'Fees & Payments', [
+                      field('Payment Plan', c.feeStatus),
+                      field('Fee Amount', rupees(c.feeAmount)),
+                      field('Amount Received', rupees(c.amountReceived), { color: 'text-emerald-700' }),
+                      field('Balance Due', rupees(balance > 0 ? balance : 0), { color: balance > 0 ? 'text-rose-600' : 'text-emerald-700' }),
+                      field('Last Payment Date', showDay(c.paymentDate))
+                    ])}
+
+                    {section(Info, 'Record Info', [
+                      field('Added By', c.createdBy?.name ? `${c.createdBy.name}${c.createdBy.empId ? ` (${c.createdBy.empId})` : ''}` : ''),
+                      field('Added On', c.createdAt ? formatIstDateTime(c.createdAt) : ''),
+                      field('Last Updated', c.updatedAt ? formatIstDateTime(c.updatedAt) : '')
+                    ])}
+
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2 border-b border-slate-100 pb-2"><MessageSquare size={14}/> GST Notes & Remarks ({notes.length})</h3>
+                      <div className="max-h-60 overflow-y-auto custom-scrollbar bg-slate-50 rounded-xl p-4 border border-slate-100">
+                        <RemarkTimeline entries={notes} emptyText="No GST notes added yet." />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {historyTab === 'returns' && (
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm animate-in fade-in slide-in-from-bottom-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2 border-b border-slate-100 pb-2">
                     <CalendarClock size={14}/> Returns Tracker
                   </h3>
                   
-                  <div className="space-y-4">
-                    {/* GSTR-1 */}
-                    <div className="flex items-start gap-4">
-                      <div className="mt-1 h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center border border-blue-100 shrink-0">
-                        <FileCheck size={14} className="text-blue-600" />
-                      </div>
-                      <div className="flex-1 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                        <h4 className="text-xs font-bold text-slate-800 mb-2">GSTR-1 (Outward Supplies)</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase text-slate-400">Filed On</p>
-                            <p className="text-sm font-semibold text-emerald-600">{clientForHistory.gstr1FilingDate ? new Date(clientForHistory.gstr1FilingDate).toLocaleDateString('en-IN') : 'Not Filed'}</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold uppercase text-slate-400">Next Due (11th)</p>
-                            <p className="text-sm font-semibold text-rose-500">{clientForHistory.gstr1NextDueDate ? new Date(clientForHistory.gstr1NextDueDate).toLocaleDateString('en-IN') : 'N/A'}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* GSTR-3B */}
-                    <div className="flex items-start gap-4">
-                      <div className="mt-1 h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center border border-indigo-100 shrink-0">
-                        <FileText size={14} className="text-indigo-600" />
-                      </div>
-                      <div className="flex-1 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                        <h4 className="text-xs font-bold text-slate-800 mb-2">GSTR-3B (Summary Return)</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase text-slate-400">Filed On</p>
-                            <p className="text-sm font-semibold text-emerald-600">{clientForHistory.gstr3bFilingDate ? new Date(clientForHistory.gstr3bFilingDate).toLocaleDateString('en-IN') : 'Not Filed'}</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold uppercase text-slate-400">Next Due (20th)</p>
-                            <p className="text-sm font-semibold text-rose-500">{clientForHistory.gstr3bNextDueDate ? new Date(clientForHistory.gstr3bNextDueDate).toLocaleDateString('en-IN') : 'N/A'}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <GstFilingView client={clientForHistory} />
                 </div>
               )}
 

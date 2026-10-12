@@ -24,6 +24,16 @@ const gstReturnSchema = new mongoose.Schema({
   gstr3bFilingDate: { type: Date },
   gstr3bNextDueDate: { type: Date },
 
+  // 🔴 MONTHLY RETURN TRACKING: har mahine ki filing alag row (GST portal ki list jaisi).
+  // Upar ke 4 fields inhi rows se apne aap bante hain (utils/gstFiling.js).
+  filingRecords: [{
+    returnType: { type: String, enum: ['GSTR1', 'GSTR3B'], required: true },
+    period: { type: String, required: true },   // Tax period 'YYYY-MM'
+    filingDate: { type: Date, default: null },
+    status: { type: String, enum: ['Filed', 'Pending', 'Not Filed'], default: 'Pending' },
+    remark: { type: String, default: '' }       // Pending kyu hai / koi note
+  }],
+
   mobile: { type: Number, required: true },
   email: { type: String },
   state: { type: String },

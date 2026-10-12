@@ -1,6 +1,7 @@
 import GstReturn from '../models/GstReturn.js';
 import ClientMaster from '../models/ClientMaster.js'; 
 import { getListStats, num, countIf, statusIn } from '../utils/listStats.js';
+import { applyFilingRecords } from '../utils/gstFiling.js';
 
 // @desc    Get all GST records (WITH PAGINATION & FILTERS)
 export const getGstReturns = async (req, res) => {
@@ -170,6 +171,9 @@ export const createGstReturn = async (req, res) => {
       });
     }
 
+    // Mahine-wise filing rows saaf karke purane date fields unse banao
+    applyFilingRecords(req.body);
+
     // 3. Save GST Return & Link ClientMaster ID
     const newGst = new GstReturn({ 
       ...req.body, 
@@ -191,6 +195,8 @@ export const updateGstReturn = async (req, res) => {
   try {
     if (req.body.gstin) req.body.gstin = req.body.gstin.toUpperCase();
     if (req.body.pan) req.body.pan = req.body.pan.toUpperCase();
+    // Form ne mahine-wise filing rows bheji hain toh unse purane date fields bhi banao
+    applyFilingRecords(req.body);
 
     const updatedGst = await GstReturn.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!updatedGst) return res.status(404).json({ message: 'Record not found' });
