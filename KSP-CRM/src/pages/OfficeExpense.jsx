@@ -30,6 +30,9 @@ const OfficeExpense = () => {
 
   const [monthFilter, setMonthFilter] = useState(currentMonth);
   const [yearFilter, setYearFilter] = useState(currentYear);
+  // 🔴 NATURE FILTER: 'All' ya kisi ek nature ka naam (chhote akshar me, taaki "Tea" aur "tea" ek hi maane jayein)
+  const [natureFilter, setNatureFilter] = useState('All');
+  const natureKey = (value) => String(value || '').trim().toLowerCase();
 
   // 1. Fetch Expenses from Backend
   const fetchExpenses = async () => {
@@ -139,14 +142,25 @@ const OfficeExpense = () => {
     return [...new Set(years)].sort((a,b) => b - a);
   }, [expenses, currentYear]);
 
+  // Ab tak jitne nature likhe gaye unki list (A-Z). Spelling ka chhota-bada farak ek hi maana jata hai.
+  const natureOptions = useMemo(() => {
+    const seen = new Map();
+    expenses.forEach(exp => {
+      const key = natureKey(exp.nature);
+      if (key && !seen.has(key)) seen.set(key, String(exp.nature).trim());
+    });
+    return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [expenses]);
+
   const filteredExpenses = useMemo(() => {
     return expenses.filter(exp => {
       const expDate = new Date(exp.date);
       const matchesMonth = monthFilter === 'All' || (expDate.getMonth() + 1).toString() === monthFilter;
       const matchesYear = yearFilter === 'All' || expDate.getFullYear().toString() === yearFilter;
-      return matchesMonth && matchesYear;
+      const matchesNature = natureFilter === 'All' || natureKey(exp.nature) === natureFilter;
+      return matchesMonth && matchesYear && matchesNature;
     });
-  }, [expenses, monthFilter, yearFilter]);
+  }, [expenses, monthFilter, yearFilter, natureFilter]);
 
   const totalExpenses = filteredExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
@@ -166,7 +180,7 @@ const OfficeExpense = () => {
         {/* Total Expense Box */}
         <div className="bg-blue-50 border border-blue-200 px-5 py-2.5 rounded-xl text-right shadow-sm">
           <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-            {monthFilter !== 'All' || yearFilter !== 'All' ? 'Filtered Total' : 'Total Expenses'}
+            {monthFilter !== 'All' || yearFilter !== 'All' || natureFilter !== 'All' ? 'Filtered Total' : 'Total Expenses'}
           </p>
           <p className="text-xl font-black text-blue-900 flex items-center justify-end gap-1">
             <IndianRupee size={18} /> {totalExpenses.toLocaleString('en-IN')}
@@ -216,8 +230,14 @@ const OfficeExpense = () => {
                 placeholder="e.g. Electricity, Tea, Marketing"
                 value={formData.nature}
                 onChange={handleChange}
+                list="expense-nature-list"
+                autoComplete="off"
                 className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500/20"
               />
+              {/* Pehle likhe hue nature ka sujhav: ek hi spelling rahe toh filter saaf chalta hai */}
+              <datalist id="expense-nature-list">
+                {natureOptions.map(option => <option key={option.key} value={option.label} />)}
+              </datalist>
             </div>
 
             <div>
@@ -287,11 +307,16 @@ const OfficeExpense = () => {
               </span>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1.5 mr-1">
                 <Filter size={14} className="text-slate-400" />
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Filter:</span>
               </div>
+              {/* 🔴 NATURE FILTER */}
+              <select value={natureFilter} onChange={(e) => setNatureFilter(e.target.value)} className={`text-xs font-bold bg-white border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-blue-500/20 cursor-pointer max-w-[180px] ${natureFilter !== 'All' ? 'border-blue-300 text-blue-700 bg-blue-50' : 'border-slate-200 text-slate-700'}`}>
+                <option value="All">All Natures</option>
+                {natureOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+              </select>
               <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
                 <option value="All">All Months</option>
                 {Array.from({length: 12}, (_, i) => <option key={i+1} value={i+1}>{new Date(0, i).toLocaleString('en', {month: 'long'})}</option>)}
