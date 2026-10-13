@@ -193,12 +193,18 @@ const ClientMaster = () => {
     return Array.from({length: 10}, (_, i) => currentY - i); 
   }, []);
 
-  const getClientDueAmount = (client) => {
-    const clientInvs = allInvoices.filter(inv => 
+  // Is client ke invoice (PAN, GSTIN ya naam se milan)
+  const getClientInvoices = (client) => allInvoices.filter(inv =>
       (client.pan && inv.customer?.pan?.toUpperCase() === client.pan?.toUpperCase()) || 
       (client.gstin && inv.customer?.gstin?.toUpperCase() === client.gstin?.toUpperCase()) ||
       (inv.customer?.name?.toLowerCase() === client.name?.toLowerCase())
-    );
+  );
+
+  // Billing shuru hui ya nahi: koi invoice bana ho ya opening balance ho. Na ho toh "Dues Clear" kehna galat hai.
+  const hasClientBilling = (client) => getClientInvoices(client).length > 0 || Number(client.openingBalance || 0) > 0;
+
+  const getClientDueAmount = (client) => {
+    const clientInvs = getClientInvoices(client);
 
     let invoiceDue = 0;
     clientInvs.forEach(inv => {
@@ -530,22 +536,40 @@ const ClientMaster = () => {
         inv.paymentHistory.forEach((ph, idx) => {
           const paidAmt = Number(ph.amount || 0);
           const discAmt = Number(ph.discount || 0);
+          const tdsAmt = Number(ph.tds || 0);
           const totalCredit = paidAmt + discAmt;
-          
+          const entryDate = ph.date || inv.paymentDate || inv.updatedAt;
+
           let desc = `Part Payment Received against Invoice ${inv.invoiceNo} via ${ph.mode || 'Online'}`;
           if (discAmt > 0) {
             desc += ` (+ ₹${discAmt.toLocaleString('en-IN')} Discount)`;
           }
 
-          transactions.push({
-            id: `pay-${inv._id}-${idx}`,
-            date: ph.date || inv.paymentDate || inv.updatedAt,
-            type: 'Payment',
-            ref: inv.invoiceNo,
-            particulars: desc,
-            debit: 0,
-            credit: totalCredit
-          });
+          // Sirf TDS wali entry ho (paisa / discount 0) toh khali "payment" line nahi banate
+          if (totalCredit > 0 || tdsAmt === 0) {
+            transactions.push({
+              id: `pay-${inv._id}-${idx}`,
+              date: entryDate,
+              type: 'Payment',
+              ref: inv.invoiceNo,
+              particulars: desc,
+              debit: 0,
+              credit: totalCredit
+            });
+          }
+
+          // 🔴 TDS: client ne kaat kar sarkar ko jama kiya. Statement me alag line, taaki saaf dikhe.
+          if (tdsAmt > 0) {
+            transactions.push({
+              id: `tds-${inv._id}-${idx}`,
+              date: entryDate,
+              type: 'TDS',
+              ref: inv.invoiceNo,
+              particulars: `TDS Deducted by Client against Invoice ${inv.invoiceNo}`,
+              debit: 0,
+              credit: tdsAmt
+            });
+          }
         });
       } else {
         let actualReceived = Number(inv.amountReceived || 0);
@@ -808,8 +832,11 @@ const ClientMaster = () => {
                                <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-100 px-2 py-0.5 rounded border border-rose-200">
                                  Due: ₹{clientDue.toLocaleString('en-IN')}
                                </span>
+                            ) : hasClientBilling(client) ? (
+                               <span className="text-[10px] font-bold text-emerald-600">Dues Clear</span>
                             ) : (
-                               <span className="text-[10px] font-bold text-slate-400">Dues Clear</span>
+                               // Abhi tak koi invoice hi nahi bana: "clear" nahi, "bill nahi bana"
+                               <span className="text-[10px] font-bold text-slate-400" title="No invoice has been raised for this client yet">No Invoice Yet</span>
                             )}
                           </div>
                         </td>
@@ -1042,14 +1069,14 @@ const ClientMaster = () => {
                       {WORKSPACES.map(ws => {
                         const linked = !!clientToView.services?.[ws.key];
                         const count = workspaceData.data?.[ws.key]?.length;
-                        const clickable = linked || ws.key === 'cfo'; // CFO report kisi bhi client ke liye shuru ki ja sakti hai
+                        const clickable = linked; // jo workspace juda nahi hai (CFO samet) wo band dikhta hai
                         const WsIcon = ws.icon;
                         return (
                           <button
                             key={ws.key}
                             onClick={() => handleWorkspaceClick(ws)}
                             disabled={!clickable}
-                            title={linked ? `View ${ws.label} details` : ws.key === 'cfo' ? 'Start a Business Health report for this client' : 'Not linked'}
+                            title={linked ? `View ${ws.label} details` : 'Not linked'}
                             className={`border rounded-xl p-3 flex flex-col items-center justify-center text-center gap-2 transition-all ${linked ? `${ws.box} shadow-sm hover:scale-105 active:scale-95 cursor-pointer` : clickable ? 'bg-white border-dashed border-slate-300 hover:border-rose-300 hover:bg-rose-50/40 cursor-pointer' : 'bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed'}`}
                           >
                             <div className={`h-10 w-10 rounded-full flex items-center justify-center ${linked ? ws.chip : 'bg-slate-200 text-slate-400'}`}><WsIcon size={18}/></div>
@@ -1058,8 +1085,6 @@ const ClientMaster = () => {
                               <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded shadow-sm flex items-center gap-1">
                                 <CheckCircle2 size={10}/> {workspaceData.loading ? 'Active' : count ? `${count} ${ws.key === 'cfo' ? 'report' : 'record'}${count > 1 ? 's' : ''}` : 'Active'}
                               </span>
-                            ) : ws.key === 'cfo' ? (
-                              <span className="text-[9px] font-bold uppercase tracking-wider bg-rose-50 text-rose-600 px-2 py-0.5 rounded">Start Report</span>
                             ) : (
                               <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Not Linked</span>
                             )}
@@ -1095,9 +1120,15 @@ const ClientMaster = () => {
                     <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100 shadow-sm flex flex-col">
                       <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Total Received (Credit)</span>
                       <span className="text-xl font-black text-emerald-700 flex items-center gap-1">
-                        <IndianRupee size={18}/> 
+                        <IndianRupee size={18}/>
                         {clientLedger.filter(l => l.credit > 0).reduce((acc, curr) => acc + curr.credit, 0).toLocaleString('en-IN')}
                       </span>
+                      {/* Isme se kitna TDS hai (client ne kaat kar jama kiya, hame nahi mila) */}
+                      {clientLedger.some(l => l.type === 'TDS') && (
+                        <span className="text-[11px] font-bold text-violet-700 mt-1">
+                          incl. TDS deducted by client: ₹{clientLedger.filter(l => l.type === 'TDS').reduce((acc, curr) => acc + curr.credit, 0).toLocaleString('en-IN')}
+                        </span>
+                      )}
                     </div>
                     <div className="bg-rose-50 p-5 rounded-2xl border border-rose-100 shadow-sm flex flex-col">
                       <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider mb-1">Net Balance Due</span>
@@ -1148,7 +1179,7 @@ const ClientMaster = () => {
                                 </td>
                                 <td className="py-3 px-4">
                                   <div className="flex items-center gap-2">
-                                    <span className={`w-2 h-2 rounded-full ${entry.type === 'Opening' ? 'bg-amber-500' : entry.type === 'Payment' ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+                                    <span className={`w-2 h-2 rounded-full ${entry.type === 'Opening' ? 'bg-amber-500' : entry.type === 'Payment' ? 'bg-emerald-500' : entry.type === 'TDS' ? 'bg-violet-500' : 'bg-blue-500'}`}></span>
                                     <span className="font-bold text-slate-800">{entry.particulars}</span>
                                   </div>
                                 </td>

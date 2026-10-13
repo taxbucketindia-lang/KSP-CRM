@@ -58,7 +58,9 @@ paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], defa
     date: { type: Date },
     amount: { type: Number },
     mode: { type: String, default: 'Online' },
-    discount: { type: Number, default: 0 }
+    discount: { type: Number, default: 0 },
+    // 🔴 TDS: client ne bill me se khud kaat kar sarkar ko jama kiya (hame nahi mila, par bill utna clear maana jata hai)
+    tds: { type: Number, default: 0 }
   }],
 
   isGstEnabled: {

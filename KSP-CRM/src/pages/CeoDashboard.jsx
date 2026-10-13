@@ -1824,12 +1824,12 @@ if (rawInTime) {
       if (inv.paymentStatus === 'Paid' && credited === 0) credited = total;
 
       const history = (inv.paymentHistory || []).map(p => ({
-        date: p.date, amount: Number(p.amount || 0), discount: Number(p.discount || 0), mode: p.mode || 'Online'
+        date: p.date, amount: Number(p.amount || 0), discount: Number(p.discount || 0), tds: Number(p.tds || 0), mode: p.mode || 'Online'
       }));
       // Purane invoices jinme payment history nahi likhi, sirf received amount hai
-      const recorded = history.reduce((sum, p) => sum + p.amount + p.discount, 0);
+      const recorded = history.reduce((sum, p) => sum + p.amount + p.discount + p.tds, 0);
       if (credited - recorded > 0.5) {
-        history.push({ date: inv.paymentDate || inv.updatedAt || inv.createdAt, amount: credited - recorded, discount: 0, mode: 'Not recorded' });
+        history.push({ date: inv.paymentDate || inv.updatedAt || inv.createdAt, amount: credited - recorded, discount: 0, tds: 0, mode: 'Not recorded' });
       }
 
       return {
@@ -1864,6 +1864,8 @@ if (rawInTime) {
     const billed = raised.reduce((sum, r) => sum + r.total, 0);
     const collected = payments.reduce((sum, p) => sum + p.amount, 0);
     const discountGiven = payments.reduce((sum, p) => sum + p.discount, 0);
+    // TDS client ne kaat kar jama kiya: hame mila nahi, isliye "collected" me nahi ginte
+    const tdsDeducted = payments.reduce((sum, p) => sum + (p.tds || 0), 0);
     const invoiceDue = raised.reduce((sum, r) => sum + r.due, 0);
     const revenue = billed + openingBalance;
 
@@ -1890,7 +1892,7 @@ if (rawInTime) {
     };
 
     return {
-      revenue, billed, openingBalance, collected, discountGiven,
+      revenue, billed, openingBalance, collected, discountGiven, tdsDeducted,
       outstanding: invoiceDue + openingBalance,
       invoiceDue,
       invoiceCount: raised.length,
@@ -1983,7 +1985,7 @@ if (rawInTime) {
               <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${finance.collectionRate}%` }}></div>
             </div>
             <p className="text-[11px] font-semibold text-slate-400 mt-1.5">
-              {finance.collectionRate}% of billed{finance.discountGiven > 0 ? ` · ${formatInr(finance.discountGiven)} discount given` : ''}
+              {finance.collectionRate}% of billed{finance.discountGiven > 0 ? ` · ${formatInr(finance.discountGiven)} discount given` : ''}{finance.tdsDeducted > 0 ? ` · ${formatInr(finance.tdsDeducted)} TDS deducted` : ''}
             </p>
           </button>
 
@@ -2607,7 +2609,7 @@ if (rawInTime) {
                   {financeModal === 'collected' && (
                     <>
                       <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-100">
-                        <tr><th className={th}>Payment Date</th><th className={th}>Client</th><th className={th}>Invoice</th><th className={th}>Mode</th><th className={`${th} text-right`}>Amount Received</th><th className={`${th} text-right`}>Discount</th></tr>
+                        <tr><th className={th}>Payment Date</th><th className={th}>Client</th><th className={th}>Invoice</th><th className={th}>Mode</th><th className={`${th} text-right`}>Amount Received</th><th className={`${th} text-right`}>Discount</th><th className={`${th} text-right`}>TDS</th></tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {finance.payments.length === 0 ? empty('No payment received in this period.') : finance.payments.map(p => (
@@ -2618,6 +2620,7 @@ if (rawInTime) {
                             <td className="py-3 px-4 text-xs text-slate-600">{p.mode}</td>
                             <td className="py-3 px-4 text-right font-black text-emerald-600 whitespace-nowrap">{formatInr(p.amount)}</td>
                             <td className="py-3 px-4 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">{p.discount > 0 ? formatInr(p.discount) : '-'}</td>
+                            <td className="py-3 px-4 text-right text-xs font-semibold text-violet-600 whitespace-nowrap">{p.tds > 0 ? formatInr(p.tds) : '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2651,6 +2654,7 @@ if (rawInTime) {
               <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex flex-wrap items-center justify-between gap-3 shrink-0">
                 <p className="text-[11px] font-semibold text-slate-500">
                   {financeModal === 'collected' && finance.discountGiven > 0 && `Discount given: ${formatInr(finance.discountGiven)} (not counted as collected). `}
+                  {financeModal === 'collected' && finance.tdsDeducted > 0 && `TDS deducted by clients: ${formatInr(finance.tdsDeducted)} (not counted as collected). `}
                   {['revenue', 'outstanding'].includes(financeModal) && finance.openingBalance > 0 && `Card total also includes ${formatInr(finance.openingBalance)} opening balance from Client Master, which is not listed here. `}
                   Only clients with invoices are shown.
                 </p>

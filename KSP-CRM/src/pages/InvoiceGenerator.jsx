@@ -100,7 +100,8 @@ const InvoiceGenerator = () => {
     open: false, invoice: null, amountReceived: '', 
     paymentDate: new Date().toISOString().split('T')[0], 
     mode: 'UPI / Online', 
-    discount: ''
+    discount: '',
+    tds: '' // client ne jo TDS kaat liya
   });
   const [processingPayment, setProcessingPayment] = useState(false);
 
@@ -226,7 +227,7 @@ const InvoiceGenerator = () => {
   // Payment history se invoice ka total received / status / last payment date dobara banana
   // (purane invoices me jo rakam history me likhi nahi thi, wo "legacy" me bachi rehti hai)
   const buildPaymentUpdate = (invoice, history) => {
-    const credit = (list) => list.reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.discount || 0), 0);
+    const credit = (list) => list.reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.discount || 0) + Number(p.tds || 0), 0); // paisa + discount + TDS
     const legacy = Math.max(0, Number(invoice.amountReceived || 0) - credit(invoice.paymentHistory || []));
     const amountReceived = legacy + credit(history);
     const invoiceTotal = Number(invoice.totalAmountAfterTax || 0);
@@ -239,7 +240,7 @@ const InvoiceGenerator = () => {
     return { amountReceived, paymentStatus, paymentDate: lastDate || (amountReceived > 0 ? invoice.paymentDate : null), paymentHistory: history };
   };
 
-  const closePaymentModal = () => setPaymentModal({ open: false, invoice: null, editIndex: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '' });
+  const closePaymentModal = () => setPaymentModal({ open: false, invoice: null, editIndex: null, amountReceived: '', paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '', tds: '' });
 
   // 🔴 NAYA: naya payment record karna YA pehle se dali hui entry ko edit karna (date, mode, discount, amount)
   const handleRecordPayment = async (e) => {
@@ -254,7 +255,8 @@ const InvoiceGenerator = () => {
         date: new Date(paymentModal.paymentDate).toISOString(),
         amount: Number(paymentModal.amountReceived || 0),
         mode: paymentModal.mode,
-        discount: Number(paymentModal.discount || 0)
+        discount: Number(paymentModal.discount || 0),
+        tds: Number(paymentModal.tds || 0)
       };
 
       const currentHistory = invoice.paymentHistory || [];
@@ -278,7 +280,8 @@ const InvoiceGenerator = () => {
       amountReceived: entry.amount ?? '',
       paymentDate: entry.date ? new Date(entry.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       mode: entry.mode || 'UPI / Online',
-      discount: entry.discount || ''
+      discount: entry.discount || '',
+      tds: entry.tds || ''
     });
   };
 
@@ -297,9 +300,18 @@ const InvoiceGenerator = () => {
   // Edit ke waqt: is entry ko chhod kar baaki kitna clear ho chuka hai
   const editingPayment = paymentModal.open && paymentModal.editIndex != null ? paymentModal.invoice?.paymentHistory?.[paymentModal.editIndex] : null;
   const clearedBefore = paymentModal.invoice
-    ? Number(paymentModal.invoice.amountReceived || 0) - (editingPayment ? Number(editingPayment.amount || 0) + Number(editingPayment.discount || 0) : 0)
+    ? Number(paymentModal.invoice.amountReceived || 0) - (editingPayment ? Number(editingPayment.amount || 0) + Number(editingPayment.discount || 0) + Number(editingPayment.tds || 0) : 0)
     : 0;
   const PAYMENT_MODES = [['UPI / Online', 'UPI / Online'], ['NEFT / RTGS', 'NEFT / RTGS / IMPS'], ['Cash', 'Cash'], ['Adjust against Adv.', 'Adjust against Adv.']];
+  // 🔴 TDS: client bill me se kaat kar deta hai. TDS hamesha GST se pehle wali rakam (taxable amount) par lagta hai.
+  const tdsBase = paymentModal.invoice ? Number(paymentModal.invoice.taxableAmount || paymentModal.invoice.totalAmountAfterTax || 0) : 0;
+  const adjustments = Number(paymentModal.discount || 0) + Number(paymentModal.tds || 0);
+  // TDS % chunne par TDS bhar do aur "Amount Received" ko bachi hui rakam par le aao
+  const applyTdsPercent = (percent) => {
+    const tds = Math.round((tdsBase * percent) / 100);
+    const dueNow = Number(paymentModal.invoice.totalAmountAfterTax || 0) - clearedBefore - Number(paymentModal.discount || 0) - tds;
+    setPaymentModal(prev => ({ ...prev, tds: tds || '', amountReceived: Math.max(0, Math.round(dueNow * 100) / 100) }));
+  };
 
   const handleSendReminder = (inv) => {
     const total = Number(inv.totalAmountAfterTax || 0);
@@ -1044,6 +1056,7 @@ const InvoiceGenerator = () => {
                               <CheckCircle2 size={12} className="text-emerald-500"/>
                               Received <span className="text-emerald-700 font-black">₹{Number(ph.amount).toLocaleString('en-IN')}</span> via {ph.mode} on {new Date(ph.date).toLocaleDateString('en-IN')}
                               {ph.discount > 0 && <span className="text-rose-500 ml-1 bg-rose-50 px-1 rounded border border-rose-100">(+ ₹{ph.discount} Discount)</span>}
+                              {ph.tds > 0 && <span className="text-violet-600 ml-1 bg-violet-50 px-1 rounded border border-violet-100">(+ ₹{Number(ph.tds).toLocaleString('en-IN')} TDS deducted)</span>}
                               <button type="button" onClick={() => openEditPayment(inv, idx)} className="ml-1 p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Edit this payment entry"><Edit size={11}/></button>
                               {canDelete && <button type="button" onClick={() => handleDeletePayment(inv, idx)} className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors" title="Delete this payment entry"><Trash2 size={11}/></button>}
                             </div>
@@ -1091,7 +1104,7 @@ const InvoiceGenerator = () => {
                     <div className="flex flex-row lg:flex-col items-center justify-end gap-2 w-full lg:w-auto border-t lg:border-t-0 pt-4 lg:pt-0 border-slate-200">
                        {percentPaid < 100 && (
                          <button 
-                           onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '' })} 
+                           onClick={() => setPaymentModal({ open: true, invoice: inv, amountReceived: due, paymentDate: new Date().toISOString().split('T')[0], mode: 'UPI / Online', discount: '', tds: '' })} 
                            className="w-full text-[10px] font-black uppercase tracking-wider bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-1.5"
                          >
                            <IndianRupee size={12}/> Record Pay
@@ -1244,10 +1257,16 @@ const InvoiceGenerator = () => {
                     <span className="font-mono">- ₹{Number(paymentModal.discount).toLocaleString('en-IN')}</span>
                   </div>
                 )}
-                {Number(paymentModal.discount) > 0 && (
+                {Number(paymentModal.tds) > 0 && (
+                  <div className="flex justify-between text-xs font-bold text-violet-600 mt-1">
+                    <span>TDS Deducted by Client:</span>
+                    <span className="font-mono">- ₹{Number(paymentModal.tds).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+                {adjustments > 0 && (
                   <div className="flex justify-between text-sm font-black text-emerald-700 mt-1">
                     <span>Net Payable Now:</span>
-                    <span className="font-mono">₹{Math.max(0, (paymentModal.invoice.totalAmountAfterTax - clearedBefore - Number(paymentModal.discount))).toLocaleString('en-IN')}</span>
+                    <span className="font-mono">₹{Math.max(0, (paymentModal.invoice.totalAmountAfterTax - clearedBefore - adjustments)).toLocaleString('en-IN')}</span>
                   </div>
                 )}
               </div>
@@ -1282,6 +1301,28 @@ const InvoiceGenerator = () => {
                 </div>
               </div>
 
+              {/* 🔴 TDS: client ne bill me se jo TDS kaat liya (hame nahi mila, par bill utna clear maana jata hai) */}
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                  TDS Deducted by Client (₹)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={paymentModal.tds}
+                    onChange={(e) => setPaymentModal({...paymentModal, tds: e.target.value})}
+                    placeholder="0 if no TDS was cut"
+                    className="w-full text-sm font-bold border border-violet-200 bg-violet-50 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/20 text-violet-800 transition-all shadow-sm"
+                  />
+                  {[10, 2, 1].map(percent => (
+                    <button key={percent} type="button" onClick={() => applyTdsPercent(percent)} title={`${percent}% of taxable amount ₹${tdsBase.toLocaleString('en-IN')}`} className="shrink-0 px-2.5 text-[11px] font-black text-violet-700 bg-white border border-violet-200 hover:bg-violet-50 rounded-xl">{percent}%</button>
+                  ))}
+                </div>
+                <p className="text-[10px] font-semibold text-slate-400 mt-1">Some clients cut TDS and pay the rest. Enter the TDS here so the bill clears fully. The % buttons work on the amount before GST (₹{tdsBase.toLocaleString('en-IN')}).</p>
+              </div>
+
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
                   {editingPayment ? 'Amount Received (₹)' : 'Amount Received Now (₹)'}
@@ -1290,7 +1331,7 @@ const InvoiceGenerator = () => {
                   type="number"
                   required
                   min="0"
-                  max={Math.max(0, paymentModal.invoice.totalAmountAfterTax - clearedBefore - Number(paymentModal.discount || 0))}
+                  max={Math.max(0, paymentModal.invoice.totalAmountAfterTax - clearedBefore - adjustments)}
                   value={paymentModal.amountReceived}
                   onChange={(e) => setPaymentModal({...paymentModal, amountReceived: e.target.value})}
                   placeholder="Enter amount received"

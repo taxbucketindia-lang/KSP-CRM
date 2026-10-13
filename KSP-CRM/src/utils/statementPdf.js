@@ -22,6 +22,8 @@ export const downloadClientStatement = async (client, ledger) => {
 
   const totalDebit = ledger.reduce((sum, e) => sum + Number(e.debit || 0), 0);
   const totalCredit = ledger.reduce((sum, e) => sum + Number(e.credit || 0), 0);
+  // TDS jo client ne kaat kar jama kiya (credit me shamil hai, par hame mila nahi)
+  const totalTds = ledger.filter(e => e.type === 'TDS').reduce((sum, e) => sum + Number(e.credit || 0), 0);
   const closing = ledger.length ? ledger[ledger.length - 1].balance : 0;
   const opening = ledger.find(e => e.type === 'Opening')?.debit || 0;
   const dated = ledger.filter(e => e.type !== 'Opening' && e.date);
@@ -73,7 +75,8 @@ export const downloadClientStatement = async (client, ledger) => {
         ['Period', `${day(periodFrom)} to ${day(new Date())}`],
         ['Opening Balance', balanceText(opening)],
         ['Total Billed (Dr)', amount(totalDebit - opening) || '0.00'],
-        ['Total Received (Cr)', amount(totalCredit) || '0.00'],
+        ['Total Received (Cr)', amount(totalCredit - totalTds) || '0.00'],
+        ...(totalTds > 0 ? [['TDS Deducted (Cr)', amount(totalTds)]] : []),
         ['Closing Balance', balanceText(closing)]
       ];
       const rows = Math.max(clientLines.length, right.length);
