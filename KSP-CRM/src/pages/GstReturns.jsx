@@ -1,4 +1,5 @@
 import { isAdminRole } from '../utils/roles';
+import FilingDateFilter, { filingRange } from '../components/FilingDateFilter';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -36,6 +37,8 @@ const GstReturns = () => {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  // 🔴 DATE OF FILING FILTER (Day / Month / Year / Financial Year / Custom)
+  const [filingDate, setFilingDate] = useState({ mode: 'all' });
   const [taxpayerTypeFilter, setTaxpayerTypeFilter] = useState('ALL');
   const [paymentPlanFilter, setPaymentPlanFilter] = useState('ALL');
   const [stateFilter, setStateFilter] = useState('ALL');
@@ -131,7 +134,8 @@ const GstReturns = () => {
         bankLinked: bankLinkedFilter,
         aadhaarKyc: aadhaarKycFilter,
         gstr1: gstr1Filter,
-        gstr3b: gstr3bFilter
+        gstr3b: gstr3bFilter,
+        ...filingRange(filingDate)
       }).toString();
 
       const [crmRes, gstRes] = await Promise.all([
@@ -178,12 +182,12 @@ const GstReturns = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter, taxpayerTypeFilter, stateFilter, paymentPlanFilter, bankLinkedFilter, aadhaarKycFilter, gstr1Filter, gstr3bFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, taxpayerTypeFilter, stateFilter, paymentPlanFilter, bankLinkedFilter, aadhaarKycFilter, gstr1Filter, gstr3bFilter, filingDate]);
 
   // Reset page to 1 if any filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, taxpayerTypeFilter, stateFilter, paymentPlanFilter, bankLinkedFilter, aadhaarKycFilter, gstr1Filter, gstr3bFilter]);
+  }, [searchQuery, statusFilter, taxpayerTypeFilter, stateFilter, paymentPlanFilter, bankLinkedFilter, aadhaarKycFilter, gstr1Filter, gstr3bFilter, filingDate]);
 
   // 🔴 PAN Change Handler with Fixes
   const handlePanChange = async (e) => {
@@ -260,7 +264,8 @@ const GstReturns = () => {
         aadhaarKyc: aadhaarKycFilter,
         gstr1: gstr1Filter,
         gstr3b: gstr3bFilter,
-        fetchAll: 'true' // Requesting full list
+        ...filingRange(filingDate),
+        fetchAll: 'true' // filter ke hisaab se poori list
       }).toString();
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/gst?${params}`, { headers });
@@ -819,6 +824,7 @@ const GstReturns = () => {
             </div>
             
             <div className="flex flex-wrap items-center gap-2 w-full">
+              <FilingDateFilter value={filingDate} onChange={setFilingDate} />
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
                 <option value="ALL">Status: All</option>
                 <option value="Documents Pending">Documents Pending</option>

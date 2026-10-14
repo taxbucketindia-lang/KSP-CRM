@@ -1,6 +1,7 @@
 import ItrReturn from '../models/ItrReturn.js';
 import ClientMaster from '../models/ClientMaster.js';
 import { getListStats, num, countIf, statusIn } from '../utils/listStats.js';
+import { readFilingRange, addCondition } from '../utils/filingDateFilter.js';
 
 // 🔴 HELPER FUNCTION: Smart Find, Create OR UPDATE Client
 const findOrCreateClient = async (clientData) => {
@@ -96,6 +97,9 @@ export const getItrReturns = async (req, res) => {
     if (processed && processed !== 'ALL') filter.itrProcessedStatus = withDefault(processed, 'Pending');
     if (returnType && returnType !== 'ALL') filter.returnType = withDefault(returnType, 'Original');
     if (feeStatus && feeStatus !== 'ALL') filter.feeStatus = withDefault(feeStatus, 'Dues');
+    // 🔴 DATE OF FILING: ITR kis din file hua
+    const filedRange = readFilingRange(req.query);
+    if (filedRange) filter.filingDate = filedRange;
 
     // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
     const stats = await getListStats(ItrReturn, filter, {

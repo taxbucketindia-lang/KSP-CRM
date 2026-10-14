@@ -1,4 +1,5 @@
 import { isAdminRole } from '../utils/roles';
+import FilingDateFilter, { filingRange } from '../components/FilingDateFilter';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -32,6 +33,8 @@ const ItrReturns = () => {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  // 🔴 DATE OF FILING FILTER (Day / Month / Year / Financial Year / Custom)
+  const [filingDate, setFilingDate] = useState({ mode: 'all' });
   const [verificationFilter, setVerificationFilter] = useState('ALL');
   const [processedFilter, setProcessedFilter] = useState('ALL');
   const [returnTypeFilter, setReturnTypeFilter] = useState('ALL');
@@ -95,7 +98,8 @@ const ItrReturns = () => {
         verification: verificationFilter,
         processed: processedFilter,
         returnType: returnTypeFilter,
-        feeStatus: feeStatusFilter
+        feeStatus: feeStatusFilter,
+        ...filingRange(filingDate)
       }).toString();
 
       const [crmRes, itrRes, basRes] = await Promise.all([
@@ -135,12 +139,12 @@ const ItrReturns = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter, filingDate]);
 
   // Reset page to 1 if any filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter]);
+  }, [searchQuery, statusFilter, verificationFilter, processedFilter, returnTypeFilter, feeStatusFilter, filingDate]);
 
   // 🔴 PAN Auto-fetch logic updated for pagination and full extraction
   const handlePanChange = async (e) => {
@@ -220,7 +224,8 @@ const ItrReturns = () => {
         processed: processedFilter,
         returnType: returnTypeFilter,
         feeStatus: feeStatusFilter,
-        fetchAll: 'true' // Requesting full list from backend
+        ...filingRange(filingDate),
+        fetchAll: 'true' // filter ke hisaab se poori list
       }).toString();
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/itr?${params}`, { headers });
@@ -780,6 +785,7 @@ const ItrReturns = () => {
           </div>
           
           <div className="flex flex-wrap items-center gap-3 w-full">
+            <FilingDateFilter value={filingDate} onChange={setFilingDate} />
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-sm">
               <option value="ALL">Status: All</option>
               <option value="Documents Pending">Documents Pending</option>

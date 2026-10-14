@@ -1,4 +1,5 @@
 import { isAdminRole } from '../utils/roles';
+import FilingDateFilter, { filingRange } from '../components/FilingDateFilter';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -31,6 +32,8 @@ const TdsWorkspace = () => {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  // 🔴 DATE OF FILING FILTER (Day / Month / Year / Financial Year / Custom)
+  const [filingDate, setFilingDate] = useState({ mode: 'all' });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -92,7 +95,8 @@ const TdsWorkspace = () => {
         page: currentPage,
         limit: itemsPerPage,
         search: searchQuery,
-        status: statusFilter
+        status: statusFilter,
+        ...filingRange(filingDate)
       }).toString();
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/tds/workspaces?${params}`, { headers });
@@ -119,12 +123,12 @@ const TdsWorkspace = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, filingDate]);
 
   // Reset page to 1 if any filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, filingDate]);
 
   const loadTabSpecificData = async (workspaceId, tabName) => {
     if (tabName === 'profile') return; 
@@ -445,6 +449,7 @@ const TdsWorkspace = () => {
                 className="w-full pl-9 pr-3.5 py-2.5 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm" 
               />
             </div>
+            <FilingDateFilter value={filingDate} onChange={setFilingDate} />
           </div>
           <div className="w-full text-left bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-wider flex pr-4">
              <div className="py-3 px-8 w-[35%]">Deductor Details</div>

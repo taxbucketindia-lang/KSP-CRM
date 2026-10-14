@@ -1,4 +1,5 @@
 import { isAdminRole } from '../utils/roles';
+import FilingDateFilter, { filingRange } from '../components/FilingDateFilter';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -32,6 +33,8 @@ const RocWorkspace = () => {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Active');
+  // 🔴 DATE OF FILING FILTER (Day / Month / Year / Financial Year / Custom)
+  const [filingDate, setFilingDate] = useState({ mode: 'all' });
   const [typeFilter, setTypeFilter] = useState('ALL');
 
   // 🔴 Server-Side Pagination States
@@ -76,7 +79,8 @@ const RocWorkspace = () => {
         limit: itemsPerPage,
         search: searchQuery,
         status: statusFilter,
-        type: typeFilter
+        type: typeFilter,
+        ...filingRange(filingDate)
       }).toString();
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/roc/workspaces?${params}`, { headers });
@@ -104,12 +108,12 @@ const RocWorkspace = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, filingDate]);
 
   // Reset page to 1 if any filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter]);
+  }, [searchQuery, statusFilter, typeFilter, filingDate]);
 
   // 🔴 BULLETPROOF PAN SEARCH LOGIC FOR ROC
   const handlePanChange = async (e) => {
@@ -229,7 +233,8 @@ const RocWorkspace = () => {
         search: searchQuery,
         status: statusFilter,
         type: typeFilter,
-        fetchAll: 'true' // Requesting full list from backend
+        ...filingRange(filingDate),
+        fetchAll: 'true' // filter ke hisaab se poori list
       }).toString();
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/roc/workspaces?${params}`, { headers });
@@ -702,6 +707,7 @@ const RocWorkspace = () => {
             </div>
             
             <div className="flex items-center gap-3 w-full md:w-auto">
+              <FilingDateFilter value={filingDate} onChange={setFilingDate} />
               <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer w-full md:w-auto">
                 <option value="ALL">All Entity Types</option>
                 <option value="Private Limited">Private Limited</option>

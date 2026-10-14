@@ -3,6 +3,7 @@ import ClientMaster from '../models/ClientMaster.js';
 import Director from '../models/Director.js';
 import RocCompliance from '../models/RocCompliance.js';
 import { getListStats, countIf, statusIn } from '../utils/listStats.js';
+import { readFilingRange, addCondition } from '../utils/filingDateFilter.js';
 
 // ==========================================
 // 1. ROC WORKSPACE MANAGEMENT
@@ -36,6 +37,9 @@ export const getRocWorkspaces = async (req, res) => {
     if (type && type !== 'ALL') {
       filter.clientType = type;
     }
+    // 🔴 DATE OF FILING: is range me koi ROC form file hua ho
+    const filedRange = readFilingRange(req.query);
+    if (filedRange) filter.complianceFilings = { $elemMatch: { filingDate: filedRange } };
 
     // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
     const stats = await getListStats(RocWorkspace, filter, {

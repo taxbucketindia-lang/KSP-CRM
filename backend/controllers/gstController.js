@@ -2,6 +2,7 @@ import GstReturn from '../models/GstReturn.js';
 import ClientMaster from '../models/ClientMaster.js'; 
 import { getListStats, num, countIf, statusIn } from '../utils/listStats.js';
 import { applyFilingRecords } from '../utils/gstFiling.js';
+import { readFilingRange, addCondition } from '../utils/filingDateFilter.js';
 
 // @desc    Get all GST records (WITH PAGINATION & FILTERS)
 export const getGstReturns = async (req, res) => {
@@ -57,6 +58,15 @@ export const getGstReturns = async (req, res) => {
     }
     if (gstr3b && gstr3b !== 'ALL') {
       filter.gstr3bFilingDate = gstr3b === 'Filed' ? { $exists: true, $ne: null } : { $eq: null };
+    }
+    // 🔴 DATE OF FILING: is range me koi bhi return (GSTR-1 / GSTR-3B, mahine-wise list samet) file hua ho
+    const filedRange = readFilingRange(req.query);
+    if (filedRange) {
+      addCondition(filter, { $or: [
+        { gstr1FilingDate: filedRange },
+        { gstr3bFilingDate: filedRange },
+        { filingRecords: { $elemMatch: { filingDate: filedRange } } }
+      ] });
     }
 
     // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)

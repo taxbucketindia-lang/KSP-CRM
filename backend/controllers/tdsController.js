@@ -7,6 +7,7 @@ import TdsDeductionEntry from '../models/TdsDeductionEntry.js';
 import { TdsSection, TdsDueDate } from '../models/TdsMasterData.js';
 import ClientMaster from '../models/ClientMaster.js';
 import { getListStats, countIf } from '../utils/listStats.js';
+import { readFilingRange, addCondition } from '../utils/filingDateFilter.js';
 
 // ==========================================
 // 🔴 SECURITY: AES-256 Encryption Setup
@@ -74,6 +75,12 @@ export const getTdsWorkspaces = async (req, res) => {
        } else if (status === 'Inactive') {
           filter.isActive = false;
        }
+    }
+    // 🔴 DATE OF FILING: jin deductors ka koi TDS return is range me file hua
+    const filedRange = readFilingRange(req.query);
+    if (filedRange) {
+      const workspaceIds = await TdsReturn.distinct('tdsWorkspaceId', { filedDate: filedRange });
+      filter._id = { $in: workspaceIds };
     }
 
     // 🔴 Cards ke liye poore filtered data ka total (sirf current page ka nahi)
