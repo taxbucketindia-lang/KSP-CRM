@@ -232,6 +232,48 @@ export const updateClient = async (req, res) => {
   }
 };
 
+// 🔴 DOCUMENTS: client ke documents ki list save karna (Received / Pending / Not Received + remark).
+// Jis document ki status ya remark badli, sirf usi par naya time aur naam lagta hai.
+// @route   PUT /api/client-master/:id/documents
+const DOCUMENT_STATUSES = ['Received', 'Pending', 'Not Received'];
+export const updateClientDocuments = async (req, res) => {
+  try {
+    const client = await ClientMaster.findById(req.params.id);
+    if (!client) return res.status(404).json({ message: 'Client not found.' });
+    if (!Array.isArray(req.body.documents)) return res.status(400).json({ message: 'Documents list is required.' });
+
+    const previous = new Map(client.documents.map(doc => [String(doc._id), doc]));
+    const seen = new Set();
+    const documents = [];
+
+    for (const row of req.body.documents.slice(0, 100)) {
+      const name = String(row?.name || '').trim().slice(0, 80);
+      if (!name) return res.status(400).json({ message: 'Every document needs a name.' });
+      if (seen.has(name.toLowerCase())) return res.status(400).json({ message: `"${name}" is added twice.` });
+      seen.add(name.toLowerCase());
+
+      const status = DOCUMENT_STATUSES.includes(row.status) ? row.status : 'Pending';
+      const remark = String(row?.remark || '').trim().slice(0, 300);
+      const old = row._id ? previous.get(String(row._id)) : null;
+      const unchanged = old && old.name === name && old.status === status && (old.remark || '') === remark;
+
+      documents.push({
+        ...(old ? { _id: old._id } : {}),
+        name, status, remark,
+        updatedAt: unchanged ? old.updatedAt : new Date(),
+        updatedByName: unchanged ? old.updatedByName : req.user.name
+      });
+    }
+
+    client.documents = documents;
+    await client.save();
+    res.json({ message: 'Documents saved', documents: client.documents });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+
 // ==========================================
 // 4. Delete Client
 // ==========================================

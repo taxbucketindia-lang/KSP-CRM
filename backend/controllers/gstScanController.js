@@ -120,6 +120,37 @@ const estimateFilingFrequency = (returnsArray) => {
   return 'Monthly'; 
 };
 
+// 🔴 GST Insights (RapidAPI) ko call karna: jawab na aaye / limit lage toh thoda ruk kar ek baar aur koshish
+const fetchGstInsights = async (path, gstin) => {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await axios.get(`https://gst-insights-api.p.rapidapi.com/${path}/${gstin}`, {
+        headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'gst-insights-api.p.rapidapi.com' },
+        timeout: 20000
+      });
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      const status = error.response?.status;
+      // Key galat ho ya mahine ka quota khatam: dobara koshish bekaar hai
+      if (status === 401 || status === 403) break;
+      if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+  }
+  throw lastError;
+};
+
+// API ki galti ko aam bhasha me (report me dikhane ke liye)
+const insightsErrorNote = (error) => {
+  const status = error?.response?.status;
+  const detail = String(error?.response?.data?.message || error?.message || '').slice(0, 140);
+  if (status === 429) return 'The GST data provider limit is reached (the RapidAPI plan allows a fixed number of requests per month). Please try again later or upgrade the plan.';
+  if (status === 401 || status === 403) return `The GST data provider rejected the API key (${detail || status}). Check RAPIDAPI_KEY on the server.`;
+  if (error?.code === 'ECONNABORTED') return 'The GST data provider did not reply in time. Please run the scan again.';
+  return `Filing history could not be fetched from the GST data provider (${status ? `error ${status}` : detail || 'no reply'}). Please run the scan again.`;
+};
+
 const getSandboxToken = async () => {
   try {
     const response = await axios.post('https://api.sandbox.co.in/authenticate', {}, {
@@ -218,17 +249,16 @@ Lead generated manually via Free GST Health Scan.
     // 🟢 B. FETCH RETURNS FROM GST INSIGHTS API
     let filingReturns = [];
     let apiReachable = true;
+    let filingDataNote = ''; // filing history na mile toh uski wajah (report me dikhti hai)
+    let filingDataAsOf = null; // live data na mile aur purani save hui history dikhayi ho toh uski date
     let insightsProfile = {}; // GST Insights ke return-filing jawab me aayi basic detail
 
     try {
-      const response = await axios.get(`https://gst-insights-api.p.rapidapi.com/getGSTReturnFilingStatus/${gstin}`, {
-        headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'gst-insights-api.p.rapidapi.com' },
-      });
-
-      let respData = response.data;
+      let respData = await fetchGstInsights('getGSTReturnFilingStatus', gstin.toUpperCase());
       let rawReturns = [];
-      
-      if (respData.data && respData.data.fillingData) respData = respData.data;
+
+      // Jawab { success, data: { ...profile, fillingData } } ki shakal me aata hai. fillingData khali ho tab bhi andar jao.
+      if (respData && respData.data && !Array.isArray(respData.data) && typeof respData.data === 'object') respData = respData.data;
       // Isi jawab me legal name, status, registration date wagairah bhi aate hain
       if (respData && !Array.isArray(respData) && (respData.legalName || respData.status)) insightsProfile = respData;
 
@@ -254,12 +284,36 @@ Lead generated manually via Free GST Health Scan.
           status: (r.isValid === 'Y' || r.status === 'Filed') ? 'Filed' : (r.status || 'N/A'),
           dof: r.dateOfFiling || r.dof || 'N/A'
         }));
+      } else if (respData && (respData.gstNumber || respData.legalName || respData.status)) {
+        // API ne jawab diya par filing ki ek bhi row nahi. Iska matlab yeh NAHI ki taxpayer ne return file nahi kiya:
+        // data provider kabhi-kabhi saal ke khane bhejta hai par andar kuch nahi (uski taraf ki kami). Isliye daava nahi karte.
+        filingDataNote = 'The GST data provider returned an empty filing history for this GSTIN right now. This does not mean returns were not filed. Please verify on the GST portal or try again later.';
       } else {
         apiReachable = false;
+        filingDataNote = `The GST data provider did not return filing data for this GSTIN${respData?.message ? ` (${String(respData.message).slice(0, 120)})` : ''}.`;
       }
     } catch (apiErr) {
       apiReachable = false;
-      console.error('[GST INSIGHTS API ERROR]', apiErr.message);
+      filingDataNote = insightsErrorNote(apiErr);
+      console.error('[GST INSIGHTS API ERROR]', apiErr.response?.status || '', apiErr.response?.data?.message || apiErr.message);
+    }
+
+    // 🔴 BACKUP: live filing data khali aaye toh isi GSTIN ka pichhla save hua scan dekho (CRM me pehle se pada data)
+    if (filingReturns.length === 0) {
+      try {
+        // filingDataAsOf: null = wahi scan jo us waqt live data se bana tha (purani history se bana scan dobara source nahi banta)
+        const previous = await GstScan.findOne({ gstin: gstin.toUpperCase(), 'filingReturns.0': { $exists: true }, filingDataAsOf: null })
+          .sort({ createdAt: -1 }).select('filingReturns createdAt').lean();
+        if (previous) {
+          filingReturns = previous.filingReturns.map(r => ({ rtntype: r.rtntype, taxp: r.taxp, status: r.status, dof: r.dof }));
+          filingDataAsOf = previous.createdAt;
+          apiReachable = true;
+          const savedOn = new Date(previous.createdAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
+          filingDataNote = `Live filing data is not available from the GST data provider right now. The filing history below is the one last saved in the CRM on ${savedOn}; newer returns may be missing.`;
+        }
+      } catch (backupErr) {
+        console.error('[GST SCAN] saved history lookup failed:', backupErr.message);
+      }
     }
 
     // SORT RETURNS
@@ -279,10 +333,8 @@ Lead generated manually via Free GST Health Scan.
     let details = {};
     if (!isSandboxSuccess) {
       try {
-        const detailRes = await axios.get(`https://gst-insights-api.p.rapidapi.com/getGSTDetailsUsingGST/${gstin.toUpperCase()}`, {
-          headers: { 'x-rapidapi-key': process.env.RAPIDAPI_KEY, 'x-rapidapi-host': 'gst-insights-api.p.rapidapi.com' },
-        });
-        const body = detailRes.data?.data;
+        const detailData = await fetchGstInsights('getGSTDetailsUsingGST', gstin.toUpperCase());
+        const body = detailData?.data;
         details = (Array.isArray(body) ? body[0] : body) || {};
       } catch (detailErr) {
         console.error('[GST INSIGHTS DETAILS API ERROR]', detailErr.response?.data?.message || detailErr.message);
@@ -326,7 +378,10 @@ Lead generated manually via Free GST Health Scan.
 
     // RULE ENGINE
     const registrationHealth = profileFound ? gstinStatusHealth(gstinStatus) : 'Red';
-    const { health: filingHealth, gapMonths } = apiReachable ? returnFilingHealth(filingReturns) : { health: 'Red', gapMonths: null };
+    // Purani save hui history par aaj ka gap / late nikalna galat hoga: tab sirf 'Yellow' (jaanch zaroori), koi daava nahi
+    const { health: filingHealth, gapMonths } = filingDataAsOf
+      ? { health: 'Yellow', gapMonths: null }
+      : apiReachable ? returnFilingHealth(filingReturns) : { health: 'Red', gapMonths: null };
     const dataAvailHealth = profileFound ? dataAvailabilityHealth(legalName) : 'Red';
     const overallScanStatus = worstOf(registrationHealth, filingHealth, dataAvailHealth);
     const filingPattern = filingPatternFromGap(gapMonths);
@@ -338,10 +393,17 @@ Lead generated manually via Free GST Health Scan.
 
     const observations = [
       { observation: `Registration: GSTIN status shows as "${gstinStatus}" based on public registry verification.` },
-      { observation: filingHealth === 'Green' ? `Return Filing: Recent filing history appears regular.` : `Return Filing: Late/gap indication in recent filings.` },
-      { observation: gapMonths && gapMonths > MONTHS_YELLOW ? `Possible Filing Gap: Approximately ${gapMonths} month(s) since the latest available return period.` : 'Possible Filing Gap: No significant gap detected.' },
+      { observation: filingDataAsOf
+          ? 'Return Filing: Cannot be judged today because only the earlier saved history is available.'
+          : filingReturns.length === 0
+          ? `Return Filing: ${filingDataNote || 'Filing history is not available.'}`
+          : filingHealth === 'Green' ? `Return Filing: Recent filing history appears regular.` : `Return Filing: Late/gap indication in recent filings.` },
+      { observation: filingReturns.length === 0 || filingDataAsOf
+          ? 'Possible Filing Gap: Cannot be checked because live filing history is not available.'
+          : gapMonths && gapMonths > MONTHS_YELLOW ? `Possible Filing Gap: Approximately ${gapMonths} month(s) since the latest available return period.` : 'Possible Filing Gap: No significant gap detected.' },
       { observation: 'Public data alone does not establish ITC mismatch, tax liability or complete GST compliance.' }
     ];
+    if (filingDataAsOf) observations.splice(1, 0, { observation: `Note: ${filingDataNote}` });
 
     const scanResult = {
       reportId: 'TB-GST-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
@@ -364,6 +426,8 @@ Lead generated manually via Free GST Health Scan.
       natureOfBusiness, // Array of strings
       filingFrequency, // Derived string
       filingReturns: filingReturns.slice(0, 20),
+      filingDataNote, // filing history khali ho toh uski wajah
+      filingDataAsOf, // purani save hui history dikhayi ho toh uski date
       latestGstr1Period,
       latestGstr3bPeriod,
       recentFilingGapMonths: gapMonths,

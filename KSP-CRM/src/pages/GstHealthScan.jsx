@@ -745,7 +745,7 @@ const GstHealthScan = () => {
                       {reportData.returnFilingHealth}
                     </td>
                     <td className="border border-slate-300 p-2">
-                      Filing pattern: {reportData.filingPattern}
+                      {reportData.filingDataAsOf ? 'Live data not available; earlier saved history shown below.' : reportData.filingDataNote && !(reportData.filingReturns || []).length ? reportData.filingDataNote : `Filing pattern: ${reportData.filingPattern}`}
                       {reportData.recentFilingGapMonths != null && ` (~${reportData.recentFilingGapMonths} mo. since latest period)`}
                     </td>
                   </tr>
@@ -810,7 +810,7 @@ const GstHealthScan = () => {
                         );
                       })
                     ) : (
-                      <tr><td colSpan="4" className="border border-slate-300 p-3 text-slate-500 font-medium">No recent filing history</td></tr>
+                      <tr><td colSpan="4" className="border border-slate-300 p-3 text-slate-500 font-medium">{reportData.filingDataNote || 'No recent filing history'}</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -842,7 +842,7 @@ const GstHealthScan = () => {
                         );
                       })
                     ) : (
-                      <tr><td colSpan="4" className="border border-slate-300 p-3 text-slate-500 font-medium">No recent filing history</td></tr>
+                      <tr><td colSpan="4" className="border border-slate-300 p-3 text-slate-500 font-medium">{reportData.filingDataNote || 'No recent filing history'}</td></tr>
                     )}
                   </tbody>
                 </table>

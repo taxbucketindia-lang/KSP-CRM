@@ -32,6 +32,8 @@ const OfficeExpense = () => {
   const [yearFilter, setYearFilter] = useState(currentYear);
   // 🔴 NATURE FILTER: 'All' ya kisi ek nature ka naam (chhote akshar me, taaki "Tea" aur "tea" ek hi maane jayein)
   const [natureFilter, setNatureFilter] = useState('All');
+  // 🔴 PAID BY FILTER: 'All' ya kisne / kis se paisa diya (Shubham, Cash, HDFC Card ...)
+  const [paidByFilter, setPaidByFilter] = useState('All');
   const natureKey = (value) => String(value || '').trim().toLowerCase();
 
   // 1. Fetch Expenses from Backend
@@ -152,15 +154,26 @@ const OfficeExpense = () => {
     return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [expenses]);
 
+  // Ab tak jitne 'Paid By' likhe gaye unki list (A-Z)
+  const paidByOptions = useMemo(() => {
+    const seen = new Map();
+    expenses.forEach(exp => {
+      const key = natureKey(exp.paidBy);
+      if (key && !seen.has(key)) seen.set(key, String(exp.paidBy).trim());
+    });
+    return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [expenses]);
+
   const filteredExpenses = useMemo(() => {
     return expenses.filter(exp => {
       const expDate = new Date(exp.date);
       const matchesMonth = monthFilter === 'All' || (expDate.getMonth() + 1).toString() === monthFilter;
       const matchesYear = yearFilter === 'All' || expDate.getFullYear().toString() === yearFilter;
       const matchesNature = natureFilter === 'All' || natureKey(exp.nature) === natureFilter;
-      return matchesMonth && matchesYear && matchesNature;
+      const matchesPaidBy = paidByFilter === 'All' || natureKey(exp.paidBy) === paidByFilter;
+      return matchesMonth && matchesYear && matchesNature && matchesPaidBy;
     });
-  }, [expenses, monthFilter, yearFilter, natureFilter]);
+  }, [expenses, monthFilter, yearFilter, natureFilter, paidByFilter]);
 
   const totalExpenses = filteredExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
@@ -180,7 +193,7 @@ const OfficeExpense = () => {
         {/* Total Expense Box */}
         <div className="bg-blue-50 border border-blue-200 px-5 py-2.5 rounded-xl text-right shadow-sm">
           <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-            {monthFilter !== 'All' || yearFilter !== 'All' || natureFilter !== 'All' ? 'Filtered Total' : 'Total Expenses'}
+            {monthFilter !== 'All' || yearFilter !== 'All' || natureFilter !== 'All' || paidByFilter !== 'All' ? 'Filtered Total' : 'Total Expenses'}
           </p>
           <p className="text-xl font-black text-blue-900 flex items-center justify-end gap-1">
             <IndianRupee size={18} /> {totalExpenses.toLocaleString('en-IN')}
@@ -235,6 +248,9 @@ const OfficeExpense = () => {
                 className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500/20"
               />
               {/* Pehle likhe hue nature ka sujhav: ek hi spelling rahe toh filter saaf chalta hai */}
+              <datalist id="expense-paidby-list">
+                {paidByOptions.map(option => <option key={option.key} value={option.label} />)}
+              </datalist>
               <datalist id="expense-nature-list">
                 {natureOptions.map(option => <option key={option.key} value={option.label} />)}
               </datalist>
@@ -251,6 +267,8 @@ const OfficeExpense = () => {
                 placeholder="e.g. Shubham, Cash, HDFC Card"
                 value={formData.paidBy}
                 onChange={handleChange}
+                list="expense-paidby-list"
+                autoComplete="off"
                 className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
@@ -316,6 +334,11 @@ const OfficeExpense = () => {
               <select value={natureFilter} onChange={(e) => setNatureFilter(e.target.value)} className={`text-xs font-bold bg-white border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-blue-500/20 cursor-pointer max-w-[180px] ${natureFilter !== 'All' ? 'border-blue-300 text-blue-700 bg-blue-50' : 'border-slate-200 text-slate-700'}`}>
                 <option value="All">All Natures</option>
                 {natureOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+              </select>
+              {/* 🔴 PAID BY FILTER */}
+              <select value={paidByFilter} onChange={(e) => setPaidByFilter(e.target.value)} className={`text-xs font-bold bg-white border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-blue-500/20 cursor-pointer max-w-[180px] ${paidByFilter !== 'All' ? 'border-blue-300 text-blue-700 bg-blue-50' : 'border-slate-200 text-slate-700'}`}>
+                <option value="All">Paid By: All</option>
+                {paidByOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
               </select>
               <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-blue-500/20 cursor-pointer">
                 <option value="All">All Months</option>

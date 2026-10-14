@@ -5,6 +5,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import ClientWorkspaceDetail, { WORKSPACES } from '../components/ClientWorkspaceDetail';
 import ClientTasksPanel from '../components/ClientTasksPanel';
+import ClientDocumentsPanel, { documentCounts } from '../components/ClientDocumentsPanel';
 import { downloadClientStatement } from '../utils/statementPdf';
 import * as XLSX from 'xlsx'; 
 import ExcelJS from 'exceljs'; 
@@ -794,6 +795,17 @@ const ClientMaster = () => {
                                   ))}
                                 </div>
                               )}
+                              {/* Documents: kitne pending / nahi mile */}
+                              {(() => {
+                                const docs = documentCounts(client.documents);
+                                if (docs.total === 0) return null;
+                                const waiting = docs.pending + docs.notReceived;
+                                return (
+                                  <span className={`inline-flex items-center gap-1 mt-1.5 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border ${waiting > 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`} title={`${docs.received} received, ${docs.pending} pending, ${docs.notReceived} not received`}>
+                                    <FileText size={9} /> {waiting > 0 ? `Docs: ${waiting} pending` : 'Docs complete'}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </div>
                         </td>
@@ -909,57 +921,56 @@ const ClientMaster = () => {
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-slate-50 rounded-3xl w-full max-w-5xl shadow-2xl border border-slate-100 flex flex-col max-h-[95vh] overflow-hidden animate-in fade-in zoom-in-95">
             
-            {/* Modal Header */}
-            <div className="relative px-8 pt-6 pb-16 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl flex flex-col overflow-hidden shrink-0">
-              <div className="absolute top-0 right-0 -mt-10 -mr-10 h-40 w-40 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
-              
-              <div className="flex justify-between items-start z-10 w-full">
-                <div className="flex items-center gap-5">
-                  <div className="h-16 w-16 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md border border-white/30 shadow-inner">
-                    <UserCircle size={36} className="text-white" />
+            {/* Modal Header: chhota rakha hai taaki neeche ki jaankari ko zyada jagah mile */}
+            <div className="relative px-5 md:px-6 pt-4 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-t-3xl shrink-0">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-11 w-11 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0 font-black text-lg">
+                    {(clientToView.name || '?').trim().charAt(0).toUpperCase()}
                   </div>
-                  <div>
-                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-2">
-                      {clientToView.name} 
-                      {clientToView.tradeName && <span className="text-sm font-medium text-blue-200">({clientToView.tradeName})</span>}
+                  <div className="min-w-0">
+                    <h2 className="text-lg md:text-xl font-black tracking-tight leading-tight truncate">
+                      {clientToView.name}
+                      {clientToView.tradeName && <span className="text-xs font-medium text-blue-200 ml-2">({clientToView.tradeName})</span>}
                     </h2>
-                    <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-blue-100 font-medium">
-                      {clientToView.clientId && (
-                        <span className="flex items-center gap-1.5 bg-white/20 px-2.5 py-1 rounded-md border border-white/30 font-mono tracking-wider text-white font-bold">
-                          ID: {clientToView.clientId}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-md border border-white/10 font-mono tracking-wider text-white">
-                        PAN: {clientToView.pan}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${clientToView.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-bold">
+                      {clientToView.clientId && <span className="bg-white/20 px-2 py-0.5 rounded-md border border-white/25 font-mono tracking-wider">ID: {clientToView.clientId}</span>}
+                      <span className="bg-black/20 px-2 py-0.5 rounded-md border border-white/10 font-mono tracking-wider">PAN: {clientToView.pan}</span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${clientToView.status === 'Active' ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/30' : 'bg-rose-500/25 text-rose-200 border border-rose-400/30'}`}>
                         {clientToView.status}
                       </span>
                     </div>
                   </div>
                 </div>
-                <button onClick={() => setIsViewModalOpen(false)} className="p-2 rounded-full bg-black/10 hover:bg-black/20 text-white transition-colors"><X size={20} strokeWidth={2.5} /></button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => { setIsViewModalOpen(false); handleEdit(clientToView); }} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-white text-blue-800 hover:bg-blue-50 rounded-xl shadow-sm transition-colors">
+                    <Edit size={14} strokeWidth={2.5}/> <span className="hidden sm:inline">Edit Details</span>
+                  </button>
+                  <button onClick={() => setIsViewModalOpen(false)} className="p-2 rounded-xl bg-black/15 hover:bg-black/25 text-white transition-colors" title="Close"><X size={18} strokeWidth={2.5} /></button>
+                </div>
               </div>
 
-              {/* TABS Navigation */}
-              <div className="flex items-center gap-6 mt-6 z-10 border-b border-white/20">
-                <button 
-                  onClick={() => setActiveTab('overview')}
-                  className={`pb-3 text-sm font-bold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'overview' ? 'border-white text-white' : 'border-transparent text-blue-200 hover:text-white'}`}
-                >
-                  <Eye size={16}/> Profile Overview
-                </button>
-                <button 
-                  onClick={() => setActiveTab('ledger')}
-                  className={`pb-3 text-sm font-bold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'ledger' ? 'border-white text-white' : 'border-transparent text-blue-200 hover:text-white'}`}
-                >
-                  <BookOpen size={16}/> Account Statement & Ledger
-                </button>
+              {/* TABS */}
+              <div className="flex items-center gap-1 mt-3 overflow-x-auto">
+                {[['overview', 'Profile Overview', Eye], ['ledger', 'Account Statement & Ledger', BookOpen], ['documents', 'Documents', FileText]].map(([value, label, Icon]) => {
+                  const docs = value === 'documents' ? documentCounts(clientToView.documents) : null;
+                  const waiting = docs ? docs.pending + docs.notReceived : 0;
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => setActiveTab(value)}
+                      className={`px-3.5 py-2 text-xs md:text-sm font-bold rounded-t-xl flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === value ? 'bg-slate-50 text-blue-800' : 'text-blue-100 hover:text-white hover:bg-white/10'}`}
+                    >
+                      <Icon size={15}/> {label}
+                      {waiting > 0 && <span className="bg-amber-400 text-slate-900 text-[10px] font-black px-1.5 rounded-full">{waiting}</span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             
             {/* TAB CONTENT AREA */}
-            <div className="overflow-y-auto p-6 md:p-8 custom-scrollbar flex-1">
+            <div className="overflow-y-auto p-4 md:p-6 custom-scrollbar flex-1">
               
               {/* TAB 1: PROFILE OVERVIEW */}
               {activeTab === 'overview' && (
@@ -1104,6 +1115,19 @@ const ClientMaster = () => {
                 </div>
               )}
 
+              {/* 🔴 TAB: DOCUMENTS (Received / Pending / Not Received + remark) */}
+              {activeTab === 'documents' && (
+                <ClientDocumentsPanel
+                  client={clientToView}
+                  token={user.token}
+                  onSaved={(documents) => {
+                    // Khule hue profile aur list dono me nayi ginti turant dikhe
+                    setClientToView(prev => (prev ? { ...prev, documents } : prev));
+                    setClients(prev => prev.map(c => (c._id === clientToView._id ? { ...c, documents } : c)));
+                  }}
+                />
+              )}
+
               {/* TAB 2: ACCOUNT STATEMENT & Ledger */}
               {activeTab === 'ledger' && (
                 <div className="space-y-6 animate-in fade-in">
@@ -1204,17 +1228,6 @@ const ClientMaster = () => {
 
             </div>
             
-            <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-white rounded-b-3xl shrink-0">
-              <div></div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => setIsViewModalOpen(false)} className="px-5 py-2.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors">
-                  Close Window
-                </button>
-                <button onClick={() => { setIsViewModalOpen(false); handleEdit(clientToView); }} className="px-5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2">
-                  <Edit size={15} strokeWidth={2.5}/> Edit Details
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

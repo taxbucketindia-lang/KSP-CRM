@@ -1,5 +1,5 @@
 import express from 'express';
-import { getClients, createClient, updateClient, deleteClient, getClientWorkspaces, getRegistrationCandidates } from '../controllers/clientMasterController.js';
+import { getClients, createClient, updateClient, deleteClient, getClientWorkspaces, getRegistrationCandidates, updateClientDocuments } from '../controllers/clientMasterController.js';
 import { protect } from '../middleware/authMiddleware.js'; // Ensure only logged-in users access this
 
 import { requirePermission } from '../utils/permissions.js';
@@ -13,6 +13,7 @@ router.get('/', protect, getClients);
 router.get('/registration-candidates', protect, getRegistrationCandidates);
 router.post('/', protect, createClient);
 router.get('/:id/workspaces', protect, getClientWorkspaces);
+router.put('/:id/documents', protect, updateClientDocuments);
 router.put('/:id', protect, updateClient);
 router.delete('/:id', protect, canDelete, deleteClient);
 

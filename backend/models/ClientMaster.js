@@ -63,8 +63,16 @@ const clientMasterSchema = new mongoose.Schema({
   pinCode: { type: String },
 
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
-  remarks: { type: String }
-  
+  remarks: { type: String },
+
+  // 🔴 DOCUMENTS: client se kaun sa document mila, kaun sa pending hai, kaun sa nahi mila (remark ke saath)
+  documents: [{
+    name: { type: String, required: true, trim: true },
+    status: { type: String, enum: ['Received', 'Pending', 'Not Received'], default: 'Pending' },
+    remark: { type: String, default: '', trim: true },
+    updatedAt: { type: Date, default: Date.now },   // is document ki status / remark aakhri baar kab badli
+    updatedByName: { type: String, default: '' }
+  }]
 }, { timestamps: true });
 
 export default mongoose.model('ClientMaster', clientMasterSchema);

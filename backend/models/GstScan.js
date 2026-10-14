@@ -33,6 +33,9 @@ const gstScanSchema = new mongoose.Schema(
 
     // --- Return Filing Snapshot ---
     filingReturns: { type: Array, default: [] },
+    // Live data na mile aur purani save hui history dikhayi gayi ho toh uski wajah aur asli date
+    filingDataNote: { type: String, default: '' },
+    filingDataAsOf: { type: Date, default: null },
     latestGstr1Period: { type: String, default: 'N/A' },
     latestGstr3bPeriod: { type: String, default: 'N/A' },
     recentFilingGapMonths: { type: Number, default: null },
