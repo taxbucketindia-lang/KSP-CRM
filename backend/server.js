@@ -37,6 +37,8 @@ import businessHealthRoutes from './routes/businessHealthRoutes.js';
 import personalFinanceRoutes from './routes/personalFinanceRoutes.js';
 import pushRoutes from './routes/pushRoutes.js';
 import vendorRoutes from './routes/vendorRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
+import { LOCAL_ROOT as CHAT_FILES_ROOT } from './utils/chatFiles.js';
 import { startMeetingReminderCron } from './utils/meetingReminders.js';
 
 
@@ -52,6 +54,18 @@ app.use(cors({
   origin: '*', // Ya aap apna specific frontend URL bhi de sakte hain
   credentials: true
 }));
+
+// Team Chat ki local files (BLOB token na ho tab isi computer par rakhi jaati hain; 24 ghante baad apne aap hat jaati hain)
+// ?download=1 = khole nahi, seedha download ho (asli naam ke saath, shuru ka random hissa hata kar)
+app.use('/uploads/chat', (req, res, next) => {
+  if (req.query.download) {
+    const stored = decodeURIComponent(req.path.split('/').pop() || 'file');
+    const name = stored.replace(/^[a-f0-9]{16}-/, '') || 'file';
+    res.setHeader('Content-Disposition', `attachment; filename="${name.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+  }
+  next();
+});
+app.use('/uploads/chat', express.static(CHAT_FILES_ROOT, { index: false, dotfiles: 'deny' }));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -82,6 +96,7 @@ app.use('/api/business-health', businessHealthRoutes);
 app.use('/api/personal-finance', personalFinanceRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/vendors', vendorRoutes);
+app.use('/api/chat', chatRoutes);
 
 // ==========================================
 // CRON JOB FOR DAILY FOLLOW-UP REMINDERS

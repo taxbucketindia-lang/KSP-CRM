@@ -96,6 +96,8 @@ function App() {
             <Route index element={<Home />} />
             <Route path="/my-portal" element={<MyPortal />} />
             <Route path="/todo" element={<TodoHome />} />
+            {/* Team Chat: page Layout khud dikhata hai */}
+            <Route path="/chat" element={null} />
 
             {/* Sirf CEO / Admin */}
             <Route path="settings" element={<Guard adminOnly><Settings /></Guard>} />

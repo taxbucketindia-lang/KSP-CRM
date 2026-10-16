@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import Todo from '../models/Todo.js';
 import Notification from '../models/Notification.js';
 import TaskHandover from '../models/TaskHandover.js';
+import { cleanupExpiredChatFiles } from './chatFiles.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -47,6 +48,11 @@ export const startCronJobs = () => {
   });
 
   console.log("⏰ Task Reminder Cron Job Initialized.");
+
+  // Chat ki 24 ghante purani files (storage + database): har ghante. Vercel par yeh chat khulne par bhi hoti hai.
+  cron.schedule('5 * * * *', () => {
+    cleanupExpiredChatFiles({ force: true }).catch(error => console.error('❌ Chat file cleanup error:', error.message));
+  });
 
   // Har 2 ghante mein chalega: '0 */2 * * *' (Testing ke liye '* * * * *')
   cron.schedule('0 */2 * * *', async () => {

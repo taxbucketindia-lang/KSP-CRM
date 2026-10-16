@@ -10,8 +10,9 @@ import {
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
   Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo,
   AlertCircle, TrendingUp, Code, Globe, Zap, Cake, RotateCwFadingClock, HeartPulse,
-  CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight, BellRing, Smartphone, Handshake
+  CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight, BellRing, Smartphone, Handshake, MessageCircle
 } from 'lucide-react';
+import ChatPanel from './ChatPanel';
 import { getPushState, enablePush, disablePush, syncPush, detachPush, sendTestPush } from '../utils/push';
 import toast from 'react-hot-toast';
 
@@ -85,6 +86,19 @@ const Layout = () => {
   // 🔴 PHONE ALERTS (push): 'unsupported' | 'ios-install' | 'blocked' | 'on' | 'off' | '' (abhi pata nahi)
   const [pushState, setPushState] = useState('');
   const [pushBusy, setPushBusy] = useState(false);
+  // 🔴 TEAM CHAT: phone ke chat notification se aaye (?chat=ID) toh wahi chat seedha khule.
+  // URL abhi padh lete hain, kyunki home page redirect hote hi ?chat= gayab ho jata hai.
+  const [chatLink, setChatLink] = useState(() => { try { return new URLSearchParams(window.location.search).get('chat'); } catch { return null; } });
+  // Chat apne alag page (/chat) par khulta hai
+  const chatOpen = location.pathname === '/chat';
+  // Chat band karne par wapas usi page par jahan se aaye the
+  const lastPageRef = useRef('/');
+  useEffect(() => { if (location.pathname !== '/chat') lastPageRef.current = `${location.pathname}${location.search}`; }, [location.pathname, location.search]);
+  const [chatUnread, setChatUnread] = useState(0);
+  useEffect(() => {
+    if (chatLink && location.pathname !== '/chat') navigate(`/chat?chat=${chatLink}`, { replace: true });
+    // eslint-disable-next-line
+  }, []);
 
   // Login ke baad: is device par push pehle se chalu ho toh use isi login se jod do
   useEffect(() => {
@@ -370,6 +384,7 @@ const Layout = () => {
   const currentPage = useMemo(() => {
     const flat = [...mainItems, ...sections.flatMap(s => s.items.flatMap(i => (i.isGroup ? i.subItems : [i])))];
     if (location.pathname === '/settings') return 'Access Control';
+    if (location.pathname === '/chat') return 'Team Chat';
     const exact = flat.find(i => i.path && isSubItemActive(i.path));
     return (exact || flat.find(i => i.path && i.path.split('?')[0] === location.pathname))?.name || '';
     // eslint-disable-next-line
@@ -664,7 +679,18 @@ const Layout = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {/* 🔴 TEAM CHAT */}
+            <button
+              onClick={() => { setShowNotifications(false); setChatLink(null); navigate('/chat'); }}
+              className={`relative p-2 rounded-full transition-colors ${chatOpen ? 'bg-emerald-50 text-emerald-600' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}
+              title="Team Chat"
+            >
+              <MessageCircle size={19} />
+              {chatUnread > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-emerald-500 text-white text-[10px] font-black rounded-full ring-2 ring-white flex items-center justify-center">{chatUnread > 99 ? '99+' : chatUnread}</span>
+              )}
+            </button>
             <div className="relative">
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
@@ -775,8 +801,12 @@ const Layout = () => {
           </div>
         </header>
 
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 lg:p-8 bg-[#f8fafc]">
-          <Outlet />
+        <main className={`flex-1 overflow-x-hidden bg-[#f8fafc] ${chatOpen ? 'overflow-hidden p-0 md:p-4' : 'overflow-y-auto p-4 md:p-6 lg:p-8'}`}>
+          {!chatOpen && <Outlet />}
+          {/* 🔴 TEAM CHAT: /chat par poora page; baaki pages par chhupa rehta hai par naye message ki ginti laata rehta hai */}
+          {user?.token && user?.role !== 'Client' && (
+            <ChatPanel user={user} embedded open={chatOpen} onClose={() => navigate(lastPageRef.current || '/')} onUnreadChange={setChatUnread} initialChatId={chatOpen ? chatLink : null} />
+          )}
         </main>
       </div>
 

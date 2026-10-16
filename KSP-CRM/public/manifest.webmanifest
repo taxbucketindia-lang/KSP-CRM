@@ -8,6 +8,20 @@
   "background_color": "#0f172a",
   "theme_color": "#1e3a8a",
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
-  ]
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/taxbucket-logo.webp", "sizes": "1688x1688", "type": "image/webp", "purpose": "any" }
+  ],
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        { "name": "files", "accept": ["image/*", "video/*", "application/pdf", ".pdf"] }
+      ]
+    }
+  }
 }
