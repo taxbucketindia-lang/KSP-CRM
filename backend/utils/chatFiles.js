@@ -16,7 +16,18 @@ export const ALLOWED_TYPES = ['image/*', 'video/*', 'application/pdf'];
 
 export const isAllowedType = (type) => /^image\//.test(type || '') || /^video\//.test(type || '') || type === 'application/pdf';
 export const fileKind = (type) => (/^image\//.test(type || '') ? 'image' : /^video\//.test(type || '') ? 'video' : type === 'application/pdf' ? 'pdf' : 'file');
-export const storageReady = () => !!process.env.BLOB_READ_WRITE_TOKEN;
+// Vercel Blob token: BLOB_READ_WRITE_TOKEN, ya connect karte waqt koi aur prefix rakha ho (XYZ_READ_WRITE_TOKEN) toh bhi mil jaye.
+// Aage-peeche ke quotes / space hata dete hain (dashboard me galti se lag jaate hain).
+const clean = (value) => String(value || '').trim().replace(/^['"]|['"]$/g, '').trim();
+export const blobToken = () => {
+  const direct = clean(process.env.BLOB_READ_WRITE_TOKEN);
+  if (direct) return direct;
+  const key = Object.keys(process.env).find(k => /_READ_WRITE_TOKEN$/.test(k) && clean(process.env[k]).startsWith('vercel_blob_rw_'));
+  return key ? clean(process.env[key]) : '';
+};
+export const blobTokenName = () => (clean(process.env.BLOB_READ_WRITE_TOKEN) ? 'BLOB_READ_WRITE_TOKEN'
+  : Object.keys(process.env).find(k => /_READ_WRITE_TOKEN$/.test(k) && clean(process.env[k]).startsWith('vercel_blob_rw_')) || '');
+export const storageReady = () => !!blobToken();
 
 // Kaunsi jagah: token = blob; Vercel par bina token = kuch nahi (wahan disk read-only hai); warna local
 export const storageMode = () => (storageReady() ? 'blob' : process.env.VERCEL ? 'none' : 'local');
@@ -63,7 +74,7 @@ export const deleteChatFile = async (attachment) => {
   try {
     const local = localFilePath(attachment.pathname);
     if (local) await fs.promises.rm(local, { force: true });
-    else if (isBlobUrl(attachment.url) && storageReady()) await del(attachment.url);
+    else if (isBlobUrl(attachment.url) && storageReady()) await del(attachment.url, { token: blobToken() });
   } catch (error) {
     console.error('[CHAT FILES] delete failed:', error.message);
   }
@@ -100,9 +111,9 @@ export const cleanupExpiredChatFiles = async ({ force = false } = {}) => {
     try {
       let cursor;
       do {
-        const page = await list({ prefix: 'chat/', limit: 500, cursor });
+        const page = await list({ prefix: 'chat/', limit: 500, cursor, token: blobToken() });
         const old = page.blobs.filter(blob => new Date(blob.uploadedAt) < cutoff).map(blob => blob.url);
-        if (old.length) await del(old);
+        if (old.length) await del(old, { token: blobToken() });
         cursor = page.hasMore ? page.cursor : undefined;
       } while (cursor);
     } catch (error) {

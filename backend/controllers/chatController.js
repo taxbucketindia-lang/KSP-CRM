@@ -5,7 +5,7 @@ import { sendPushToUser } from '../utils/pushService.js';
 import { handleUpload } from '@vercel/blob/client';
 import fs from 'fs';
 import {
-  MAX_FILE_BYTES, FILE_LIFETIME_MS, ALLOWED_TYPES, isAllowedType, fileKind, isBlobUrl, storageReady, storageMode,
+  MAX_FILE_BYTES, FILE_LIFETIME_MS, ALLOWED_TYPES, isAllowedType, fileKind, isBlobUrl, storageReady, storageMode, blobToken, blobTokenName,
   localFilePath, saveLocalFile, filePreviewText, deleteChatFile, cleanupExpiredChatFiles
 } from '../utils/chatFiles.js';
 
@@ -332,6 +332,19 @@ export const markRead = run(async (req, res) => {
 
 // @route POST /api/chat/upload  (Vercel Blob: browser ko file seedha storage par bhejne ki ijazat)
 // Server se 4.5 MB se badi file nahi guzar sakti, isliye file browser se seedha storage me jaati hai; yahan sirf jaanch aur token.
+// @route GET /api/chat/files/status  (bina login: sirf haan/naa, token kabhi nahi dikhata) - live par jaanch ke liye
+export const getFileStatus = run(async (req, res) => {
+  const mode = storageMode();
+  res.json({
+    ready: mode !== 'none',
+    mode,
+    tokenFound: storageReady(),
+    tokenVariable: blobTokenName() || null,
+    onVercel: !!process.env.VERCEL,
+    problem: mode === 'none' ? 'BLOB_READ_WRITE_TOKEN is not set on this backend. Add the Blob store to THIS (backend) Vercel project and redeploy.' : ''
+  });
+});
+
 // @route GET /api/chat/files/config  -> file kahan jayegi: 'local' (isi computer par) | 'blob' (Vercel) | 'none'
 export const getFileConfig = run(async (req, res) => {
   res.json({ mode: storageMode(), maxBytes: MAX_FILE_BYTES });
@@ -355,6 +368,7 @@ export const chatUploadToken = run(async (req, res) => {
   if (!storageReady()) fail('File sending is not set up on the server yet (BLOB_READ_WRITE_TOKEN is missing).', 503);
   const me = req.user._id;
   const result = await handleUpload({
+    token: blobToken(),
     request: req,
     body: req.body,
     onBeforeGenerateToken: async (pathname, clientPayload) => {

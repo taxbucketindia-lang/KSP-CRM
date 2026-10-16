@@ -3,12 +3,14 @@ import { protect } from '../middleware/authMiddleware.js';
 import {
   getChatUsers, getConversations, openDirectChat, createGroup, updateGroup, leaveGroup,
   getMessages, sendMessage, markRead, deleteMessage, reactToMessage, getMessageInfo, clearChat, chatUploadToken,
-  getFileConfig, uploadLocalFile
+  getFileConfig, uploadLocalFile, getFileStatus
 } from '../controllers/chatController.js';
 import { MAX_FILE_BYTES } from '../utils/chatFiles.js';
 
 // 🔴 TEAM CHAT: har login kiya hua employee (client nahi) chat kar sakta hai
 const router = express.Router();
+// Bina login: file storage chalu hai ya nahi (sirf haan/naa)
+router.get('/files/status', getFileStatus);
 router.use(protect);
 // Client login (agar koi ho) ko chat nahi milta
 router.use((req, res, next) => (req.user?.role === 'Client' ? res.status(403).json({ message: 'Chat is for the team only' }) : next()));
