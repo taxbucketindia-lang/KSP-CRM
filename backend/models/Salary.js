@@ -43,7 +43,25 @@ const salarySchema = new mongoose.Schema({
 
   // Final Auto Calculated
   netPayable: { type: Number, required: true },
-  status: { type: String, enum: ['Draft', 'Finalized', 'Paid'], default: 'Draft' }
+  status: { type: String, enum: ['Draft', 'Finalized', 'Paid'], default: 'Draft' },
+
+  // 🔴 PAYMENT: salary di gayi ya nahi + remarks. Sirf CEO (ya jise CEO ne "Salary Payment" right diya) badal sakta hai.
+  // "Finalize Sheet" in fields ko kabhi nahi chhedta; Paid salary dobara Finalize se badalti bhi nahi.
+  paid: { type: Boolean, default: false },
+  paidOn: { type: Date },
+  paymentMode: { type: String, default: '' },
+  remarks: { type: String, default: '', maxlength: 500 },
+  paymentUpdatedBy: { type: String, default: '' },
+  paymentUpdatedAt: { type: Date },
+  paymentLog: [{
+    _id: false,
+    paid: Boolean,
+    paidOn: Date,
+    paymentMode: String,
+    remarks: String,
+    byName: String,
+    at: { type: Date, default: Date.now }
+  }]
 }, { timestamps: true });
 
 export default mongoose.model('Salary', salarySchema);

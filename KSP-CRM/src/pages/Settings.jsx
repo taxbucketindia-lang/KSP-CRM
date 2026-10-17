@@ -2,7 +2,10 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { isCeoRole } from '../utils/roles';
-import { PERMISSION_CATALOG, ALL_PERMISSION_ITEMS, ALL_PERMISSION_KEYS } from '../utils/permissions';
+import { PERMISSION_CATALOG, ALL_PERMISSION_ITEMS, ALL_PERMISSION_KEYS, CEO_ONLY_KEYS } from '../utils/permissions';
+
+// Full access me ye nahi aate (CEO alag se deta hai)
+const FULL_ACCESS_KEYS = ALL_PERMISSION_KEYS.filter(key => !CEO_ONLY_KEYS.includes(key));
 import {
   ShieldCheck, KeyRound, Trash2, Power, PowerOff, X, CheckCircle2, AlertCircle, AlertTriangle,
   Mail, SlidersHorizontal, Search, Crown, UserCog, UserMinus, Info, Zap, Users, Layers, RefreshCw, Save
@@ -33,7 +36,8 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
 
   // Main jo rights de sakta hoon: CEO sab, Admin sirf apne
-  const myKeys = useMemo(() => (isCeo ? ALL_PERMISSION_KEYS : (user?.permissions || [])), [isCeo, user?.permissions]);
+  // Jo rights main de sakta hun. CEO-only rights sirf CEO deta hai
+  const myKeys = useMemo(() => (isCeo ? ALL_PERMISSION_KEYS : (user?.permissions || []).filter(key => !CEO_ONLY_KEYS.includes(key))), [isCeo, user?.permissions]);
 
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type });
@@ -88,7 +92,8 @@ const Settings = () => {
     // "Assign Tasks" jaisa khaas kaam apne tab ke bina nahi chal sakta
     if (item?.parent && selected.includes(key) && !selected.includes(item.parent)) selected.push(item.parent);
     if (!selected.includes(key)) selected = selected.filter(k => ALL_PERMISSION_ITEMS.find(i => i.key === k)?.parent !== key);
-    return { ...prev, selected, fullAccess: false };
+    // CEO-only right lagane / hatane se Full access nahi tootta
+    return { ...prev, selected, fullAccess: item?.ceoOnly ? prev.fullAccess : false };
   });
 
   const toggleGroup = (group) => setAccessModal(prev => {
@@ -103,7 +108,7 @@ const Settings = () => {
     try {
       const { person, selected, fullAccess } = accessModal;
       await axios.put(`${import.meta.env.VITE_API_URL}/users/${person._id}/permissions`,
-        { permissions: fullAccess ? ALL_PERMISSION_KEYS : selected, fullAccess }, { headers });
+        { permissions: fullAccess ? [...FULL_ACCESS_KEYS, ...selected.filter(k => CEO_ONLY_KEYS.includes(k))] : selected, fullAccess }, { headers });
       showToast(`Access rights of ${person.name} updated.`);
       setAccessModal(null);
       fetchPeople();
@@ -352,10 +357,10 @@ const Settings = () => {
                 {/* CEO -> Admin: poora access ek click me */}
                 {targetIsAdmin && isCeo && (
                   <label className={`flex items-start gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${fullAccess ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
-                    <input type="checkbox" checked={fullAccess} onChange={(e) => setAccessModal({ ...accessModal, fullAccess: e.target.checked, selected: e.target.checked ? [...ALL_PERMISSION_KEYS] : selected })} className="w-4 h-4 mt-0.5 text-emerald-600 rounded" />
+                    <input type="checkbox" checked={fullAccess} onChange={(e) => setAccessModal({ ...accessModal, fullAccess: e.target.checked, selected: e.target.checked ? [...FULL_ACCESS_KEYS, ...selected.filter(k => CEO_ONLY_KEYS.includes(k))] : selected })} className="w-4 h-4 mt-0.5 text-emerald-600 rounded" />
                     <div>
                       <p className="text-sm font-black text-slate-800">Full access (all tabs and all rights)</p>
-                      <p className="text-[11px] font-medium text-slate-500">This Admin gets everything, including tabs added in future. Untick to choose specific rights below.</p>
+                      <p className="text-[11px] font-medium text-slate-500">This Admin gets everything, including tabs added in future. Untick to choose specific rights below. CEO-only rights (like Salary Payment) are not included; tick them separately below.</p>
                     </div>
                   </label>
                 )}
@@ -368,7 +373,7 @@ const Settings = () => {
                   const allOn = grantable.length > 0 && grantable.every(item => selected.includes(item.key));
 
                   return (
-                    <div key={group.group} className={`rounded-2xl border border-slate-200 overflow-hidden ${fullAccess ? 'opacity-60' : ''}`}>
+                    <div key={group.group} className={`rounded-2xl border border-slate-200 overflow-hidden ${fullAccess && !items.some(i => i.ceoOnly) ? 'opacity-60' : ''}`}>
                       <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5 border-b border-slate-200">
                         <p className="text-xs font-black uppercase tracking-wider text-slate-600">{group.group}</p>
                         {grantable.length > 0 && (
@@ -381,14 +386,16 @@ const Settings = () => {
                         {items.map(item => {
                           const checked = selected.includes(item.key);
                           const locked = !myKeys.includes(item.key); // yeh right mere paas nahi (CEO ne diya tha)
+                          const frozen = fullAccess && !item.ceoOnly; // Full access me sab pehle se on (CEO-only alag se)
                           return (
-                            <label key={item.key} className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${item.action ? 'sm:col-span-2' : ''} ${locked || fullAccess ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? (item.action ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200') : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
-                              <input type="checkbox" checked={checked} disabled={locked || fullAccess} onChange={() => toggleKey(item.key)} className="w-4 h-4 mt-0.5 text-indigo-600 rounded focus:ring-indigo-500" />
+                            <label key={item.key} className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${item.action ? 'sm:col-span-2' : ''} ${locked || frozen ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? (item.action ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200') : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                              <input type="checkbox" checked={checked} disabled={locked || frozen} onChange={() => toggleKey(item.key)} className="w-4 h-4 mt-0.5 text-indigo-600 rounded focus:ring-indigo-500" />
                               <div className="min-w-0">
                                 <p className={`text-sm font-bold flex flex-wrap items-center gap-2 ${checked ? 'text-slate-900' : 'text-slate-700'}`}>
                                   {item.action && <Zap size={13} className="text-amber-500"/>}
                                   {item.label}
                                   {item.action && <span className="text-[9px] font-black uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Special right</span>}
+                                  {item.ceoOnly && <span className="text-[9px] font-black uppercase bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">Only CEO can give</span>}
                                   {locked && <span className="text-[9px] font-black uppercase bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">Given by CEO</span>}
                                 </p>
                                 {item.hint && <p className="text-[11px] font-medium text-slate-500 mt-0.5">{item.hint}</p>}

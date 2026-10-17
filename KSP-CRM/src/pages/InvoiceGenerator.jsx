@@ -8,6 +8,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { toJpeg } from 'html-to-image';
 import jsPDF from 'jspdf';
 import { can } from '../utils/permissions';
+import { INVOICE_SERVICES, guessService } from '../utils/invoiceServices';
 
 const numberToWords = (num) => {
   if (num === 0 || isNaN(num)) return "Zero Rupees Only";
@@ -73,7 +74,7 @@ const InvoiceGenerator = () => {
 
   // Customer state for invoice
   const [customer, setCustomer] = useState({ name: "", tradeName: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
-  const [items, setItems] = useState([{ description: '', hsn: '', qty: 1, rate: 0 }]);
+  const [items, setItems] = useState([{ service: '', description: '', hsn: '', qty: 1, rate: 0 }]);
   const [bank, setBank] = useState(axisBankPreset);
 
   const [historyList, setHistoryList] = useState([]);
@@ -196,7 +197,7 @@ const InvoiceGenerator = () => {
   const upiLink = `upi://pay?pa=${bank.upiId}&pn=${companyDetails.name || 'Business'}&am=${totalAmountAfterTax}&cu=INR`;
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(upiLink)}`;
 
-  const addItem = () => setItems([...items, { description: '', hsn: '', qty: 1, rate: 0 }]);
+  const addItem = () => setItems([...items, { service: '', description: '', hsn: '', qty: 1, rate: 0 }]);
   const removeItem = (index) => { const list = [...items]; list.splice(index, 1); setItems(list); };
 
   const handlePrint = () => window.print();
@@ -343,6 +344,12 @@ const InvoiceGenerator = () => {
         toast.error("Please enter Invoice Number, Customer Name, and Company Name!");
         return false;
       }
+      // 🔴 Har line ki Service chuni ho (Business MIS me revenue isi se ITR / GST / ... me jaata hai)
+      const missing = items.findIndex(item => !item.service);
+      if (missing !== -1) {
+        toast.error(`Please choose the Service for item ${missing + 1}`);
+        return false;
+      }
       setLoading(true);
       const headers = { Authorization: `Bearer ${user.token}` };
       const payload = {
@@ -376,7 +383,7 @@ const InvoiceGenerator = () => {
     if (inv.taxes) setTaxes(inv.taxes); else setTaxes({ igst: true, cgst: false, sgst: false });
     setShowQr(inv.showQr !== undefined ? inv.showQr : true); 
     setCustomer(inv.customer || {});
-    setItems(inv.items && inv.items.length > 0 ? inv.items : [{ description: '', hsn: '', qty: 1, rate: 0 }]);
+    setItems(inv.items && inv.items.length > 0 ? inv.items.map(item => ({ ...item, service: item.service || guessService(item.description) })) : [{ service: '', description: '', hsn: '', qty: 1, rate: 0 }]);
     setBank(inv.bank || {});
     setLogoImage(inv.logoImage || null); setStampImage(inv.stampImage || null); setCustomQrImage(inv.customQrImage || null);
     
@@ -389,7 +396,7 @@ const InvoiceGenerator = () => {
     setIsGstEnabled(true); setTaxes({ igst: true, cgst: false, sgst: false });
     setCompanyDetails(defaultCompany); setShowQr(true);
     setCustomer({ name: "", tradeName: "", address: "", phone: "", email: "", gstin: "", pan: "", placeOfSupply: "" });
-    setItems([{ description: '', hsn: '', qty: 1, rate: 0 }]); setBank(axisBankPreset); 
+    setItems([{ service: '', description: '', hsn: '', qty: 1, rate: 0 }]); setBank(axisBankPreset); 
     setLogoImage(null); setStampImage(null); setCustomQrImage(null);
   };
 
@@ -691,16 +698,23 @@ const InvoiceGenerator = () => {
                 <button type="button" onClick={addItem} className="text-xs bg-slate-100 hover:bg-slate-200 text-blue-600 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus size={14}/> Add Item</button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-1 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider hidden md:grid">
-                 <div className={isGstEnabled ? "md:col-span-4" : "md:col-span-6"}>Service / Product Description</div>
+                 <div className="md:col-span-2">Service *</div>
+                 <div className={isGstEnabled ? "md:col-span-3" : "md:col-span-4"}>Description</div>
                  <div className="md:col-span-2">HSN / SAC</div>
                  <div className="md:col-span-1">Quantity</div>
                  <div className="md:col-span-2">Rate (₹)</div>
-                 {isGstEnabled && <div className="md:col-span-2">GST Calculated</div>}
+                 {isGstEnabled && <div className="md:col-span-1">GST</div>}
                  <div className="md:col-span-1 text-right">Action</div>
               </div>
               {items.map((item, index) => (
                 <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-2 items-center bg-slate-50 p-3 rounded-xl">
-                  <div className={isGstEnabled ? "md:col-span-4" : "md:col-span-6"}>
+                  <div className="md:col-span-2">
+                    <select value={item.service || ''} onChange={(e) => { const list = [...items]; list[index] = { ...list[index], service: e.target.value }; setItems(list); }} className={`w-full p-2 border rounded text-xs font-semibold ${item.service ? 'bg-white text-slate-800' : 'bg-amber-50 border-amber-300 text-amber-700'}`} title="Used for the revenue split in Business MIS (not printed on the invoice)">
+                      <option value="">Choose service</option>
+                      {INVOICE_SERVICES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    </select>
+                  </div>
+                  <div className={isGstEnabled ? "md:col-span-3" : "md:col-span-4"}>
                     <input type="text" placeholder="Description..." value={item.description} onChange={(e) => { const list = [...items]; list[index].description = e.target.value; setItems(list); }} className="w-full p-2 border rounded text-xs"/>
                   </div>
                   <div className="md:col-span-2">
@@ -713,8 +727,8 @@ const InvoiceGenerator = () => {
                     <input type="number" placeholder="Rate (₹)" value={item.rate} onChange={(e) => { const list = [...items]; list[index].rate = Number(e.target.value); setItems(list); }} className="w-full p-2 border rounded text-xs"/>
                   </div>
                   {isGstEnabled && (
-                    <div className="md:col-span-2 flex items-center h-full">
-                      <span className="w-full text-center text-xs font-bold text-slate-500 bg-slate-200 border border-slate-300 rounded p-2">{globalGstPercent}% GST</span>
+                    <div className="md:col-span-1 flex items-center h-full">
+                      <span className="w-full text-center text-xs font-bold text-slate-500 bg-slate-200 border border-slate-300 rounded p-2">{globalGstPercent}%</span>
                     </div>
                   )}
                   <div className="md:col-span-1 text-right">

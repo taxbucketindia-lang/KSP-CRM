@@ -38,6 +38,8 @@ import personalFinanceRoutes from './routes/personalFinanceRoutes.js';
 import pushRoutes from './routes/pushRoutes.js';
 import vendorRoutes from './routes/vendorRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import businessMisRoutes from './routes/businessMisRoutes.js';
+import serviceReportRoutes from './routes/serviceReportRoutes.js';
 import { LOCAL_ROOT as CHAT_FILES_ROOT } from './utils/chatFiles.js';
 import { startMeetingReminderCron } from './utils/meetingReminders.js';
 
@@ -94,6 +96,8 @@ app.use('/api/taskhandover', taskHnadoverRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/business-health', businessHealthRoutes);
 app.use('/api/personal-finance', personalFinanceRoutes);
+app.use('/api/business-mis', businessMisRoutes);
+app.use('/api/service-report', serviceReportRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/chat', chatRoutes);

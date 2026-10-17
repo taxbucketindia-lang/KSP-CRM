@@ -9,7 +9,7 @@ import {
   X, Bell, ChevronDown, ShieldCheck, PhoneCall, CheckCircle2,
   Settings, FileText, CalendarClock, ClipboardList, BriefcaseBusiness, Target,
   Activity, Landmark, Laptop, Megaphone, Wrench, IndianRupee, Receipt, ListTodo,
-  AlertCircle, TrendingUp, Code, Globe, Zap, Cake, RotateCwFadingClock, HeartPulse,
+  AlertCircle, TrendingUp, Code, Globe, Zap, Cake, RotateCwFadingClock, HeartPulse, FileBarChart,
   CheckCheck, Trash2, ArrowUpRight, BellOff, Search, Star, ChevronsLeft, ChevronsRight, BellRing, Smartphone, Handshake, MessageCircle
 } from 'lucide-react';
 import ChatPanel from './ChatPanel';
@@ -354,7 +354,8 @@ const Layout = () => {
     ...buildSection('Executive', Target, [
       // CEO ke liye yeh upar Main me hai (home page), isliye yahan dobara nahi
       ...(isCeoRole(user?.role) ? [] : [{ path: '/ceo-panel', name: 'CEO Dashboard', icon: Target, perm: 'CEO_DASHBOARD' }]),
-      { path: '/business-health', name: 'Client Health Reports', icon: HeartPulse, perm: 'BUSINESS_HEALTH' }
+      { path: '/business-health', name: 'Client Health Reports', icon: HeartPulse, perm: 'BUSINESS_HEALTH' },
+      { path: '/service-report', name: 'Service Report', icon: FileBarChart, perm: 'SERVICE_REPORT' }
     ])
   ];
 

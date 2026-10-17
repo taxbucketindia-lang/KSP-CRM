@@ -1,6 +1,6 @@
 import User from '../models/User.js';
 import { canManageUser, canGrantRole, isCeo } from '../utils/roles.js';
-import { getEffectivePermissions, sanitizePermissions, ALL_PERMISSIONS } from '../utils/permissions.js';
+import { getEffectivePermissions, sanitizePermissions, ALL_PERMISSIONS, CEO_ONLY_RIGHTS } from '../utils/permissions.js';
 
 // Frontend ko user ke asli rights ke saath bhejna
 const withAccess = (user) => {
@@ -138,8 +138,10 @@ export const updateEmployeePermissions = async (req, res) => {
     if (user.role === 'CEO') return res.status(400).json({ message: 'CEO always has full access' });
     if (!canManageUser(req.user, user)) return res.status(403).json({ message: 'Only the CEO can change an Admin\'s rights' });
 
-    const requested = sanitizePermissions(req.body.permissions);
-    const mine = getEffectivePermissions(req.user);
+    let requested = sanitizePermissions(req.body.permissions);
+    // CEO-only right (jaise Salary Payment) sirf CEO de / hata sakta hai: Admin ke request me ho toh bhi ignore, jo pehle se hai woh waisa hi
+    const mine = getEffectivePermissions(req.user).filter(key => isCeo(req.user) || !CEO_ONLY_RIGHTS.includes(key));
+    if (!isCeo(req.user)) requested = requested.filter(key => !CEO_ONLY_RIGHTS.includes(key));
     const current = getEffectivePermissions(user);
 
     let final = requested;
@@ -158,7 +160,7 @@ export const updateEmployeePermissions = async (req, res) => {
 
     if (user.role === 'Admin') {
       // CEO "Full access" de ya chuninda rights
-      user.fullAccess = req.body.fullAccess === true || final.length === ALL_PERMISSIONS.length;
+      user.fullAccess = req.body.fullAccess === true || ALL_PERMISSIONS.filter(key => !CEO_ONLY_RIGHTS.includes(key)).every(key => final.includes(key));
     }
 
     await user.save();

@@ -12,10 +12,14 @@ export const PERMISSION_GROUPS = {
   'HR & Ops': ['EMPLOYEE_MASTER', 'ATTENDANCE', 'SALARY', 'HOLIDAY'],
   'Finance': ['INVOICES', 'VENDORS', 'OFFICE_EXPENSE'],
   'IT Department': ['DEV_TASKS'],
-  'Executive': ['CEO_DASHBOARD', 'BUSINESS_HEALTH'],
+  'Executive': ['CEO_DASHBOARD', 'BUSINESS_HEALTH', 'SERVICE_REPORT'],
   // Tab nahi, khaas kaam: Client Master, ITR, GST, ROC, TDS, Audit, FSSAI, Leads, Registrations, Invoices ka data delete karna
-  'Special Rights': ['DELETE_RECORDS']
+  // SALARY_PAYMENT: salary Paid mark karna + remarks (sirf CEO de sakta hai)
+  'Special Rights': ['DELETE_RECORDS', 'SALARY_PAYMENT']
 };
+
+// 🔴 Ye rights sirf CEO deta hai: Admin ke "Full access" se apne aap nahi milte, aur Admin aage kisi ko nahi de sakta
+export const CEO_ONLY_RIGHTS = ['SALARY_PAYMENT'];
 
 export const ALL_PERMISSIONS = Object.values(PERMISSION_GROUPS).flat();
 
@@ -50,7 +54,10 @@ export const getEffectivePermissions = (user) => {
 
   if (user.role === 'Admin') {
     // Jab tak CEO ne Admin ke rights alag se set nahi kiye, Admin ke paas sab kuch hai
-    return user.fullAccess === false ? [...expand(user.permissions)] : [...ALL_PERMISSIONS];
+    if (user.fullAccess === false) return [...expand(user.permissions)];
+    // Full access = sab kuch, sirf CEO-only rights tabhi jab CEO ne alag se diye hon
+    const granted = expand(user.permissions);
+    return [...ALL_PERMISSIONS.filter(key => !CEO_ONLY_RIGHTS.includes(key) || granted.has(key))];
   }
 
   const granted = expand(user.permissions);

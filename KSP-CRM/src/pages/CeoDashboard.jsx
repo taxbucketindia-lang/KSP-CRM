@@ -1112,6 +1112,7 @@ import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
 import MeetingCalendar from '../components/MeetingCalendar';
 import CashFlowPanel from '../components/CashFlowPanel';
+import BusinessMisPanel from '../components/BusinessMisPanel';
 import { isCeoRole } from '../utils/roles';
 import { formatIstDateTime } from '../utils/time';
 import { useNavigate, Link } from 'react-router-dom';
@@ -2015,6 +2016,9 @@ if (rawInTime) {
 
       {/* PERSONAL CASH FLOW: sirf owner (CEO) ko dikhta hai, click par popup panel */}
       {isCeoRole(user?.role) && <CashFlowPanel />}
+
+      {/* BUSINESS MIS: company ka cash flow, P&L, expense budget, billing & collection (click par popup) */}
+      {isCeoRole(user?.role) && <BusinessMisPanel />}
 
       {/* CEO SUCCESS LIST WIDGET */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 md:p-6">

@@ -62,17 +62,22 @@ export const PERMISSION_CATALOG = [
     group: 'Executive',
     items: [
       { key: 'CEO_DASHBOARD', label: 'CEO Dashboard', path: '/ceo-panel' },
-      { key: 'BUSINESS_HEALTH', label: 'Client Health Reports (CFO)', path: '/business-health' }
+      { key: 'BUSINESS_HEALTH', label: 'Client Health Reports (CFO)', path: '/business-health' },
+      { key: 'SERVICE_REPORT', label: 'Service Report (month-wise)', path: '/service-report' }
     ]
   },
   {
     // Tab nahi, khaas kaam
     group: 'Special Rights',
     items: [
-      { key: 'DELETE_RECORDS', label: 'Delete Records', action: true, hint: 'Delete saved data in Client Master, ITR, GST, ROC, TDS, Audit, FSSAI, Leads, Registrations and Invoices. Without this right nobody can delete.' }
+      { key: 'DELETE_RECORDS', label: 'Delete Records', action: true, hint: 'Delete saved data in Client Master, ITR, GST, ROC, TDS, Audit, FSSAI, Leads, Registrations and Invoices. Without this right nobody can delete.' },
+      { key: 'SALARY_PAYMENT', label: 'Salary Payment (mark Paid + remarks)', action: true, ceoOnly: true, hint: 'Mark salary as Paid / Unpaid and write remarks in Salary Calculation, and see those remarks. Only the CEO can give this right; Full access does not include it.' }
     ]
   }
 ];
+
+// 🔴 Sirf CEO deta hai (Admin ke Full access me apne aap nahi, Admin aage nahi de sakta)
+export const CEO_ONLY_KEYS = ['SALARY_PAYMENT'];
 
 export const ALL_PERMISSION_ITEMS = PERMISSION_CATALOG.flatMap(g => g.items.map(item => ({ ...item, group: g.group })));
 export const ALL_PERMISSION_KEYS = ALL_PERMISSION_ITEMS.map(item => item.key);

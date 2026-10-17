@@ -2,7 +2,7 @@ import express from 'express';
 import { 
   createEmployee, getEmployees, 
   markAttendance, getAttendance, 
-  generateSalary, getSalaries , updateEmployee, 
+  generateSalary, getSalaries , updateEmployee, updateSalaryPayment,
   deleteEmployee,
 } from '../controllers/hrController.js';
 import { protect } from '../middleware/authMiddleware.js';
@@ -21,5 +21,6 @@ router.route('/attendance').post(protect, markAttendance).get(protect, getAttend
 
 // Salary
 router.route('/salary').post(protect, generateSalary).get(protect, getSalaries);
+router.put('/salary/:id/payment', protect, updateSalaryPayment);
 
 export default router;

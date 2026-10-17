@@ -680,9 +680,18 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { computeMonthAttendance, computePay, computeOpeningLeaves } from '../utils/payroll';
+import { can } from '../utils/permissions';
+import { BadgeCheck, MessageSquareText, X as CloseIcon, Wallet as WalletIcon } from 'lucide-react';
+
+const PAYMENT_MODES = ['Bank Transfer', 'UPI', 'Cash', 'Cheque'];
+const fmtDay = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : '');
+const dayKey = (d) => new Date(d || Date.now()).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 const SalaryCalculation = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Paid mark karna + remarks: sirf CEO (ya jise CEO ne "Salary Payment" right diya)
+  const canPay = can(user, 'SALARY_PAYMENT');
+  const [payModal, setPayModal] = useState(null);   // { row, paid, paidOn, paymentMode, remarks, saving }
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [salarySheet, setSalarySheet] = useState([]);
@@ -790,7 +799,7 @@ const SalaryCalculation = () => {
           closingLeaves: pay.closingLeaves
         };
 
-        if (savedRecord && !isForceRecalculate) {
+        if (savedRecord && (!isForceRecalculate || savedRecord.paid)) {
           // If already saved, load the exact values that were saved at that time
           const savedSummary = Object.fromEntries(
             Object.entries(savedRecord.attendanceSummary || {}).filter(([, v]) => v !== undefined && v !== null)
@@ -899,7 +908,7 @@ const SalaryCalculation = () => {
     try {
       const headers = { Authorization: `Bearer ${user.token}` };
 
-      const payload = salarySheet.map(row => ({
+      const payload = salarySheet.filter(row => !row.paid).map(row => ({
         employee: row.employeeId || row.employee._id,
         companyName: row.companyName || 'SkyEdge Taxbucket India Private Limited',
         monthYear: row.monthYear,
@@ -923,7 +932,8 @@ const SalaryCalculation = () => {
         await axios.put(`${import.meta.env.VITE_API_URL}/hr/employees/${empId}`, { paidLeaveBalance: closingLeaves, leaveBalanceAsOf: row.monthYear }, { headers }).catch(() => {});
       }
 
-      toast.success("Salary Sheet Finalized & Leave Balance Updated!");
+      const paidCount = salarySheet.filter(row => row.paid).length;
+      toast.success(paidCount ? `Salary Sheet Finalized & Leave Balance Updated! ${paidCount} paid salar${paidCount > 1 ? 'ies were' : 'y was'} left unchanged.` : "Salary Sheet Finalized & Leave Balance Updated!");
       fetchSalaryData();
     } catch (error) {
       toast.error("Failed to save salary");
@@ -931,6 +941,46 @@ const SalaryCalculation = () => {
       setSaving(false);
     }
   };
+
+  // 🔴 PAYMENT: Paid / Unpaid + remarks
+  const openPayment = (row) => setPayModal({
+    row,
+    paidOn: dayKey(row.paidOn),
+    paymentMode: row.paymentMode || 'Bank Transfer',
+    remarks: row.remarks || '',
+    saving: false
+  });
+
+  const savePayment = async (markPaid) => {
+    if (!payModal?.row?._id) return;
+    setPayModal(prev => ({ ...prev, saving: true }));
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const res = await axios.put(`${import.meta.env.VITE_API_URL}/hr/salary/${payModal.row._id}/payment`, {
+        paid: markPaid, paidOn: payModal.paidOn, paymentMode: payModal.paymentMode, remarks: payModal.remarks
+      }, { headers });
+      const saved = res.data;
+      setSalarySheet(prev => prev.map(r => (r._id === saved._id ? { ...r, paid: saved.paid, paidOn: saved.paidOn, paymentMode: saved.paymentMode, remarks: saved.remarks, status: r.status, paymentUpdatedBy: saved.paymentUpdatedBy, paymentUpdatedAt: saved.paymentUpdatedAt } : r)));
+      toast.success(markPaid ? `Salary of ${payModal.row.empName} marked as Paid` : 'Saved');
+      setPayModal(null);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not save the payment');
+      setPayModal(prev => (prev ? { ...prev, saving: false } : prev));
+    }
+  };
+
+  // Mahine ka hisaab: kitna diya, kitna baaki
+  const paySummary = useMemo(() => {
+    const saved = salarySheet.filter(r => r.isSaved);
+    const paidRows = saved.filter(r => r.paid);
+    return {
+      total: salarySheet.reduce((s, r) => s + (Number(r.netPayable) || 0), 0),
+      paidCount: paidRows.length,
+      paidAmount: paidRows.reduce((s, r) => s + (Number(r.netPayable) || 0), 0),
+      unpaidCount: salarySheet.length - paidRows.length,
+      unpaidAmount: salarySheet.filter(r => !r.paid).reduce((s, r) => s + (Number(r.netPayable) || 0), 0)
+    };
+  }, [salarySheet]);
 
   // PDF GENERATOR
   const generateSalarySlip = (row) => {
@@ -1145,6 +1195,27 @@ const SalaryCalculation = () => {
         </div>
       </div>
 
+      {/* PAYMENT SUMMARY */}
+      {salarySheet.length > 0 && !loading && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-4 py-3">
+            <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><WalletIcon size={12} className="text-blue-500" /> Total Net Salary</p>
+            <p className="text-xl font-black text-slate-900 mt-0.5">₹{Math.round(paySummary.total).toLocaleString('en-IN')}</p>
+            <p className="text-[11px] text-slate-400">{salarySheet.length} employee(s)</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-emerald-200 shadow-sm px-4 py-3">
+            <p className="text-[10px] font-black uppercase tracking-wider text-emerald-600 flex items-center gap-1.5"><BadgeCheck size={12} /> Paid</p>
+            <p className="text-xl font-black text-emerald-700 mt-0.5">₹{Math.round(paySummary.paidAmount).toLocaleString('en-IN')}</p>
+            <p className="text-[11px] text-slate-400">{paySummary.paidCount} employee(s)</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-amber-200 shadow-sm px-4 py-3">
+            <p className="text-[10px] font-black uppercase tracking-wider text-amber-600 flex items-center gap-1.5"><AlertCircle size={12} /> Not Paid Yet</p>
+            <p className="text-xl font-black text-amber-700 mt-0.5">₹{Math.round(paySummary.unpaidAmount).toLocaleString('en-IN')}</p>
+            <p className="text-[11px] text-slate-400">{paySummary.unpaidCount} employee(s)</p>
+          </div>
+        </div>
+      )}
+
       {/* CONFIGURATION BAR */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row gap-4 items-center">
         <div className="w-full md:w-64">
@@ -1188,7 +1259,7 @@ const SalaryCalculation = () => {
                 <th colSpan="2" className="py-2 px-4 border-r border-slate-200 text-center text-[10px] font-black uppercase text-emerald-600 bg-emerald-50">Salary Snapshot</th>
                 <th colSpan="4" className="py-2 px-4 border-r border-slate-200 text-center text-[10px] font-black uppercase text-amber-600 bg-amber-50">Attendance & Leaves</th>
                 <th colSpan="5" className="py-2 px-4 border-r border-slate-200 text-center text-[10px] font-black uppercase text-rose-600 bg-rose-50">Adjustments & Deductions</th>
-                <th colSpan="2" className="py-2 px-4 text-center text-[10px] font-black uppercase text-blue-600 bg-blue-50">Final Output</th>
+                <th colSpan={canPay ? 4 : 3} className="py-2 px-4 text-center text-[10px] font-black uppercase text-blue-600 bg-blue-50">Final Output</th>
               </tr>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-[10px] font-bold uppercase tracking-wider">
                 <th className="py-3 px-4 w-48">Name & ID</th>
@@ -1209,14 +1280,16 @@ const SalaryCalculation = () => {
                 <th className="py-3 px-4 text-right border-r border-slate-200 bg-rose-50/30">Reimb. (₹)</th>
                 
                 <th className="py-3 px-4 text-right bg-blue-50/30 font-black">Net Salary</th>
+                <th className="py-3 px-4 text-center bg-blue-50/30 w-36">Payment</th>
+                {canPay && <th className="py-3 px-4 text-left bg-blue-50/30 w-48">Remarks</th>}
                 <th className="py-3 px-4 text-center bg-blue-50/30 w-24">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
               {loading ? (
-                <tr><td colSpan="15" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Calculating Payroll...</td></tr>
+                <tr><td colSpan="17" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Calculating Payroll...</td></tr>
               ) : salarySheet.length === 0 ? (
-                <tr><td colSpan="15" className="text-center py-16 text-slate-400">No active employees found for this month based on joining/exit dates.</td></tr>
+                <tr><td colSpan="17" className="text-center py-16 text-slate-400">No active employees found for this month based on joining/exit dates.</td></tr>
               ) : (
                 salarySheet.map((row, index) => {
                   const snap = row.salarySnapshot || { basic: 0, hra: 0, gross: 0 };
@@ -1226,7 +1299,9 @@ const SalaryCalculation = () => {
                   const isOffboarded = ['Resigned', 'Terminated', 'Absconded'].includes(row.status);
                   const rowClass = isOffboarded 
                         ? 'bg-rose-50/40 hover:bg-rose-50 transition-colors border-l-4 border-rose-500' 
+                        : row.paid ? 'bg-emerald-50/40 hover:bg-emerald-50/70 transition-colors border-l-4 border-emerald-500'
                         : 'hover:bg-slate-50/50 transition-colors';
+                  const lockPaid = !!row.paid; // di hui salary ki rakam badal nahi sakti
 
                   return (
                     <tr key={row.employeeId} className={rowClass}>
@@ -1240,7 +1315,9 @@ const SalaryCalculation = () => {
                         </div>
                       </td>
                       <td className="py-3 px-4 text-center border-r border-slate-100">
-                        {row.isSaved ? (
+                        {row.paid ? (
+                          <span className="flex items-center justify-center gap-1 text-[10px] font-black text-white bg-emerald-600 px-2 py-1 rounded"><BadgeCheck size={12}/> PAID</span>
+                        ) : row.isSaved ? (
                           <span className="flex items-center justify-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded"><CheckCircle2 size={12}/> Saved</span>
                         ) : (
                           <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded">Draft</span>
@@ -1291,22 +1368,23 @@ const SalaryCalculation = () => {
                            type="number" 
                            min="0" 
                            value={adj.latesForgiven} 
+                           disabled={lockPaid}
                            onChange={(e) => handleAdjustmentChange(index, 'latesForgiven', e.target.value)} 
                            className="w-16 mx-auto block text-center p-1.5 border border-amber-200 rounded text-xs focus:ring-2 focus:ring-amber-500/20 text-amber-600 font-semibold bg-white" 
                            title="Forgive lates to recover salary" 
                         />
                       </td>
                       <td className="py-3 px-4 bg-rose-50/10">
-                        <input type="number" min="0" value={adj.lopDeduction} onChange={(e) => handleAdjustmentChange(index, 'lopDeduction', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-rose-600 font-semibold bg-white" />
+                        <input type="number" min="0" disabled={lockPaid} value={adj.lopDeduction} onChange={(e) => handleAdjustmentChange(index, 'lopDeduction', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-rose-600 font-semibold bg-white" />
                       </td>
                       <td className="py-3 px-4 bg-rose-50/10">
-                        <input type="number" min="0" value={adj.otherDeduction} onChange={(e) => handleAdjustmentChange(index, 'otherDeduction', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-rose-600 font-semibold bg-white" />
+                        <input type="number" min="0" disabled={lockPaid} value={adj.otherDeduction} onChange={(e) => handleAdjustmentChange(index, 'otherDeduction', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-rose-600 font-semibold bg-white" />
                       </td>
                       <td className="py-3 px-4 bg-rose-50/10">
-                        <input type="number" min="0" value={adj.incentiveBonus} onChange={(e) => handleAdjustmentChange(index, 'incentiveBonus', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-emerald-600 font-semibold bg-white" />
+                        <input type="number" min="0" disabled={lockPaid} value={adj.incentiveBonus} onChange={(e) => handleAdjustmentChange(index, 'incentiveBonus', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-emerald-600 font-semibold bg-white" />
                       </td>
                       <td className="py-3 px-4 border-r border-slate-100 bg-rose-50/10">
-                        <input type="number" min="0" value={adj.reimbursement} onChange={(e) => handleAdjustmentChange(index, 'reimbursement', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-blue-600 font-semibold bg-white" />
+                        <input type="number" min="0" disabled={lockPaid} value={adj.reimbursement} onChange={(e) => handleAdjustmentChange(index, 'reimbursement', e.target.value)} className="w-full text-right p-1.5 border border-slate-200 rounded text-xs focus:ring-2 focus:ring-blue-500/20 text-blue-600 font-semibold bg-white" />
                       </td>
                       
                       <td className="py-3 px-4 text-right bg-blue-50/10">
@@ -1315,8 +1393,35 @@ const SalaryCalculation = () => {
                         </div>
                       </td>
 
+                      {/* PAYMENT: sabko dikhta hai; badal sirf CEO / jise right mila */}
                       <td className="py-3 px-4 text-center bg-blue-50/10">
-                        <button 
+                        {row.paid ? (
+                          <button type="button" disabled={!canPay} onClick={() => openPayment(row)} title={canPay ? 'Change payment details' : undefined} className={`inline-flex flex-col items-center gap-0.5 ${canPay ? 'hover:opacity-80' : 'cursor-default'}`}>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-emerald-100 px-2 py-1 rounded-lg"><BadgeCheck size={13}/> Paid</span>
+                            <span className="text-[9px] font-semibold text-slate-500 leading-tight">{fmtDay(row.paidOn)}{row.paymentMode ? ` · ${row.paymentMode}` : ''}</span>
+                          </button>
+                        ) : !row.isSaved || !row._id ? (
+                          <span className="text-[10px] font-semibold text-slate-400" title="Finalize the sheet first">Finalize first</span>
+                        ) : canPay ? (
+                          <button type="button" onClick={() => openPayment(row)} className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-white border border-emerald-300 hover:bg-emerald-600 hover:text-white px-2.5 py-1.5 rounded-lg transition-colors"><BadgeCheck size={13}/> Mark Paid</button>
+                        ) : (
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">Not paid</span>
+                        )}
+                      </td>
+                      {canPay && (
+                        <td className="py-3 px-4 bg-blue-50/10 max-w-[220px]">
+                          {row.isSaved && row._id ? (
+                            <button type="button" onClick={() => openPayment(row)} className="w-full text-left group" title={row.remarks || 'Add remarks'}>
+                              {row.remarks
+                                ? <span className="block text-[11px] text-slate-700 line-clamp-2 group-hover:text-blue-700">{row.remarks}</span>
+                                : <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 group-hover:text-blue-600"><MessageSquareText size={12}/> Add remark</span>}
+                            </button>
+                          ) : <span className="text-[10px] text-slate-300">—</span>}
+                        </td>
+                      )}
+
+                      <td className="py-3 px-4 text-center bg-blue-50/10">
+                        <button
                           onClick={() => generateSalarySlip(row)}
                           title="Download Salary Slip (PDF)"
                           className="p-2 bg-white hover:bg-blue-600 text-blue-600 hover:text-white border border-blue-200 rounded-lg shadow-sm transition-colors mx-auto flex items-center justify-center group"
@@ -1332,6 +1437,55 @@ const SalaryCalculation = () => {
           </table>
         </div>
       </div>
+      {/* 🔴 PAYMENT POPUP: Paid mark karna / remarks */}
+      {payModal && (
+        <div className="fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => !payModal.saving && setPayModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-slate-800 truncate">Salary Payment · {payModal.row.empName}</p>
+                <p className="text-[11px] text-slate-500">{payModal.row.monthYear} · Net ₹{Math.round(payModal.row.netPayable || 0).toLocaleString('en-IN')}</p>
+              </div>
+              <button type="button" onClick={() => setPayModal(null)} disabled={payModal.saving} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100"><CloseIcon size={17}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {payModal.row.paid && (
+                <p className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  Marked Paid{payModal.row.paymentUpdatedBy ? ` by ${payModal.row.paymentUpdatedBy}` : ''}{payModal.row.paymentUpdatedAt ? ` on ${fmtDay(payModal.row.paymentUpdatedAt)}` : ''}.
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Paid On</span>
+                  <input type="date" value={payModal.paidOn} max={dayKey()} onChange={(e) => setPayModal(prev => ({ ...prev, paidOn: e.target.value }))} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-500/20" />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Mode</span>
+                  <select value={payModal.paymentMode} onChange={(e) => setPayModal(prev => ({ ...prev, paymentMode: e.target.value }))} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold outline-none bg-white focus:ring-2 focus:ring-emerald-500/20">
+                    {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label className="block">
+                <span className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Remarks</span>
+                <textarea rows={3} maxLength={500} value={payModal.remarks} onChange={(e) => setPayModal(prev => ({ ...prev, remarks: e.target.value }))} placeholder="e.g. Paid in two parts, advance of ₹2,000 adjusted, UTR no. ..." className="w-full p-2.5 border border-slate-200 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-emerald-500/20" />
+                <span className="block text-right text-[10px] text-slate-400">{payModal.remarks.length}/500 · only people with the Salary Payment right can see remarks</span>
+              </label>
+            </div>
+            <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 rounded-b-2xl flex flex-wrap items-center justify-between gap-2">
+              {payModal.row.paid
+                ? <button type="button" disabled={payModal.saving} onClick={() => { if (window.confirm('Mark this salary as NOT paid?')) savePayment(false); }} className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">Mark as Unpaid</button>
+                : <button type="button" disabled={payModal.saving} onClick={() => savePayment(false)} className="text-xs font-bold text-slate-600 hover:text-slate-800 disabled:opacity-50">Save remark only</button>}
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={payModal.saving} onClick={() => setPayModal(null)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-100">Cancel</button>
+                <button type="button" disabled={payModal.saving || !payModal.paidOn} onClick={() => savePayment(true)} className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl disabled:opacity-50">
+                  {payModal.saving ? <RefreshCw size={13} className="animate-spin"/> : <BadgeCheck size={14}/>} {payModal.row.paid ? 'Save' : 'Mark as Paid'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

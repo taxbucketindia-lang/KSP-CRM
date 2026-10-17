@@ -3,6 +3,9 @@ import Attendance from '../models/Attendance.js';
 import Salary from '../models/Salary.js';
 import User from '../models/User.js';
 import { canManageUser, canGrantRole } from '../utils/roles.js';
+import { can } from '../utils/permissions.js';
+
+const PAYMENT_FIELDS = ['paid', 'paidOn', 'paymentMode', 'remarks', 'paymentUpdatedBy', 'paymentUpdatedAt', 'paymentLog'];
 
 // ================= EMPLOYEES =================
 export const createEmployee = async (req, res) => {
@@ -247,18 +250,49 @@ export const getAttendance = async (req, res) => {
 // ================= SALARY =================
 export const generateSalary = async (req, res) => {
   try {
-    const records = req.body.records; 
-    
-    const ops = records.map(r => ({
-      updateOne: {
-        filter: { employee: r.employee, monthYear: r.monthYear },
-        update: { $set: r },
-        upsert: true
-      }
-    }));
-    
-    await Salary.bulkWrite(ops);
-    res.status(200).json({ message: 'Salary records saved successfully' });
+    const records = Array.isArray(req.body.records) ? req.body.records : [];
+
+    // 🔴 Jo salary Paid ho chuki hai use Finalize dobara nahi badalta (di hui rakam ka record pakka rahe)
+    const paidRows = await Salary.find({ paid: true, $or: records.map(r => ({ employee: r.employee, monthYear: r.monthYear })) }).select('employee monthYear').lean();
+    const isPaid = (r) => paidRows.some(p => String(p.employee) === String(r.employee) && p.monthYear === r.monthYear);
+
+    const ops = records.filter(r => !isPaid(r)).map(r => {
+      // Payment / remarks yahan se kabhi nahi badalte (unka alag rasta hai, sirf CEO ke liye)
+      const clean = Object.fromEntries(Object.entries(r).filter(([key]) => !PAYMENT_FIELDS.includes(key)));
+      if (clean.status === 'Paid') clean.status = 'Finalized';
+      return { updateOne: { filter: { employee: r.employee, monthYear: r.monthYear }, update: { $set: clean }, upsert: true } };
+    });
+
+    if (ops.length) await Salary.bulkWrite(ops);
+    res.status(200).json({ message: 'Salary records saved successfully', saved: ops.length, skippedPaid: paidRows.length });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// @route PUT /api/hr/salary/:id/payment  { paid, paidOn, paymentMode, remarks }
+// Sirf CEO (ya jise CEO ne "Salary Payment" right diya)
+export const updateSalaryPayment = async (req, res) => {
+  try {
+    if (!can(req.user, 'SALARY_PAYMENT')) return res.status(403).json({ message: 'Only the CEO (or someone the CEO allowed) can mark salary as paid' });
+    const salary = await Salary.findById(req.params.id);
+    if (!salary) return res.status(404).json({ message: 'Salary record not found. Finalize the sheet first.' });
+
+    const paid = req.body.paid === true;
+    const paidOn = paid ? new Date(req.body.paidOn || Date.now()) : undefined;
+    if (paid && Number.isNaN(paidOn.getTime())) return res.status(400).json({ message: 'Please give a valid payment date' });
+
+    salary.paid = paid;
+    salary.paidOn = paidOn;
+    salary.paymentMode = paid ? String(req.body.paymentMode || '').slice(0, 40) : '';
+    salary.remarks = String(req.body.remarks ?? salary.remarks ?? '').slice(0, 500);
+    salary.status = paid ? 'Paid' : (salary.status === 'Paid' ? 'Finalized' : salary.status);
+    salary.paymentUpdatedBy = req.user.name || '';
+    salary.paymentUpdatedAt = new Date();
+    salary.paymentLog.push({ paid, paidOn, paymentMode: salary.paymentMode, remarks: salary.remarks, byName: req.user.name || '', at: new Date() });
+    if (salary.paymentLog.length > 30) salary.paymentLog = salary.paymentLog.slice(-30);
+    await salary.save();
+    res.json(salary);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -269,8 +303,10 @@ export const getSalaries = async (req, res) => {
     const { monthYear } = req.query;
     const filter = monthYear ? { monthYear } : {};
     
-    const records = await Salary.find(filter).populate('employee', 'name empId');
-    res.json(records);
+    const records = await Salary.find(filter).populate('employee', 'name empId').lean();
+    // Paid / Unpaid sabko dikhta hai; remarks aur history sirf "Salary Payment" right wale ko
+    const full = can(req.user, 'SALARY_PAYMENT');
+    res.json(full ? records : records.map(({ remarks, paymentLog, ...rest }) => rest));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

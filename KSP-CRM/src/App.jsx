@@ -36,6 +36,7 @@ import BirthdayWishes from './pages/BirthdayWishes';
 import DevTask from './pages/DevTask';
 import TaskHandoverWorkspace from './pages/TaskHandoverWorkspace';
 import BusinessHealth from './pages/BusinessHealth';
+import ServiceReport from './pages/ServiceReport';
 import Vendors from './pages/Vendors';
 
 const ProtectedRoute = ({ children }) => {
@@ -136,6 +137,7 @@ function App() {
             <Route path="/it/dev-task" element={guarded('DEV_TASKS', <DevTask />)} />
             <Route path="/ceo-panel" element={guarded('CEO_DASHBOARD', <CeoDashboard />)} />
             <Route path="/business-health" element={guarded('BUSINESS_HEALTH', <BusinessHealth />)} />
+            <Route path="/service-report" element={guarded('SERVICE_REPORT', <ServiceReport />)} />
           </Route>
         </Routes>
       </Router>

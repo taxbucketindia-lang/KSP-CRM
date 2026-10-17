@@ -32,6 +32,8 @@ paymentStatus: { type: String, enum: ['Pending', 'Partially Paid', 'Paid'], defa
     placeOfSupply: String
   },
   items: [{
+    // 🔴 Kis service ki line hai (itr / gst / accounting / tds / roc / registration / audit / cfo / otherRev): Business MIS ka revenue isi se
+    service: { type: String, default: '' },
     description: String,
     hsn: String,
     qty: Number,
