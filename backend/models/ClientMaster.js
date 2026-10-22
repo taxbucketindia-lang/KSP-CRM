@@ -57,6 +57,12 @@ const clientMasterSchema = new mongoose.Schema({
 
   openingBalance: { type: Number, default: 0 },
 
+  // 🔴 CLIENT KAHAN SE AAYA (Registrations jaisa): Google / Reference / BA / Other ...
+  leadSource: { type: String, default: '' },
+  referredByBA: { type: mongoose.Schema.Types.ObjectId, ref: 'BA', default: null },
+  referenceName: { type: String, default: '' },
+  otherSourceName: { type: String, default: '' },
+
   // Basic Details
   address: { type: String },
   state: { type: String },

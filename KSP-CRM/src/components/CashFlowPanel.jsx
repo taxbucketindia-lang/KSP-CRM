@@ -16,8 +16,8 @@ import {
 // CEO Dashboard par chhota card dikhta hai; click karne par poora panel popup me khulta hai.
 
 const SHOW_KEY = 'taxbucket_cashflow_show';
-const TYPES = ['Expense', 'Income', 'Transfer', 'Card Purchase', 'Card Settlement', 'Refund'];
-const ACCOUNT_TYPE_LABEL = { CASH: 'Cash', BANK: 'Bank', CREDIT_CARD: 'Credit Card', OTHER: 'Wallet / Other' };
+const TYPES = ['Expense', 'Income', 'Transfer', 'Card Purchase', 'Card Settlement', 'Refund', 'Investment', 'Redemption'];
+const ACCOUNT_TYPE_LABEL = { CASH: 'Cash', BANK: 'Bank', CREDIT_CARD: 'Credit Card', OTHER: 'Wallet / Other', INVESTMENT: 'Investment' };
 
 // Har transaction type me kaun sa account chahiye aur uska hisaab par kya asar hota hai
 const TYPE_INFO = {
@@ -26,15 +26,32 @@ const TYPE_INFO = {
   Transfer: { from: 'asset', to: 'asset', fromLabel: 'From Account', toLabel: 'To Account', hint: 'Cash deposit, cash withdrawal or bank to bank. Not counted as income or expense.' },
   'Card Purchase': { from: 'card', fromLabel: 'Credit Card', cat: 'EXPENSE', hint: 'Counted as expense on this date. Cash / bank does not reduce until you pay the card bill.' },
   'Card Settlement': { from: 'asset', to: 'card', fromLabel: 'Paid From', toLabel: 'Credit Card', hint: 'Card bill payment. Reduces the card outstanding; not counted as expense again.' },
-  Refund: { to: 'any', toLabel: 'Refund Received In', cat: 'EXPENSE', catOptional: true, hint: 'Money returned to you. It reduces your expense total.' }
+  Refund: { to: 'any', toLabel: 'Refund Received In', cat: 'EXPENSE', catOptional: true, hint: 'Money returned to you. It reduces your expense total.' },
+  // 🔴 INVESTMENT: SIP / mutual fund / FD me paisa lagana. Bank / cash ghatta hai par kharcha nahi ginta
+  Investment: { from: 'asset', to: 'investment', fromLabel: 'Paid From', toLabel: 'Invested In', hint: 'Money put into a SIP, mutual fund, FD etc. Your bank / cash goes down, but it is not an expense. It shows in the Investments box.' },
+  // Redemption: investment se paisa wapas. Lagaye hue se zyada aaya = munafa (income), kam = nuksaan
+  Redemption: { from: 'investment', to: 'asset', fromLabel: 'Withdrawn From', toLabel: 'Received In', cost: true, hint: 'Money taken out of an investment. Enter the amount you received and how much of your invested money it was. The difference is counted as profit (income) or loss.' }
 };
+// Kharcha kiska: apna (Personal) ya office ka. Ek kharche ko dono me baant (split) bhi sakte hain.
+const NATURES = ['Personal', 'Office'];
+const NATURE_STYLE = {
+  Personal: 'bg-violet-50 text-violet-700 border-violet-200',
+  Office: 'bg-blue-50 text-blue-700 border-blue-200',
+  Mixed: 'bg-slate-100 text-slate-700 border-slate-200'
+};
+const EXPENSE_LIKE = ['Expense', 'Card Purchase', 'Refund'];
+const SPLIT_TYPES = ['Expense', 'Card Purchase'];
+const toPaise = (value) => Math.round(Number(value || 0) * 100);
+
 const TYPE_STYLE = {
   Income: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   Expense: 'bg-rose-50 text-rose-700 border-rose-200',
   Transfer: 'bg-slate-100 text-slate-700 border-slate-200',
   'Card Purchase': 'bg-amber-50 text-amber-700 border-amber-200',
   'Card Settlement': 'bg-sky-50 text-sky-700 border-sky-200',
-  Refund: 'bg-teal-50 text-teal-700 border-teal-200'
+  Refund: 'bg-teal-50 text-teal-700 border-teal-200',
+  Investment: 'bg-violet-50 text-violet-700 border-violet-200',
+  Redemption: 'bg-cyan-50 text-cyan-700 border-cyan-200'
 };
 
 const inputClass = 'w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 bg-white outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 disabled:bg-slate-50';
@@ -66,6 +83,8 @@ const accountText = (t) => (t.fromAccountName && t.toAccountName ? `${t.fromAcco
 const signedAmount = (t) => {
   if (t.type === 'Income' || t.type === 'Refund') return { text: `+ ${money(t.amount)}`, color: 'text-emerald-600' };
   if (t.type === 'Expense' || t.type === 'Card Purchase') return { text: `- ${money(t.amount)}`, color: 'text-rose-600' };
+  // Redemption: haath me aaya + munafa / nuksaan
+  if (t.type === 'Redemption' && t.profit != null) return { text: `${money(t.amount)} (${t.profit >= 0 ? 'profit +' : 'loss '}${money(t.profit)})`, color: t.profit >= 0 ? 'text-emerald-600' : 'text-rose-600' };
   return { text: money(t.amount), color: 'text-slate-700' };
 };
 
@@ -162,15 +181,27 @@ const TransactionForm = ({ api, overview, initial, onClose, onSaved }) => {
     fromAccount: initial?.fromAccount || '',
     toAccount: initial?.toAccount || '',
     amount: initial?.amount ?? '',
+    cost: initial?.cost ?? '', // Redemption: lagaya hua kitna nikla
     notes: initial?.notes || '',
-    linkedTransaction: initial?.linkedTransaction || ''
+    linkedTransaction: initial?.linkedTransaction || '',
+    nature: NATURES.includes(initial?.nature) ? initial.nature : 'Personal'
   });
+  // Split ke hisse: [{ nature, category, amount }]. Khali list = split band.
+  const [splits, setSplits] = useState(
+    initial?.splits?.length ? initial.splits.map(s => ({ nature: s.nature, category: s.category || '', amount: String(s.amount) })) : []
+  );
+  const splitOn = splits.length > 0;
   const [saving, setSaving] = useState(false);
   const requestId = useRef(newRequestId()); // ek form = ek ID: double click par do entry nahi banti
 
   const info = TYPE_INFO[form.type];
   const activeAccounts = overview.accounts.filter(a => a.isActive);
-  const optionsFor = (kind) => activeAccounts.filter(a => (kind === 'asset' ? a.type !== 'CREDIT_CARD' : kind === 'card' ? a.type === 'CREDIT_CARD' : true));
+  // asset = cash / bank / wallet (card aur investment nahi), card, investment, any = sab (investment nahi)
+  const optionsFor = (kind) => activeAccounts.filter(a => (
+    kind === 'asset' ? !['CREDIT_CARD', 'INVESTMENT'].includes(a.type)
+      : kind === 'card' ? a.type === 'CREDIT_CARD'
+        : kind === 'investment' ? a.type === 'INVESTMENT'
+          : a.type !== 'INVESTMENT'));
   const fromOptions = info.from ? optionsFor(info.from) : [];
   const toOptions = info.to ? optionsFor(info.to).filter(a => !(form.type === 'Transfer' && a._id === form.fromAccount)) : [];
   // Sirf ek hi account ho toh wahi apne aap chun lo
@@ -180,12 +211,47 @@ const TransactionForm = ({ api, overview, initial, onClose, onSaved }) => {
   const categories = info.cat ? overview.categories.filter(c => c.type === info.cat && (c.isActive || c._id === form.category)) : [];
 
   // Payment mode account se tay hota hai: cash account = Cash, bank = Bank / UPI, card = Credit Card
-  const funding = activeAccounts.find(a => a._id === (['Income', 'Refund'].includes(form.type) ? toAccount : fromAccount));
+  const funding = activeAccounts.find(a => a._id === (['Income', 'Refund', 'Redemption'].includes(form.type) ? toAccount : fromAccount));
+  // Redemption: munafa / nuksaan turant dikhe
+  const investmentAccount = form.type === 'Redemption' ? activeAccounts.find(a => a._id === fromAccount) : null;
+  const redemptionProfit = form.type === 'Redemption' && Number(form.cost) > 0 && Number(form.amount) > 0 ? (toPaise(form.amount) - toPaise(form.cost)) / 100 : null;
   const modeOptions = !funding ? [] : funding.type === 'CREDIT_CARD' ? ['Credit Card'] : funding.type === 'CASH' ? ['Cash'] : ['Bank', 'UPI'];
   const mode = modeOptions.includes(form.mode) ? form.mode : (modeOptions[0] || '');
 
   const set = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }));
-  const changeType = (type) => setForm(prev => ({ ...prev, type, category: '', fromAccount: '', toAccount: '', mode: '' }));
+  const changeType = (type) => {
+    setForm(prev => ({ ...prev, type, category: '', fromAccount: '', toAccount: '', mode: '' }));
+    if (!SPLIT_TYPES.includes(type)) setSplits([]);
+  };
+
+  // ---- Personal / Office aur split ----
+  const isExpenseLike = EXPENSE_LIKE.includes(form.type);
+  const canSplit = SPLIT_TYPES.includes(form.type);
+  const expenseCategories = overview.categories.filter(c => c.type === 'EXPENSE' && (c.isActive || splits.some(s => s.category === c._id)));
+  const allocatedPaise = splits.reduce((sum, s) => sum + toPaise(s.amount), 0);
+  const remainingPaise = toPaise(form.amount) - allocatedPaise;
+
+  const toggleSplit = () => {
+    if (splitOn) {
+      // Split band: pehle hisse ki category aur nature wapas main form me
+      setForm(prev => ({ ...prev, category: splits[0]?.category || prev.category, nature: splits[0]?.nature || prev.nature }));
+      setSplits([]);
+    } else {
+      setSplits([
+        { nature: 'Personal', category: form.category || '', amount: '' },
+        { nature: 'Office', category: '', amount: '' }
+      ]);
+    }
+  };
+  const setSplit = (index, field, value) => setSplits(prev => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
+  const addSplit = () => setSplits(prev => (prev.length >= 10 ? prev : [...prev, { nature: 'Office', category: '', amount: remainingPaise > 0 ? (remainingPaise / 100).toFixed(2) : '' }]));
+  const removeSplit = (index) => setSplits(prev => prev.filter((_, i) => i !== index));
+  // Bacha hua paisa aakhri khali (ya aakhri) line me daal do
+  const fillRemaining = () => setSplits(prev => {
+    if (remainingPaise === 0 || prev.length === 0) return prev;
+    const target = prev.findIndex(s => !s.amount) >= 0 ? prev.findIndex(s => !s.amount) : prev.length - 1;
+    return prev.map((s, i) => (i === target ? { ...s, amount: ((toPaise(s.amount) + remainingPaise) / 100).toFixed(2) } : s));
+  });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -194,15 +260,24 @@ const TransactionForm = ({ api, overview, initial, onClose, onSaved }) => {
     if (!(Number(form.amount) > 0)) return toast.error('Amount must be more than zero');
     if (info.from && !fromAccount) return toast.error(`Please select ${info.fromLabel}`);
     if (info.to && !toAccount) return toast.error(`Please select ${info.toLabel}`);
-    if (info.cat && !info.catOptional && !form.category) return toast.error('Please select a category');
+    if (splitOn) {
+      if (splits.length < 2) return toast.error('A split needs at least 2 lines');
+      if (splits.some(s => !s.category)) return toast.error('Please select a category in every split line');
+      if (splits.some(s => !(Number(s.amount) > 0))) return toast.error('Every split line needs an amount');
+      if (remainingPaise !== 0) return toast.error(`Split total must equal the amount. ${remainingPaise > 0 ? 'Remaining' : 'Extra'}: ${money(Math.abs(remainingPaise) / 100)}`);
+    } else if (info.cat && !info.catOptional && !form.category) return toast.error('Please select a category');
+    if (info.cost && !(Number(form.cost) > 0)) return toast.error('Enter how much of your invested money you withdrew');
 
     setSaving(true);
     try {
       const payload = {
         type: form.type, date: form.date, particulars: form.particulars.trim(), amount: Number(form.amount), notes: form.notes.trim(),
-        category: info.cat ? form.category : '', mode,
+        category: info.cat && !splitOn ? form.category : '', mode,
         fromAccount: info.from ? fromAccount : '', toAccount: info.to ? toAccount : '',
-        linkedTransaction: form.type === 'Refund' ? form.linkedTransaction : ''
+        linkedTransaction: form.type === 'Refund' ? form.linkedTransaction : '',
+        cost: info.cost ? Number(form.cost) : undefined,
+        nature: isExpenseLike && !splitOn ? form.nature : undefined,
+        splits: splitOn ? splits.map(s => ({ nature: s.nature, category: s.category, amount: Number(s.amount) })) : []
       };
       if (editing) await api.put(`/transactions/${initial._id}`, payload);
       else await api.post('/transactions', { ...payload, requestId: requestId.current });
@@ -260,7 +335,7 @@ const TransactionForm = ({ api, overview, initial, onClose, onSaved }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {info.from && accountSelect(info.fromLabel, fromAccount, 'fromAccount', fromOptions)}
           {info.to && accountSelect(info.toLabel, toAccount, 'toAccount', toOptions)}
-          {info.cat && (
+          {info.cat && !splitOn && (
             <div>
               <label className={labelClass}>Category {info.catOptional ? '' : '*'}</label>
               <select value={form.category} onChange={set('category')} className={inputClass}>
@@ -277,6 +352,86 @@ const TransactionForm = ({ api, overview, initial, onClose, onSaved }) => {
             </select>
           </div>
         </div>
+
+        {/* 🔴 REDEMPTION: kitna lagaya tha + munafa / nuksaan */}
+        {info.cost && (
+          <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-3 space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Invested Amount Withdrawn (₹) *</label>
+                <input type="number" min="0.01" step="0.01" value={form.cost} onChange={set('cost')} placeholder="e.g. 3000" className={inputClass} />
+                {investmentAccount && <p className="text-[11px] text-slate-500 mt-1">Currently invested in {investmentAccount.name}: <b>{money(investmentAccount.balance)}</b></p>}
+              </div>
+              <div className="flex flex-col justify-end">
+                <p className={labelClass}>Profit / Loss</p>
+                <p className={`text-lg font-black ${redemptionProfit == null ? 'text-slate-300' : redemptionProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {redemptionProfit == null ? '—' : `${redemptionProfit >= 0 ? '+ ' : '- '}${money(Math.abs(redemptionProfit))}`}
+                </p>
+                <p className="text-[11px] text-slate-500">{redemptionProfit == null ? 'Amount received − invested amount' : redemptionProfit >= 0 ? 'Counted as income (Investment Profit)' : 'Counted as expense (Investment Loss)'}</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500">Example: SIP of ₹1,000 × 3 months = ₹3,000 invested. You withdraw and get ₹3,100 → Amount ₹3,100, Invested Amount Withdrawn ₹3,000, Profit ₹100.</p>
+          </div>
+        )}
+
+        {/* Personal / Office + Split */}
+        {isExpenseLike && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              {!splitOn ? (
+                <div>
+                  <label className={labelClass}>Expense For *</label>
+                  <div className="inline-flex bg-white border border-slate-200 rounded-xl p-0.5">
+                    {NATURES.map(n => (
+                      <button key={n} type="button" onClick={() => setForm(prev => ({ ...prev, nature: n }))}
+                        className={`text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${form.nature === n ? (n === 'Office' ? 'bg-blue-600 text-white' : 'bg-violet-600 text-white') : 'text-slate-600 hover:bg-slate-50'}`}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs font-bold text-slate-700">Split this amount into parts</p>
+              )}
+              {canSplit && (
+                <button type="button" onClick={toggleSplit} className={splitOn ? buttonGhost : `${buttonGhost} border-indigo-200 text-indigo-700`}>
+                  {splitOn ? <><X size={13} /> Remove split</> : <><ArrowLeftRight size={13} /> Split (Personal + Office)</>}
+                </button>
+              )}
+            </div>
+
+            {splitOn && (
+              <div className="space-y-2">
+                {splits.map((s, index) => (
+                  <div key={index} className="grid grid-cols-[96px_1fr_96px_28px] sm:grid-cols-[110px_1fr_120px_28px] gap-2 items-center">
+                    <select value={s.nature} onChange={(e) => setSplit(index, 'nature', e.target.value)} className={`${inputClass} px-2 font-bold ${s.nature === 'Office' ? 'text-blue-700' : 'text-violet-700'}`}>
+                      {NATURES.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <select value={s.category} onChange={(e) => setSplit(index, 'category', e.target.value)} className={inputClass}>
+                      <option value="">Select category</option>
+                      {expenseCategories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+                    </select>
+                    <input type="number" min="0.01" step="0.01" value={s.amount} onChange={(e) => setSplit(index, 'amount', e.target.value)} placeholder="0.00" className={inputClass} />
+                    <button type="button" title="Remove line" disabled={splits.length <= 2} onClick={() => removeSplit(index)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-30 disabled:hover:bg-transparent"><Trash2 size={13} /></button>
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex gap-2">
+                    <button type="button" onClick={addSplit} disabled={splits.length >= 10} className={buttonGhost}><Plus size={13} /> Add line</button>
+                    {remainingPaise !== 0 && Number(form.amount) > 0 && (
+                      <button type="button" onClick={fillRemaining} className={buttonGhost}>Fill remaining</button>
+                    )}
+                  </div>
+                  <p className={`text-[11px] font-bold ${remainingPaise === 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    Split {money(allocatedPaise / 100)} of {money(Number(form.amount || 0))}
+                    {remainingPaise === 0 ? ' · Matched' : ` · ${remainingPaise > 0 ? 'Remaining' : 'Extra'} ${money(Math.abs(remainingPaise) / 100)}`}
+                  </p>
+                </div>
+                <p className="text-[11px] text-slate-500">Account balance reduces once by the full amount. Reports show each part under its own category and Personal / Office.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         <div>
           <label className={labelClass}>Notes</label>
@@ -341,13 +496,17 @@ const DashboardTab = ({ overview, month, setMonth, goTo, openForm }) => {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <BalanceCard icon={Banknote} label="Cash Balance" value={totals.cash} tone="bg-emerald-50 text-emerald-600"><AccountLines accounts={ofType('CASH')} /></BalanceCard>
         <BalanceCard icon={Landmark} label="Bank Balance" value={totals.bank} tone="bg-blue-50 text-blue-600" note={`${ofType('BANK').length} bank account${ofType('BANK').length === 1 ? '' : 's'}`}><AccountLines accounts={ofType('BANK')} /></BalanceCard>
         <BalanceCard icon={Wallet} label="Total Available" value={totals.available} tone="bg-indigo-50 text-indigo-600" note="Cash + Bank (card limit not included)">
           {ofType('OTHER').length > 0 && <p className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">Wallet / Other (separate): <b className="text-slate-700">{money(totals.other)}</b></p>}
         </BalanceCard>
         <BalanceCard icon={CreditCard} label="Credit Card Outstanding" value={totals.cardOutstanding} tone="bg-rose-50 text-rose-600" note="Liability: amount you owe"><AccountLines accounts={ofType('CREDIT_CARD')} /></BalanceCard>
+        {/* 🔴 INVESTMENTS: alag box, Total Available me nahi judta */}
+        <BalanceCard icon={TrendingUp} label="Investments" value={totals.investment} tone="bg-violet-50 text-violet-600" note={`Invested amount · not in Total Available${Number(totals.investmentProfit) ? ` · Profit booked ${money(totals.investmentProfit)}` : ''}`}>
+          {ofType('INVESTMENT').length ? <AccountLines accounts={ofType('INVESTMENT')} /> : <button type="button" onClick={() => goTo('accounts')} className="mt-2 text-[11px] font-bold text-violet-700 hover:underline">+ Add an investment account</button>}
+        </BalanceCard>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -369,7 +528,23 @@ const DashboardTab = ({ overview, month, setMonth, goTo, openForm }) => {
             <p className={`text-lg font-black mt-0.5 ${monthSummary.net < 0 ? 'text-rose-700' : 'text-slate-800'}`}>{money(monthSummary.net)}</p>
           </div>
         </div>
-        <p className="text-[11px] text-slate-400 mt-2">Own-account transfers and card bill payments are not counted. Card purchases count as expense on the purchase date.</p>
+        {/* Kharche ka bantwara: apna vs office */}
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          {NATURES.map(n => {
+            const value = monthSummary.natureWise?.find(x => x.nature === n)?.amount || 0;
+            const share = monthSummary.expense > 0 ? Math.round((value / monthSummary.expense) * 100) : 0;
+            return (
+              <div key={n} className={`rounded-xl border px-3 py-2 ${n === 'Office' ? 'bg-blue-50/60 border-blue-100' : 'bg-violet-50/60 border-violet-100'}`}>
+                <p className={`text-[11px] font-bold uppercase ${n === 'Office' ? 'text-blue-700' : 'text-violet-700'}`}>{n} Expenses</p>
+                <p className="text-sm font-black text-slate-800">{money(value)} <span className="text-[11px] font-semibold text-slate-400">({share}%)</span></p>
+              </div>
+            );
+          })}
+        </div>
+        {(Number(monthSummary.invested) > 0 || Number(monthSummary.redeemed) > 0) && (
+          <p className="text-[11px] font-semibold text-violet-700 mt-2">Investments this month: put in {money(monthSummary.invested)} · withdrawn {money(monthSummary.redeemed)}{Number(monthSummary.investmentProfit) ? ` · ${Number(monthSummary.investmentProfit) >= 0 ? 'profit' : 'loss'} ${money(Math.abs(monthSummary.investmentProfit))} (already in income / expense)` : ''}</p>
+        )}
+        <p className="text-[11px] text-slate-400 mt-2">Own-account transfers, card bill payments and money put into investments are not counted. Card purchases count as expense on the purchase date. Profit on an investment withdrawal counts as income.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -467,7 +642,7 @@ const HistoryModal = ({ api, txn, onClose }) => {
 
 const TransactionsTab = ({ api, overview, refreshKey, openForm, onChanged }) => {
   const today = istToday();
-  const [filters, setFilters] = useState({ period: 'month', from: `${today.slice(0, 7)}-01`, to: today, account: '', category: '', type: '', mode: '', search: '', deleted: false });
+  const [filters, setFilters] = useState({ period: 'month', from: `${today.slice(0, 7)}-01`, to: today, account: '', category: '', type: '', mode: '', nature: '', search: '', deleted: false });
   const [page, setPage] = useState(1);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -483,8 +658,8 @@ const TransactionsTab = ({ api, overview, refreshKey, openForm, onChanged }) => 
 
   const params = useMemo(() => ({
     from: range.from, to: range.to, account: filters.account, category: filters.category, type: filters.type, mode: filters.mode,
-    search: filters.search.trim(), deleted: filters.deleted ? 'true' : ''
-  }), [range, filters.account, filters.category, filters.type, filters.mode, filters.search, filters.deleted]);
+    nature: filters.nature, search: filters.search.trim(), deleted: filters.deleted ? 'true' : ''
+  }), [range, filters.account, filters.category, filters.type, filters.mode, filters.nature, filters.search, filters.deleted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -520,12 +695,23 @@ const TransactionsTab = ({ api, overview, refreshKey, openForm, onChanged }) => 
   const getTable = async () => {
     const res = await api.get('/transactions', { params: { ...params, all: 'true' } });
     const s = res.data.summary;
-    const rows = [...res.data.data].reverse().map(t => [showDay(t.date), t.particulars, t.type, t.categoryName, t.mode, t.fromAccountName, t.toAccountName, t.amount]);
-    rows.push(['', '', '', '', '', '', 'Income', s.income], ['', '', '', '', '', '', 'Expenses', s.expense], ['', '', '', '', '', '', 'Net Cash Flow', s.net]);
+    // Split entry me har hissa "Personal / Grocery 50.00" ki tarah
+    const categoryText = (t) => (t.splits?.length ? t.splits.map(p => `${p.nature} / ${p.categoryName} ${plain(p.amount)}`).join('; ') : t.categoryName);
+    const natureText = (t) => (EXPENSE_LIKE.includes(t.type) ? t.nature : '');
+    const rows = [...res.data.data].reverse().map(t => [showDay(t.date), t.particulars, t.type, natureText(t), categoryText(t), t.mode, t.fromAccountName, t.toAccountName, t.amount]);
+    const personal = s.natureWise?.find(n => n.nature === 'Personal')?.amount || 0;
+    const office = s.natureWise?.find(n => n.nature === 'Office')?.amount || 0;
+    rows.push(
+      ['', '', '', '', '', '', '', 'Income', s.income],
+      ['', '', '', '', '', '', '', 'Expenses', s.expense],
+      ['', '', '', '', '', '', '', '  Personal', personal],
+      ['', '', '', '', '', '', '', '  Office', office],
+      ['', '', '', '', '', '', '', 'Net Cash Flow', s.net]
+    );
     return {
-      title: 'Personal Cash Flow - Transaction Ledger', subtitle: `Period: ${periodText}`,
-      columns: ['Date', 'Particulars', 'Type', 'Category', 'Mode', 'From Account', 'To Account', 'Amount (Rs.)'],
-      rows, numericFrom: 7, fileName: `Personal_Transactions_${range.from || 'all'}_${range.to || today}`
+      title: 'Personal Cash Flow - Transaction Ledger', subtitle: `Period: ${periodText}${filters.nature ? ` · ${filters.nature} only` : ''}`,
+      columns: ['Date', 'Particulars', 'Type', 'Personal / Office', 'Category', 'Mode', 'From Account', 'To Account', 'Amount (Rs.)'],
+      rows, numericFrom: 8, fileName: `Personal_Transactions_${range.from || 'all'}_${range.to || today}`
     };
   };
 
@@ -571,6 +757,10 @@ const TransactionsTab = ({ api, overview, refreshKey, openForm, onChanged }) => 
             <option value="">All Modes</option>
             {['Cash', 'Bank', 'UPI', 'Credit Card'].map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+          <select value={filters.nature} onChange={change('nature')} className={selectClass} title="Personal or Office expenses">
+            <option value="">Personal + Office</option>
+            {NATURES.map(n => <option key={n} value={n}>{n} only</option>)}
+          </select>
           <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 cursor-pointer select-none">
             <input type="checkbox" checked={filters.deleted} onChange={change('deleted')} className="rounded" /> Show removed
           </label>
@@ -579,8 +769,15 @@ const TransactionsTab = ({ api, overview, refreshKey, openForm, onChanged }) => 
       </div>
 
       {result && !filters.deleted && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[['Entries', result.totalCount, 'text-slate-800', false], ['Income', result.summary.income, 'text-emerald-700', true], ['Expenses', result.summary.expense, 'text-rose-700', true], ['Net Cash Flow', result.summary.net, result.summary.net < 0 ? 'text-rose-700' : 'text-slate-800', true]].map(([label, value, color, isMoney]) => (
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            ['Entries', result.totalCount, 'text-slate-800', false],
+            ['Income', result.summary.income, 'text-emerald-700', true],
+            ['Expenses', result.summary.expense, 'text-rose-700', true],
+            ['Personal Exp.', result.summary.natureWise?.find(n => n.nature === 'Personal')?.amount || 0, 'text-violet-700', true],
+            ['Office Exp.', result.summary.natureWise?.find(n => n.nature === 'Office')?.amount || 0, 'text-blue-700', true],
+            ['Net Cash Flow', result.summary.net, result.summary.net < 0 ? 'text-rose-700' : 'text-slate-800', true]
+          ].map(([label, value, color, isMoney]) => (
             <div key={label} className="bg-white border border-slate-200 rounded-xl px-3 py-2">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
               <p className={`text-sm font-black ${color}`}>{isMoney ? money(value) : value}</p>
@@ -613,18 +810,39 @@ const TransactionsTab = ({ api, overview, refreshKey, openForm, onChanged }) => 
                 return (
                   <tr key={t._id} className={`hover:bg-slate-50/60 ${loading ? 'opacity-60' : ''}`}>
                     <td className="px-3 py-2.5 whitespace-nowrap font-semibold text-slate-600">{showDay(t.date)}</td>
-                    <td className="px-3 py-2.5 max-w-[240px]">
+                    <td className="px-3 py-2.5 max-w-[260px]">
                       <p className="font-bold text-slate-800 truncate">{t.particulars}</p>
-                      <p className="text-[11px] text-slate-400 truncate">{[t.categoryName, t.notes].filter(Boolean).join(' · ')}</p>
+                      {t.splits?.length ? (
+                        <>
+                          {/* Split: har hissa alag (Personal / Office, category, raqam) */}
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {t.splits.map((p, i) => (
+                              <span key={i} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border whitespace-nowrap ${NATURE_STYLE[p.nature]}`}>
+                                {p.nature} · {p.categoryName} · {money(p.amount)}
+                              </span>
+                            ))}
+                          </div>
+                          {t.notes && <p className="text-[11px] text-slate-400 truncate mt-0.5">{t.notes}</p>}
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-slate-400 truncate">{[t.categoryName, t.notes].filter(Boolean).join(' · ')}</p>
+                      )}
                     </td>
-                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border whitespace-nowrap ${TYPE_STYLE[t.type]}`}>{t.type}</span></td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border whitespace-nowrap ${TYPE_STYLE[t.type]}`}>{t.type}</span>
+                        {EXPENSE_LIKE.includes(t.type) && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border whitespace-nowrap ${NATURE_STYLE[t.nature] || NATURE_STYLE.Personal}`}>{t.nature === 'Mixed' ? 'Split' : t.nature}</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{accountText(t)}</td>
                     <td className="px-3 py-2.5 text-slate-600">{t.mode}</td>
                     <td className={`px-3 py-2.5 text-right font-black whitespace-nowrap ${t.deletedAt ? 'text-slate-400 line-through' : amount.color}`}>{amount.text}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         {!t.deletedAt && ['Expense', 'Card Purchase'].includes(t.type) && (
-                          <button type="button" title="Record a refund for this" onClick={() => openForm({ type: 'Refund', linkedTransaction: t._id, category: t.category, toAccount: t.fromAccount, particulars: `Refund: ${t.particulars}`.slice(0, 200), amount: t.amount })} className="p-1.5 rounded-lg text-teal-600 hover:bg-teal-50"><RotateCcw size={13} /></button>
+                          <button type="button" title="Record a refund for this" onClick={() => openForm({ type: 'Refund', linkedTransaction: t._id, category: t.category || t.splits?.[0]?.category || '', nature: t.nature === 'Mixed' ? (t.splits?.[0]?.nature || 'Personal') : t.nature, toAccount: t.fromAccount, particulars: `Refund: ${t.particulars}`.slice(0, 200), amount: t.amount })} className="p-1.5 rounded-lg text-teal-600 hover:bg-teal-50"><RotateCcw size={13} /></button>
                         )}
                         {!t.deletedAt && <button type="button" title="Edit" onClick={() => openForm(t)} className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50"><Pencil size={13} /></button>}
                         <button type="button" title="Change history" onClick={() => setHistoryOf(t)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"><History size={13} /></button>
@@ -684,7 +902,7 @@ const AccountForm = ({ api, initial, onClose, onSaved }) => {
       <form onSubmit={submit} className="space-y-3">
         <div>
           <label className={labelClass}>Account Type *</label>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
             {Object.entries(ACCOUNT_TYPE_LABEL).map(([value, label]) => (
               <button key={value} type="button" onClick={() => setForm(prev => ({ ...prev, type: value }))}
                 className={`text-[11px] font-bold px-1 py-2 rounded-xl border ${form.type === value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{label}</button>
@@ -694,7 +912,7 @@ const AccountForm = ({ api, initial, onClose, onSaved }) => {
         </div>
         <div>
           <label className={labelClass}>Account Name *</label>
-          <input type="text" required maxLength={80} value={form.name} onChange={set('name')} placeholder={form.type === 'CASH' ? 'Cash in Hand' : form.type === 'CREDIT_CARD' ? 'HDFC Credit Card' : 'HDFC Savings (UPI)'} className={inputClass} />
+          <input type="text" required maxLength={80} value={form.name} onChange={set('name')} placeholder={form.type === 'CASH' ? 'Cash in Hand' : form.type === 'CREDIT_CARD' ? 'HDFC Credit Card' : form.type === 'INVESTMENT' ? 'Axis Bluechip SIP' : 'HDFC Savings (UPI)'} className={inputClass} />
         </div>
         <div>
           <label className={labelClass}>Bank / Institution</label>
@@ -702,7 +920,7 @@ const AccountForm = ({ api, initial, onClose, onSaved }) => {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelClass}>{form.type === 'CREDIT_CARD' ? 'Opening Outstanding (₹)' : 'Opening Balance (₹)'}</label>
+            <label className={labelClass}>{form.type === 'CREDIT_CARD' ? 'Opening Outstanding (₹)' : form.type === 'INVESTMENT' ? 'Already Invested (₹)' : 'Opening Balance (₹)'}</label>
             <input type="number" step="0.01" min={form.type === 'CREDIT_CARD' ? '0' : undefined} value={form.openingBalance} onChange={set('openingBalance')} placeholder="0.00" className={inputClass} />
           </div>
           <div>
@@ -725,7 +943,7 @@ const AccountForm = ({ api, initial, onClose, onSaved }) => {
 
 const AccountsTab = ({ api, overview, onChanged }) => {
   const [editing, setEditing] = useState(null); // null | {} (naya) | account
-  const icons = { CASH: Banknote, BANK: Landmark, CREDIT_CARD: CreditCard, OTHER: Wallet };
+  const icons = { CASH: Banknote, BANK: Landmark, CREDIT_CARD: CreditCard, OTHER: Wallet, INVESTMENT: TrendingUp };
 
   const remove = async (account) => {
     if (!window.confirm(`Delete account "${account.name}"?`)) return;
@@ -741,7 +959,7 @@ const AccountsTab = ({ api, overview, onChanged }) => {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">Set up one Cash account, your Bank accounts (UPI goes from these) and Credit Cards, each with an opening balance.</p>
+        <p className="text-xs text-slate-500">Set up one Cash account, your Bank accounts (UPI goes from these), Credit Cards and Investments (SIP, mutual fund, FD), each with an opening balance.</p>
         <button type="button" onClick={() => setEditing({})} className={`${buttonPrimary} shrink-0`}><Plus size={13} /> Add Account</button>
       </div>
       {overview.accounts.length === 0 ? (
@@ -765,7 +983,7 @@ const AccountsTab = ({ api, overview, onChanged }) => {
                     <button type="button" title="Delete" onClick={() => remove(account)} className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50"><Trash2 size={13} /></button>
                   </div>
                 </div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-3">{account.type === 'CREDIT_CARD' ? 'Outstanding' : 'Current Balance'}</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-3">{account.type === 'CREDIT_CARD' ? 'Outstanding' : account.type === 'INVESTMENT' ? 'Invested Amount' : 'Current Balance'}</p>
                 <p className={`text-lg font-black ${account.type === 'CREDIT_CARD' ? 'text-rose-700' : account.balance < 0 ? 'text-rose-700' : 'text-slate-800'}`}>{money(account.balance)}</p>
                 <p className="text-[11px] text-slate-400 mt-1">Opening {money(account.openingBalance)} as on {showDay(account.openingDate)}</p>
               </div>
@@ -842,7 +1060,7 @@ const CategoriesTab = ({ api, overview, onChanged }) => {
 // REPORTS TAB
 // ============================================================
 const REPORTS = [
-  ['monthly', 'Monthly Summary'], ['category', 'Category-wise Expense'], ['mode', 'Payment-mode Totals'],
+  ['monthly', 'Monthly Summary'], ['category', 'Category-wise Expense'], ['nature', 'Personal vs Office Expense'], ['mode', 'Payment-mode Totals'],
   ['daily', 'Daily Closing Balances'], ['ledger', 'Account Ledger']
 ];
 
@@ -899,6 +1117,17 @@ const ReportsTab = ({ api, overview, refreshKey }) => {
         title: 'Category-wise Expense', subtitle: period, fileName: file('Category_Expense'), numericFrom: 1,
         columns: ['Category', 'Expense (Rs.)', 'Share'],
         rows: [...data.summary.categoryWise.map(c => [c.name, c.amount, data.summary.expense > 0 ? `${((c.amount / data.summary.expense) * 100).toFixed(1)}%` : '']), ...(data.summary.categoryWise.length ? [['Total', data.summary.expense, '']] : [])]
+      };
+    }
+    if (report === 'nature') {
+      const list = data.summary.natureWise || [];
+      return {
+        title: 'Personal vs Office Expense', subtitle: period, fileName: file('Personal_vs_Office'), numericFrom: 1,
+        columns: ['Expense For', 'Expense (Rs.)', 'Share'],
+        rows: [
+          ...list.map(n => [n.nature, n.amount, data.summary.expense > 0 ? `${((n.amount / data.summary.expense) * 100).toFixed(1)}%` : '']),
+          ['Total', data.summary.expense, '']
+        ]
       };
     }
     if (report === 'mode') {
@@ -1019,7 +1248,8 @@ const CashFlowPanel = () => {
   const masked = (value) => (show ? money(value) : '₹ ••••••');
   const tiles = [
     ['Cash', totals?.cash, Banknote, 'text-emerald-600'], ['Bank', totals?.bank, Landmark, 'text-blue-600'],
-    ['Total Available', totals?.available, Wallet, 'text-indigo-600'], ['Card Outstanding', totals?.cardOutstanding, CreditCard, 'text-rose-600']
+    ['Total Available', totals?.available, Wallet, 'text-indigo-600'], ['Card Outstanding', totals?.cardOutstanding, CreditCard, 'text-rose-600'],
+    ['Investments', totals?.investment, TrendingUp, 'text-violet-600']
   ];
 
   return (

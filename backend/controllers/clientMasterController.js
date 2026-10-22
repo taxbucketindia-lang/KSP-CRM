@@ -18,7 +18,7 @@ import { calculateBusinessHealth, previousMonth } from '../utils/businessHealthE
 export const getClients = async (req, res) => {
   try {
     // 🔴 NAYA: page, limit, month, year, aur fetchAll frontend se aayega
-    const { search, type, status, page = 1, limit = 10, month, year, dues, fetchAll } = req.query;
+    const { search, type, status, page = 1, limit = 10, month, year, dues, fetchAll, workspace } = req.query;
     let filter = {};
 
     // Search Filtering
@@ -46,6 +46,29 @@ export const getClients = async (req, res) => {
         endDate.setDate(new Date(year, mIndex + 1, 0).getDate()); // Last day of month
       }
       filter.createdAt = { $gte: startDate, $lte: endDate };
+    }
+
+    // 🔴 WORKSPACE FILTER: jo client us workspace se juda hai (TDS PAN se judta hai). "None" = kisi se nahi
+    if (workspace && workspace !== 'All') {
+      const linkedIds = {
+        itr: () => ItrReturn.distinct('clientMasterId'),
+        gst: () => GstReturn.distinct('clientMasterId'),
+        roc: () => RocWorkspace.distinct('clientMasterId'),
+        audit: () => AuditEngagement.distinct('client_id', { is_active: true }),
+        fssai: () => FssaiWorkspace.distinct('clientMasterId'),
+        cfo: () => BusinessHealthMonthly.distinct('client')
+      };
+      const and = filter.$and || [];
+      if (workspace === 'tds') {
+        and.push({ pan: { $in: (await TdsWorkspace.distinct('pan')).filter(Boolean) } });
+      } else if (workspace === 'None') {
+        const lists = await Promise.all(Object.values(linkedIds).map(fn => fn()));
+        and.push({ _id: { $nin: lists.flat().filter(Boolean) } });
+        and.push({ pan: { $nin: (await TdsWorkspace.distinct('pan')).filter(Boolean) } });
+      } else if (linkedIds[workspace]) {
+        and.push({ _id: { $in: (await linkedIds[workspace]()).filter(Boolean) } });
+      }
+      if (and.length) filter.$and = and;
     }
 
     // 🔴 DUES FILTER + CARDS KA TOTAL (server par, poore filtered data par)
@@ -113,7 +136,7 @@ export const getClients = async (req, res) => {
       pageIds = pageIds.slice(skip, skip + parseInt(limit));
     }
 
-    const pageDocs = await ClientMaster.find({ _id: { $in: pageIds } }).lean();
+    const pageDocs = await ClientMaster.find({ _id: { $in: pageIds } }).populate('referredByBA', 'baName name').lean();
     const docById = new Map(pageDocs.map(doc => [String(doc._id), doc]));
     const clients = pageIds.map(id => docById.get(String(id))).filter(Boolean); // wahi order (naya pehle)
 
@@ -160,9 +183,15 @@ export const getClients = async (req, res) => {
 // ==========================================
 // Form khali chhodi hui dropdown / date ko '' bhejta hai. Fixed-list wale fields (constitution, accounting method)
 // aur dates me '' galat value maani jaati hai, isliye use "khali" (null) bana dete hain.
-const OPTIONAL_FIELDS = ['constitution', 'accounting_method', 'dob', 'date_of_incorporation', 'assignedRM'];
+const OPTIONAL_FIELDS = ['constitution', 'accounting_method', 'dob', 'date_of_incorporation', 'assignedRM', 'referredByBA'];
 const clearEmptyFields = (data) => {
   OPTIONAL_FIELDS.forEach(field => { if (data[field] === '') data[field] = null; });
+  // Source ke hisaab se sirf usi ka extra field rahe (BA ho toh BA, Reference ho toh naam, Other ho toh likha hua)
+  if (data.leadSource !== undefined) {
+    if (data.leadSource !== 'BA') data.referredByBA = null;
+    if (data.leadSource !== 'Reference') data.referenceName = '';
+    if (data.leadSource !== 'Other') data.otherSourceName = '';
+  }
   if (data.clientType === '') delete data.clientType; // khali ho toh default (Individual) lage
   return data;
 };
@@ -304,7 +333,7 @@ export const getRegistrationCandidates = async (req, res) => {
     }
 
     const candidates = await Client.find(filter)
-      .select('clientId assesseeName pan mobile email dob district state pinCode service businessName certificateNo applicationNo feeStatus createdAt')
+      .select('clientId assesseeName pan mobile email dob district state pinCode service businessName certificateNo applicationNo feeStatus createdAt leadSource referredByBA referenceName otherSourceName')
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();

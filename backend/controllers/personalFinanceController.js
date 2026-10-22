@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
-import { PfAccount, PfCategory, PfTransaction, ACCOUNT_TYPES, TRANSACTION_TYPES, CATEGORY_TYPES } from '../models/PersonalFinance.js';
+import { PfAccount, PfCategory, PfTransaction, ACCOUNT_TYPES, TRANSACTION_TYPES, CATEGORY_TYPES, NATURES } from '../models/PersonalFinance.js';
 import {
-  DEFAULT_CATEGORIES, isCard, collectMoves, accountBalance, balanceTotals,
+  DEFAULT_CATEGORIES, isCard, isInvestment, collectMoves, accountBalance, balanceTotals,
   summarize, monthlySummary, dailyClosing, accountLedger
 } from '../utils/personalFinanceEngine.js';
 
@@ -45,9 +45,10 @@ const liveMatch = (owner, extra = {}) => ({ owner, deletedAt: null, ...extra });
 
 // Har account ka in / out (database me hi jod kar): balance nikalne ke liye
 const loadMoves = async (owner) => {
+  const outValue = { $cond: [{ $and: [{ $eq: ['$type', 'Redemption'] }, { $isNumber: '$costPaise' }] }, '$costPaise', '$amountPaise'] };
   const group = (field) => PfTransaction.aggregate([
     { $match: liveMatch(owner, { [field]: { $ne: null } }) },
-    { $group: { _id: `$${field}`, total: { $sum: '$amountPaise' } } }
+    { $group: { _id: `$${field}`, total: { $sum: field === 'fromAccount' ? outValue : '$amountPaise' } } }
   ]);
   const [outs, ins] = await Promise.all([group('fromAccount'), group('toAccount')]);
   const moves = {};
@@ -83,6 +84,11 @@ const txnView = (txn, accountsById) => {
     toAccount: txn.toAccount,
     toAccountName: to?.name || '',
     amount: rupees(txn.amountPaise),
+    // Redemption: lagaya hua kitna nikla aur munafa / nuksaan
+    cost: Number.isFinite(txn.costPaise) ? rupees(txn.costPaise) : null,
+    profit: txn.type === 'Redemption' && Number.isFinite(txn.costPaise) ? rupees(txn.amountPaise - txn.costPaise) : null,
+    nature: txn.nature || 'Personal',
+    splits: (txn.splits || []).map(sp => ({ nature: sp.nature, category: sp.category, categoryName: sp.categoryName, amount: rupees(sp.amountPaise) })),
     linkedTransaction: txn.linkedTransaction,
     notes: txn.notes,
     createdByName: txn.createdByName,
@@ -100,14 +106,18 @@ const summaryView = (summary) => ({
   refunds: rupees(summary.refunds),
   transfers: rupees(summary.transfers),
   settlements: rupees(summary.settlements),
+  invested: rupees(summary.invested || 0),
+  redeemed: rupees(summary.redeemed || 0),
+  investmentProfit: rupees(summary.investmentProfit || 0),
   net: rupees(summary.net),
   categoryWise: summary.categoryWise.map(c => ({ name: c.name, amount: rupees(c.amount) })),
+  natureWise: summary.natureWise.map(n => ({ nature: n.nature, amount: rupees(n.amount) })),
   modeWise: summary.modeWise.map(m => ({ mode: m.mode, income: rupees(m.income), expense: rupees(m.expense), other: rupees(m.other) }))
 });
 
 const totalsView = (totals) => ({
   cash: rupees(totals.cash), bank: rupees(totals.bank), other: rupees(totals.other),
-  available: rupees(totals.available), cardOutstanding: rupees(totals.card)
+  available: rupees(totals.available), cardOutstanding: rupees(totals.card), investment: rupees(totals.investment || 0)
 });
 
 const byId = (list) => Object.fromEntries(list.map(item => [String(item._id), item]));
@@ -120,12 +130,13 @@ export const getOverview = run(async (req, res) => {
   await ensureCategories(owner);
 
   const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : istToday().slice(0, 7);
-  const [accounts, categories, moves, monthTxns, recent] = await Promise.all([
+  const [accounts, categories, moves, monthTxns, recent, profitRows] = await Promise.all([
     PfAccount.find({ owner }).sort({ type: 1, name: 1 }).lean(),
     PfCategory.find({ owner }).sort({ type: 1, name: 1 }).lean(),
     loadMoves(owner),
-    PfTransaction.find(liveMatch(owner, { date: { $gte: `${month}-01`, $lte: `${month}-31` } })).select('type amountPaise categoryName mode date').lean(),
-    PfTransaction.find(liveMatch(owner)).sort({ date: -1, createdAt: -1 }).limit(6).lean()
+    PfTransaction.find(liveMatch(owner, { date: { $gte: `${month}-01`, $lte: `${month}-31` } })).select('type amountPaise costPaise categoryName mode date nature splits').lean(),
+    PfTransaction.find(liveMatch(owner)).sort({ date: -1, createdAt: -1 }).limit(6).lean(),
+    PfTransaction.aggregate([{ $match: liveMatch(owner, { type: 'Redemption', costPaise: { $type: 'number' } }) }, { $group: { _id: null, profit: { $sum: { $subtract: ['$amountPaise', '$costPaise'] } } } }])
   ]);
 
   const accountsById = byId(accounts);
@@ -133,7 +144,7 @@ export const getOverview = run(async (req, res) => {
     month,
     accounts: accounts.map(a => accountView(a, moves)),
     categories,
-    totals: totalsView(balanceTotals(accounts, moves)),
+    totals: { ...totalsView(balanceTotals(accounts, moves)), investmentProfit: rupees(profitRows[0]?.profit || 0) },
     monthSummary: summaryView(summarize(monthTxns)),
     monthCount: monthTxns.length,
     recent: recent.map(t => txnView(t, accountsById))
@@ -238,8 +249,13 @@ export const updateCategory = run(async (req, res) => {
     if (error.code === 11000) fail('This category already exists');
     throw error;
   }
-  // Purani entries me bhi naya naam dikhe
+  // Purani entries me bhi naya naam dikhe (split ke hisson me bhi)
   await PfTransaction.updateMany({ owner, category: category._id }, { $set: { categoryName: category.name } });
+  await PfTransaction.updateMany(
+    { owner, 'splits.category': category._id },
+    { $set: { 'splits.$[part].categoryName': category.name } },
+    { arrayFilters: [{ 'part.category': category._id }] }
+  );
   res.json(category);
 });
 
@@ -248,7 +264,7 @@ export const deleteCategory = run(async (req, res) => {
   if (!validId(req.params.id)) fail('Category not found', 404);
   const category = await PfCategory.findOne({ _id: req.params.id, owner });
   if (!category) fail('Category not found', 404);
-  if (await PfTransaction.exists({ owner, category: category._id })) {
+  if (await PfTransaction.exists({ owner, $or: [{ category: category._id }, { 'splits.category': category._id }] })) {
     fail('This category is used in transactions, so it cannot be deleted. Turn it off instead.');
   }
   await category.deleteOne();
@@ -282,10 +298,14 @@ const readTransaction = async (owner, body) => {
     if (body.date < account.openingDate) fail(`Date cannot be before the opening balance date of ${account.name} (${account.openingDate})`);
     return account;
   };
-  const mustBeAsset = (account, label) => { if (isCard(account)) fail(`${label} must be a Cash / Bank account, not a credit card`); };
+  const mustBeAsset = (account, label) => {
+    if (isCard(account)) fail(`${label} must be a Cash / Bank account, not a credit card`);
+    if (isInvestment(account)) fail(`${label} must be a Cash / Bank account. For investments use the type "Investment" or "Redemption".`);
+  };
+  const mustBeInvestment = (account, label) => { if (!isInvestment(account)) fail(`${label} must be an Investment account`); };
   const mustBeCard = (account, label) => { if (!isCard(account)) fail(`${label} must be a credit card account`); };
 
-  let from = null, to = null, funding = null, categoryType = null, categoryRequired = false;
+  let from = null, to = null, funding = null, categoryType = null, categoryRequired = false, costPaise = null;
 
   if (type === 'Income') {
     to = await loadAccount(body.toAccount, 'Received In account'); mustBeAsset(to, 'Received In account');
@@ -293,6 +313,7 @@ const readTransaction = async (owner, body) => {
   } else if (type === 'Expense') {
     from = await loadAccount(body.fromAccount, 'Paid From account');
     if (isCard(from)) fail('For a credit card spend, choose the type "Card Purchase"');
+    if (isInvestment(from)) fail('You cannot spend directly from an investment. First record a "Redemption" into your bank / cash.');
     funding = from; categoryType = 'EXPENSE'; categoryRequired = true;
   } else if (type === 'Transfer') {
     from = await loadAccount(body.fromAccount, 'From account'); mustBeAsset(from, 'From account');
@@ -302,6 +323,17 @@ const readTransaction = async (owner, body) => {
   } else if (type === 'Card Purchase') {
     from = await loadAccount(body.fromAccount, 'Credit card'); mustBeCard(from, 'Credit card');
     funding = from; categoryType = 'EXPENSE'; categoryRequired = true;
+  } else if (type === 'Investment') {
+    // Bank / cash se investment (SIP, mutual fund, FD...): kharcha nahi, paisa ek jagah se doosri jagah
+    from = await loadAccount(body.fromAccount, 'Paid From account'); mustBeAsset(from, 'Paid From account');
+    to = await loadAccount(body.toAccount, 'Investment'); mustBeInvestment(to, 'Investment');
+    funding = from;
+  } else if (type === 'Redemption') {
+    // Investment se paisa wapas. amount = haath me aaya, cost = usme lagaya hua kitna tha. Farak = munafa (income) / nuksaan
+    from = await loadAccount(body.fromAccount, 'Investment'); mustBeInvestment(from, 'Investment');
+    to = await loadAccount(body.toAccount, 'Received In account'); mustBeAsset(to, 'Received In account');
+    funding = to;
+    costPaise = toPaise(body.cost, 'Invested amount withdrawn');
   } else if (type === 'Card Settlement') {
     from = await loadAccount(body.fromAccount, 'Paid From account'); mustBeAsset(from, 'Paid From account');
     to = await loadAccount(body.toAccount, 'Credit card'); mustBeCard(to, 'Credit card');
@@ -309,6 +341,7 @@ const readTransaction = async (owner, body) => {
   } else {
     // Refund: paisa wapas cash / bank me aaya, ya card ka bakaya kam hua
     to = await loadAccount(body.toAccount, 'Refund Received In account');
+    if (isInvestment(to)) fail('A refund cannot go into an investment account. Choose cash, bank or the credit card.');
     funding = to; categoryType = 'EXPENSE';
   }
 
@@ -318,7 +351,32 @@ const readTransaction = async (owner, body) => {
     category = await PfCategory.findOne({ _id: body.category, owner, type: categoryType }).lean();
     if (!category) fail('Category is not valid for this transaction type');
   }
-  if (categoryRequired && !category) fail('Category is required');
+  // ---- Personal / Office aur split ----
+  // Split: ek kharcha kai hisson me (jaise Rs. 50 Personal Grocery + Rs. 100 Office Stationery). Sirf Expense / Card Purchase me.
+  let nature = 'Personal';
+  let splits = [];
+  const wantsSplit = Array.isArray(body.splits) && body.splits.length > 0;
+  if (wantsSplit) {
+    if (!['Expense', 'Card Purchase'].includes(type)) fail('Split is available only for Expense and Card Purchase');
+    if (body.splits.length < 2) fail('A split needs at least 2 lines');
+    if (body.splits.length > 10) fail('A split can have at most 10 lines');
+    const ids = body.splits.map(line => String(line?.category || ''));
+    if (ids.some(id => !validId(id))) fail('Please select a category in every split line');
+    const found = byId(await PfCategory.find({ owner, type: 'EXPENSE', _id: { $in: ids } }).lean());
+    splits = body.splits.map((line, index) => {
+      if (!NATURES.includes(line.nature)) fail(`Split line ${index + 1}: choose Personal or Office`);
+      const cat = found[String(line.category)];
+      if (!cat) fail(`Split line ${index + 1}: category is not valid`);
+      return { nature: line.nature, category: cat._id, categoryName: cat.name, amountPaise: toPaise(line.amount, `Split line ${index + 1} amount`) };
+    });
+    const total = splits.reduce((sum, line) => sum + line.amountPaise, 0);
+    if (total !== amountPaise) fail(`Split lines add up to Rs. ${rupees(total)}, but the amount is Rs. ${rupees(amountPaise)}. They must be equal.`);
+    const kinds = [...new Set(splits.map(line => line.nature))];
+    nature = kinds.length === 1 ? kinds[0] : 'Mixed';
+  } else if (categoryType === 'EXPENSE') {
+    nature = NATURES.includes(body.nature) ? body.nature : 'Personal';
+  }
+  if (categoryRequired && !category && !splits.length) fail('Category is required');
 
   // Payment mode account ke hisaab se: UPI koi alag balance nahi, wo bank account se hi jata hai
   let mode = body.mode;
@@ -334,9 +392,12 @@ const readTransaction = async (owner, body) => {
 
   return {
     doc: {
-      date: body.date, particulars, type, mode, amountPaise, notes, linkedTransaction,
-      category: category?._id || null,
-      categoryName: category?.name || (type === 'Transfer' ? 'Own Account Transfer' : type === 'Card Settlement' ? 'Card Settlement' : ''),
+      date: body.date, particulars, type, mode, amountPaise, costPaise: type === 'Redemption' ? costPaise : null, notes, linkedTransaction, nature, splits,
+      category: splits.length ? null : (category?._id || null),
+      categoryName: splits.length
+        ? [...new Set(splits.map(line => line.categoryName))].join(', ').slice(0, 120)
+        : category?.name || (type === 'Transfer' ? 'Own Account Transfer' : type === 'Card Settlement' ? 'Card Settlement'
+          : type === 'Investment' ? 'Investment' : type === 'Redemption' ? (amountPaise >= costPaise ? 'Investment Profit' : 'Investment Loss') : ''),
       fromAccount: from?._id || null,
       toAccount: to?._id || null
     },
@@ -350,10 +411,13 @@ const auditShape = (doc, names) => ({
   Particulars: doc.particulars,
   Type: doc.type,
   Category: doc.categoryName || '',
+  Nature: doc.nature || 'Personal',
+  Split: (doc.splits || []).map(line => `${line.nature} / ${line.categoryName}: ${rupees(line.amountPaise)}`).join('; '),
   'Payment Mode': doc.mode,
   'From Account': names.from,
   'To Account': names.to,
   Amount: rupees(doc.amountPaise),
+  'Invested Amount Withdrawn': Number.isFinite(doc.costPaise) ? rupees(doc.costPaise) : '',
   Notes: doc.notes || ''
 });
 
@@ -372,7 +436,7 @@ const sendTransaction = async (owner, txn, res, status = 200) => {
 
 export const getTransactions = run(async (req, res) => {
   const owner = req.user._id;
-  const { from, to, account, category, type, mode, search, deleted, all } = req.query;
+  const { from, to, account, category, type, mode, search, deleted, all, nature } = req.query;
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 15));
 
@@ -382,14 +446,27 @@ export const getTransactions = run(async (req, res) => {
     if (validDay(from)) query.date.$gte = from;
     if (validDay(to)) query.date.$lte = to;
   }
-  if (account && validId(account)) query.$or = [{ fromAccount: account }, { toAccount: account }];
-  if (category && validId(category)) query.category = category;
+  const and = [];
+  if (account && validId(account)) and.push({ $or: [{ fromAccount: account }, { toAccount: account }] });
+  // Category split ke hisse me bhi ho sakti hai
+  if (category && validId(category)) and.push({ $or: [{ category }, { 'splits.category': category }] });
+  // Personal / Office: sirf kharche wali entries; purani entries (nature nahi) Personal maani jati hain
+  const natureFilter = NATURES.includes(nature) ? nature : '';
+  if (natureFilter) {
+    and.push({ type: { $in: ['Expense', 'Card Purchase', 'Refund'] } });
+    and.push({ $or: [
+      { nature: natureFilter },
+      { 'splits.nature': natureFilter },
+      ...(natureFilter === 'Personal' ? [{ nature: { $exists: false } }, { nature: null }] : [])
+    ] });
+  }
   if (TRANSACTION_TYPES.includes(type)) query.type = type;
   if (['Cash', 'Bank', 'Credit Card', 'UPI'].includes(mode)) query.mode = mode;
   if (search && String(search).trim()) {
     const safe = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    query.$and = [{ $or: [{ particulars: new RegExp(safe, 'i') }, { notes: new RegExp(safe, 'i') }, { categoryName: new RegExp(safe, 'i') }] }];
+    and.push({ $or: [{ particulars: new RegExp(safe, 'i') }, { notes: new RegExp(safe, 'i') }, { categoryName: new RegExp(safe, 'i') }] });
   }
+  if (and.length) query.$and = and;
 
   let finder = PfTransaction.find(query).sort({ date: -1, createdAt: -1 }).select('-history');
   if (all !== 'true') finder = finder.skip((page - 1) * limit).limit(limit);
@@ -398,7 +475,7 @@ export const getTransactions = run(async (req, res) => {
     finder.lean(),
     PfTransaction.countDocuments(query),
     // Filter ke hisaab se totals (poore filter par, sirf current page par nahi)
-    PfTransaction.find(query).select('type amountPaise categoryName mode').lean(),
+    PfTransaction.find(query).select('type amountPaise costPaise categoryName mode nature splits').lean(),
     PfAccount.find({ owner }).lean()
   ]);
 
@@ -408,7 +485,7 @@ export const getTransactions = run(async (req, res) => {
     totalCount,
     page,
     totalPages: Math.max(1, Math.ceil(totalCount / limit)),
-    summary: summaryView(summarize(forTotals))
+    summary: summaryView(summarize(forTotals, { nature: natureFilter }))
   });
 });
 
@@ -495,7 +572,7 @@ const readRange = (query) => {
   return { from, to };
 };
 
-const ledgerFields = 'date particulars type categoryName mode fromAccount toAccount amountPaise notes createdAt';
+const ledgerFields = 'date particulars type categoryName mode fromAccount toAccount amountPaise costPaise notes createdAt nature splits';
 
 export const getReports = run(async (req, res) => {
   const owner = req.user._id;
@@ -503,7 +580,7 @@ export const getReports = run(async (req, res) => {
 
   const [accounts, prior, inRange] = await Promise.all([
     PfAccount.find({ owner }).lean(),
-    PfTransaction.find(liveMatch(owner, { date: { $lt: from } })).select('fromAccount toAccount amountPaise').lean(),
+    PfTransaction.find(liveMatch(owner, { date: { $lt: from } })).select('type fromAccount toAccount amountPaise costPaise').lean(),
     PfTransaction.find(liveMatch(owner, { date: { $gte: from, $lte: to } })).select(ledgerFields).sort({ date: 1, createdAt: 1 }).lean()
   ]);
 
@@ -525,7 +602,7 @@ export const getAccountLedger = run(async (req, res) => {
   const touches = { $or: [{ fromAccount: account._id }, { toAccount: account._id }] };
   const [accounts, prior, inRange] = await Promise.all([
     PfAccount.find({ owner }).lean(),
-    PfTransaction.find(liveMatch(owner, { ...touches, date: { $lt: from } })).select('fromAccount toAccount amountPaise').lean(),
+    PfTransaction.find(liveMatch(owner, { ...touches, date: { $lt: from } })).select('type fromAccount toAccount amountPaise costPaise').lean(),
     PfTransaction.find(liveMatch(owner, { ...touches, date: { $gte: from, $lte: to } })).select(ledgerFields).sort({ date: 1, createdAt: 1 }).lean()
   ]);
 

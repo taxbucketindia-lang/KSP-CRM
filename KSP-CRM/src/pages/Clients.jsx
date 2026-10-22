@@ -926,7 +926,29 @@ const Clients = () => {
                     )}
                   </span>
                 </div>
-                
+
+                {/* 🔴 CLIENT KAHAN SE AAYA (source + reference / BA / other) */}
+                {(() => {
+                  const src = clientToView.leadSource;
+                  const label = ({ Google: 'Google Ads', FB: 'Facebook', Insta: 'Instagram', BA: 'Business Associate (BA)', Website: 'Website Form' })[src] || src;
+                  const baId = clientToView.referredByBA?._id || clientToView.referredByBA;
+                  const baName = clientToView.referredByBA?.baName || clientToView.referredByBA?.name || bas.find(b => String(b._id) === String(baId))?.baName || bas.find(b => String(b._id) === String(baId))?.name;
+                  const extra = src === 'Reference' ? ['Reference Name', clientToView.referenceName]
+                    : src === 'BA' ? ['BA Partner', baName]
+                      : src === 'Other' ? ['Other Source', clientToView.otherSourceName] : null;
+                  return (
+                    <div className="col-span-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Client Source</p>
+                      <span className={`text-sm font-bold ${src ? 'text-slate-800' : 'text-slate-300'}`}>{label || 'Not added'}</span>
+                      {extra && (
+                        <p className="text-xs font-semibold text-slate-600 mt-1">
+                          <span className="text-slate-400">{extra[0]}:</span> <span className={extra[1] ? 'text-emerald-700 font-bold' : 'text-slate-300'}>{extra[1] || 'Not added'}</span>
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* 🔴 UPDATED */}
                 {['ITR Filing', 'GST Registration', 'FSSAI Registration'].includes(clientToView.service) && (
                   <div className="col-span-2">

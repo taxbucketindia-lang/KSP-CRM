@@ -9,8 +9,25 @@ import {
   ClipboardList, Search, Clock, CheckCircle2, AlertCircle, Plus, 
   X, User, Briefcase, Calendar, Flag, FileText, UploadCloud, 
   MessageSquare, UserCircle, Activity, Play, Pause, ChevronRight, RefreshCw, ChevronDown, Phone,
-  LayoutGrid, List, BarChart3, Eye, HelpCircle, Pencil, Trash2, Landmark, FilterX, ChevronLeft, CalendarClock
+  LayoutGrid, List, BarChart3, Eye, HelpCircle, Pencil, Trash2, Landmark, FilterX, ChevronLeft, CalendarClock,
+  ArrowRight, Send, Sun, Inbox, UserCheck, Loader2
 } from 'lucide-react';
+
+// 🔴 Kaam ke 5 bade step (beech ke Pending wale "In Progress" me gine jaate hain)
+const TASK_STEPS = ['Not Started', 'Started', 'In Progress', 'Under Review', 'Completed'];
+const stepIndexOf = (status) => {
+  if (status === 'Completed') return 4;
+  if (status === 'Under Review' || status === 'Approved') return 3;
+  if (['In Progress', 'Pending Client', 'Pending Government', 'Pending Internal', 'Correction Required'].includes(status)) return 2;
+  if (status === 'Started') return 1;
+  return 0;
+};
+
+// Remarks "📅 date | 👤 naam\n💬 baat" ke tukde -> timeline (sabse naya upar)
+const parseRemarks = (text) => String(text || '').split(/\n\s*\n/).map(block => block.trim()).filter(Boolean).map(block => {
+  const m = block.match(/^📅\s*(.+?)\s*\|\s*👤\s*(.+?)\n💬\s*([\s\S]*)$/);
+  return m ? { when: m[1], who: m[2], text: m[3].trim() } : { when: '', who: '', text: block };
+}).reverse();
 
 const WorkManagement = () => {
   const { user } = useContext(AuthContext);
@@ -22,6 +39,11 @@ const WorkManagement = () => {
   const [loading, setLoading] = useState(true);
 
   const [viewMode, setViewMode] = useState('list'); 
+  // 🔴 Tabs (sirf assign karne walon ke liye): all = sab, mine = mujhe mile, byMe = maine diye
+  const [scope, setScope] = useState('all');
+  const [busyTaskId, setBusyTaskId] = useState(null); // ek-click step chal raha hai
+  const [viewNote, setViewNote] = useState('');       // task kholne par seedha update likhna
+  const [postingNote, setPostingNote] = useState(false);
 
   // Modal & Search States
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
@@ -118,7 +140,8 @@ const WorkManagement = () => {
         priority: priorityFilter,
         employee: employeeFilter,
         startDate: dateFilter.start,
-        endDate: dateFilter.end
+        endDate: dateFilter.end,
+        scope
       };
 
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/tasks/paginated`, { headers, params });
@@ -138,12 +161,12 @@ const WorkManagement = () => {
   useEffect(() => {
     fetchTasks();
     // eslint-disable-next-line
-  }, [currentPage, viewMode, searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter]);
+  }, [currentPage, viewMode, searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter, scope]);
 
   // Reset page when filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter, viewMode]);
+  }, [searchQuery, statusFilter, priorityFilter, employeeFilter, dateFilter, viewMode, scope]);
 
   // 3. EOD FETCH ONLY WHEN NEEDED
   useEffect(() => {
@@ -359,6 +382,7 @@ const WorkManagement = () => {
 
   const handleOpenView = (task) => {
     setTaskToView(task);
+    setViewNote('');
     setIsViewModalOpen(true);
   };
 
@@ -379,6 +403,60 @@ const WorkManagement = () => {
     });
     setIsEditModalOpen(true);
   };
+
+  // 🔴 KAAM KARNE WALE KE LIYE: agla step ek click me (popup kholne ki zaroorat nahi)
+  const canUpdateTask = (task) => !!task && (isMyTask(task) || isAdmin);
+  const nextStep = (task) => {
+    if (!task || !isMyTask(task)) return null;
+    switch (task.currentStatus) {
+      case 'Not Started': return { label: 'Start', status: 'Started', tone: 'bg-teal-600 hover:bg-teal-700' };
+      case 'Started': return { label: 'In Progress', status: 'In Progress', tone: 'bg-blue-600 hover:bg-blue-700' };
+      case 'In Progress': case 'Pending Client': case 'Pending Government': case 'Pending Internal': case 'Correction Required':
+        return task.reviewer
+          ? { label: 'Submit for Review', status: 'Under Review', tone: 'bg-purple-600 hover:bg-purple-700' }
+          : { label: 'Mark Done', status: 'Completed', tone: 'bg-emerald-600 hover:bg-emerald-700' };
+      case 'Approved': return task.reviewer ? null : { label: 'Mark Done', status: 'Completed', tone: 'bg-emerald-600 hover:bg-emerald-700' };
+      default: return null;
+    }
+  };
+  // Review karne wala (reviewer ya manager, jiska khud ka task nahi)
+  const needsMyReview = (task) => task?.currentStatus === 'Under Review' && !isMyTask(task) && (isAdmin || task.reviewer?._id === myId);
+
+  const quickStatus = async (task, status) => {
+    if (status === 'Completed' && !window.confirm(`Mark "${taskName(task)}" as Completed?`)) return;
+    setBusyTaskId(task._id);
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const res = await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${task._id}/status`, { currentStatus: status, remarks: `Moved to ${status}` }, { headers });
+      toast.success(`${task.taskId}: ${status}`);
+      if (taskToView?._id === task._id) setTaskToView(prev => ({ ...prev, currentStatus: res.data.currentStatus, remarks: res.data.remarks }));
+      fetchTasks();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not update the task');
+    } finally {
+      setBusyTaskId(null);
+    }
+  };
+
+  // Task details me seedha update likhna (status wahi rehta hai)
+  const postViewNote = async () => {
+    if (!viewNote.trim() || !taskToView) return;
+    setPostingNote(true);
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      const res = await axios.put(`${import.meta.env.VITE_API_URL}/tasks/${taskToView._id}/status`, { currentStatus: taskToView.currentStatus, remarks: viewNote.trim() }, { headers });
+      setTaskToView(prev => ({ ...prev, remarks: res.data.remarks }));
+      setViewNote('');
+      toast.success('Update posted');
+      fetchTasks();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not post the update');
+    } finally {
+      setPostingNote(false);
+    }
+  };
+
+  const lastUpdateOf = (task) => parseRemarks(task?.remarks)[0] || null;
 
   // 🔴 UI HELPERS (sirf dikhane ke liye)
   // Due date ka rang: late = laal, aaj = peela, baaki = saada (pehle har date laal dikhti thi)
@@ -403,6 +481,7 @@ const WorkManagement = () => {
     { key: 'pendingClient', label: 'Pending Client', filter: 'Pending Client', icon: Clock, chip: 'bg-amber-50 text-amber-600', ring: 'ring-amber-500', text: 'text-amber-700' },
     { key: 'underReview', label: 'Under Review', filter: 'Under Review', icon: Eye, chip: 'bg-purple-50 text-purple-600', ring: 'ring-purple-500', text: 'text-purple-700' },
     { key: 'completed', label: 'Completed', filter: 'Completed', icon: CheckCircle2, chip: 'bg-emerald-50 text-emerald-600', ring: 'ring-emerald-500', text: 'text-emerald-700' },
+    { key: 'dueToday', label: 'Due Today', filter: 'DUE_TODAY', icon: Sun, chip: 'bg-orange-50 text-orange-600', ring: 'ring-orange-500', text: 'text-orange-700' },
     { key: 'overdue', label: 'Overdue', filter: 'OVERDUE', icon: AlertCircle, chip: 'bg-rose-50 text-rose-600', ring: 'ring-rose-500', text: 'text-rose-700' }
   ];
   const completionRate = serverStats.total ? Math.round((serverStats.completed / serverStats.total) * 100) : 0;
@@ -564,7 +643,7 @@ const WorkManagement = () => {
       {(viewMode === 'list' || viewMode === 'board') && (
         <>
           {/* STAT CARDS: filter ke hisaab se; click karne par us status ka filter lagta hai */}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
             {statCards.map((card) => {
               const Icon = card.icon;
               const active = card.filter !== 'ALL' && statusFilter === card.filter;
@@ -595,6 +674,19 @@ const WorkManagement = () => {
           <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden mb-4">
             {/* FILTERS */}
             <div className="p-4 border-b border-slate-100 space-y-3">
+              {/* 🔴 TABS: sab / mujhe mile / maine diye (assign karne walon ke liye) */}
+              {isAdmin ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[['all', 'All Tasks', ClipboardList], ['mine', 'My Tasks', Inbox], ['byMe', 'Assigned by Me', UserCheck]].map(([value, label, Icon]) => (
+                    <button key={value} type="button" onClick={() => setScope(value)}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-colors ${scope === value ? 'bg-slate-900 text-white border-slate-900 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                      <Icon size={14} /> {label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5"><Inbox size={14} className="text-blue-500" /> Tasks assigned to you. Use the coloured button on a task to move it to the next step.</p>
+              )}
               <div className="flex flex-col lg:flex-row lg:items-center gap-3">
                 <div className="relative w-full lg:w-80 shrink-0">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -632,6 +724,7 @@ const WorkManagement = () => {
                     <option value="Pending Internal">⏳ Pending Internal</option>
                     <option value="Under Review">👀 Submit for Review</option>
                     <option value="Completed">✅ Completed</option>
+                    <option value="DUE_TODAY">☀️ Due Today</option>
                     <option value="OVERDUE">🚨 Overdue Tasks</option>
                   </select>
 
@@ -744,6 +837,12 @@ const WorkManagement = () => {
                                 {task.taskTitle && task.clientName && (
                                   <div className="text-[11px] text-slate-500 mt-0.5 font-medium pl-[22px] truncate">Client: {task.clientName}</div>
                                 )}
+                                {/* Aakhri update: kisne, kab, kya */}
+                                {(() => { const last = lastUpdateOf(task); return last ? (
+                                  <div className="mt-1 pl-[22px] text-[11px] text-slate-500 truncate" title={`${last.who} · ${last.when}\n${last.text}`}>
+                                    <MessageSquare size={10} className="inline mr-1 text-slate-400" /><span className="font-semibold text-slate-600">{last.who ? `${last.who.split(' ')[0]}: ` : ''}</span>{last.text}
+                                  </div>
+                                ) : null; })()}
                               </td>
 
                               <td className="py-3.5 px-4">
@@ -797,12 +896,29 @@ const WorkManagement = () => {
                                       </button>
                                     </>
                                   )}
-                                  <button onClick={() => handleOpenView(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg transition-all border border-slate-200" title="View Details">
-                                    <Eye size={13} strokeWidth={2.5}/> View
+                                  <button onClick={() => handleOpenView(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg transition-all border border-slate-200" title="Open task">
+                                    <Eye size={13} strokeWidth={2.5}/> Open
                                   </button>
-                                  <button onClick={() => handleOpenUpdate(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-all shadow-sm" title="Update Status">
-                                    <Play size={13} strokeWidth={2.5}/> Update
-                                  </button>
+                                  {/* Agla step ek click me (sirf jiska task hai) / review (manager) / warna poora update */}
+                                  {(() => {
+                                    const step = nextStep(task);
+                                    if (step) return (
+                                      <button onClick={() => quickStatus(task, step.status)} disabled={busyTaskId === task._id} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-lg transition-all shadow-sm disabled:opacity-60 whitespace-nowrap ${step.tone}`} title={`Move to ${step.status}`}>
+                                        {busyTaskId === task._id ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} strokeWidth={2.5}/>} {step.label}
+                                      </button>
+                                    );
+                                    if (needsMyReview(task)) return (
+                                      <button onClick={() => handleOpenUpdate(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-all shadow-sm whitespace-nowrap" title="Review this task">
+                                        <UserCheck size={13} strokeWidth={2.5}/> Review
+                                      </button>
+                                    );
+                                    return null;
+                                  })()}
+                                  {canUpdateTask(task) && (
+                                    <button onClick={() => handleOpenUpdate(task)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-lg transition-all border border-indigo-200" title="Update status, follow-up or remark">
+                                      <Play size={13} strokeWidth={2.5}/> Update
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -929,9 +1045,20 @@ const WorkManagement = () => {
                                   </span>
                                 </div>
 
-                                <button onClick={(e) => { e.stopPropagation(); handleOpenUpdate(task); }} className="w-full mt-3 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white text-[11px] font-bold py-1.5 rounded-lg border border-indigo-100 hover:border-indigo-600 transition-colors">
-                                  Update Status
-                                </button>
+                                <div className="flex gap-1.5 mt-3">
+                                  {(() => { const step = nextStep(task); return step ? (
+                                    <button onClick={(e) => { e.stopPropagation(); quickStatus(task, step.status); }} disabled={busyTaskId === task._id} className={`flex-1 inline-flex items-center justify-center gap-1 text-white text-[11px] font-bold py-1.5 rounded-lg transition-colors disabled:opacity-60 ${step.tone}`}>
+                                      {busyTaskId === task._id ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />} {step.label}
+                                    </button>
+                                  ) : needsMyReview(task) ? (
+                                    <button onClick={(e) => { e.stopPropagation(); handleOpenUpdate(task); }} className="flex-1 inline-flex items-center justify-center gap-1 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold py-1.5 rounded-lg"><UserCheck size={12} /> Review</button>
+                                  ) : null; })()}
+                                  {canUpdateTask(task) && (
+                                    <button onClick={(e) => { e.stopPropagation(); handleOpenUpdate(task); }} className="flex-1 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white text-[11px] font-bold py-1.5 rounded-lg border border-indigo-100 hover:border-indigo-600 transition-colors">
+                                      Update
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             );
                           })
@@ -1196,9 +1323,14 @@ const WorkManagement = () => {
               
               {taskToUpdate.remarks && (
                 <div>
-                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Previous Remarks History</label>
-                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl max-h-32 overflow-y-auto text-xs whitespace-pre-wrap font-mono text-slate-600 custom-scrollbar shadow-inner">
-                     {taskToUpdate.remarks}
+                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Recent Updates</label>
+                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl max-h-40 overflow-y-auto custom-scrollbar space-y-2">
+                     {parseRemarks(taskToUpdate.remarks).slice(0, 6).map((r, i) => (
+                       <div key={i} className="text-xs">
+                         <p className="text-[10px] font-bold text-slate-400">{r.who || 'Note'}{r.when ? ` · ${r.when}` : ''}</p>
+                         <p className="text-slate-700 whitespace-pre-wrap">{r.text}</p>
+                       </div>
+                     ))}
                    </div>
                 </div>
               )}
@@ -1396,101 +1528,141 @@ const WorkManagement = () => {
         </div>
       )}
 
-      {/* 🔴 MODAL: VIEW TASK DETAILS (READ ONLY) */}
-      {isViewModalOpen && taskToView && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-              <div>
-                <h2 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
-                  <FileText className="text-blue-600" size={20}/> Task Details
-                </h2>
-                <span className="font-bold text-blue-600 font-mono text-[10px] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded mt-1 inline-block">{taskToView.taskId}</span>
+      {/* 🔴 MODAL: TASK DETAILS (progress, timeline, seedha update) */}
+      {isViewModalOpen && taskToView && (() => {
+        const t = taskToView;
+        const due = dueInfo(t);
+        const stepIdx = stepIndexOf(t.currentStatus);
+        const step = nextStep(t);
+        const timeline = parseRemarks(t.remarks);
+        return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-3 sm:p-4" onClick={() => setIsViewModalOpen(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+              <div className="flex justify-between items-start gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                    <span className="font-bold text-blue-700 font-mono text-[11px] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">{t.taskId}</span>
+                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${getStatusStyle(t.currentStatus)}`}>{t.currentStatus}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getPriorityStyle(t.priority)}`}><Flag size={10} className="inline mr-0.5" />{t.priority}</span>
+                    {t.govStatus && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700"><Landmark size={10} className="inline mr-0.5" />{t.govStatus}</span>}
+                  </div>
+                  <h2 className="text-lg font-black text-slate-800 leading-snug">{taskName(t)}</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">{t.serviceCategory}{t.subService ? ` › ${t.subService}` : ''}{t.taskTitle && t.clientName ? ` · Client: ${t.clientName}` : ''}</p>
+                </div>
+                <button onClick={() => setIsViewModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors shrink-0"><X size={18} /></button>
               </div>
-              <button onClick={() => setIsViewModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"><X size={18} /></button>
-            </div>
-            
-            <div className="overflow-y-auto p-6 space-y-6 custom-scrollbar text-sm">
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div className="col-span-2 md:col-span-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Task Title / Name</p>
-                  <p className="font-bold text-slate-800">{taskToView.taskTitle || taskToView.clientName || 'Internal Task'}</p>
-                </div>
-                {taskToView.clientName && (
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Associated Client</p>
-                    <p className="font-bold text-slate-700">{taskToView.clientName}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Our Status</p>
-                  <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border shadow-sm ${getStatusStyle(taskToView.currentStatus)}`}>{taskToView.currentStatus}</span>
-                </div>
-                {/* 🔴 GOVT STATUS DISPLAY */}
-                {taskToView.govStatus && (
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Gov. Status</p>
-                    <span className="px-2.5 py-1 rounded-md text-[11px] font-bold border border-purple-200 bg-purple-50 text-purple-700 shadow-sm whitespace-nowrap">
-                      🏛️ {taskToView.govStatus}
-                    </span>
-                  </div>
-                )}
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Priority & Due Date</p>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getPriorityStyle(taskToView.priority)}`}>{taskToView.priority}</span>
-                    <span className={`text-[11px] font-bold ${taskViewIsOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
-                      <Calendar size={12} className="inline mr-1 text-slate-400"/>{taskToView.dueDate ? `${formatIstDate(taskToView.dueDate)}, ${formatIstTime(taskToView.dueDate)}` : 'N/A'}
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned To</p>
-                  <div className="flex items-center gap-1.5">
-                    <div className="h-5 w-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-[9px] font-bold shrink-0">
-                      {taskToView.assignedTo?.name ? taskToView.assignedTo.name.charAt(0).toUpperCase() : 'E'}
+
+              {/* Progress: 5 step */}
+              <div className="mt-4 flex items-center">
+                {TASK_STEPS.map((label, i) => (
+                  <React.Fragment key={label}>
+                    <div className="flex flex-col items-center gap-1 min-w-0">
+                      <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-black border-2 ${i < stepIdx ? 'bg-emerald-500 border-emerald-500 text-white' : i === stepIdx ? 'bg-blue-600 border-blue-600 text-white ring-4 ring-blue-100' : 'bg-white border-slate-200 text-slate-400'}`}>
+                        {i < stepIdx ? <CheckCircle2 size={13} /> : i + 1}
+                      </span>
+                      <span className={`text-[9px] sm:text-[10px] font-bold text-center leading-tight ${i <= stepIdx ? 'text-slate-700' : 'text-slate-400'}`}>{i === 2 && stepIdx === 2 && t.currentStatus !== 'In Progress' ? t.currentStatus : label}</span>
                     </div>
-                    <span className="font-bold text-slate-700">{taskToView.assignedTo?.name || 'Unassigned'}</span>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned By</p>
-                  <p className="font-medium text-slate-600">{taskToView.assignedBy?.name || 'Admin'}{taskToView.assignedBy?.role ? ` (${taskToView.assignedBy.role})` : ''}</p>
-                </div>
+                    {i < TASK_STEPS.length - 1 && <div className={`flex-1 h-0.5 mx-1 mb-4 rounded ${i < stepIdx ? 'bg-emerald-400' : 'bg-slate-200'}`}></div>}
+                  </React.Fragment>
+                ))}
               </div>
-
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Full Description</p>
-                <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-700 leading-relaxed shadow-sm">
-                  {taskToView.taskDescription}
-                </div>
-              </div>
-
-              {taskToView.outputFileUrl && (
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 mb-1.5 border-b border-emerald-100 pb-1">Attached Output</p>
-                  <a href={taskToView.outputFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold hover:bg-emerald-100">
-                    <FileText size={14}/> View Document
-                  </a>
-                </div>
-              )}
-
-              {taskToView.remarks && (
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 border-b border-slate-200 pb-1">Remarks & Log History</p>
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl max-h-40 overflow-y-auto text-xs whitespace-pre-wrap font-mono text-slate-600 custom-scrollbar shadow-inner">
-                    {taskToView.remarks}
-                  </div>
-                </div>
-              )}
             </div>
 
-            <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
-              <button onClick={() => setIsViewModalOpen(false)} className="px-6 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 rounded-xl transition-colors shadow-sm">Close View</button>
+            <div className="overflow-y-auto custom-scrollbar">
+              {/* Kaun, kab tak */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-6 pt-5">
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned To</p>
+                  <p className="text-sm font-bold text-slate-800 truncate mt-0.5">{t.assignedTo?.name || 'Unassigned'}{isMyTask(t) ? ' (you)' : ''}</p>
+                </div>
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned By</p>
+                  <p className="text-sm font-bold text-slate-800 truncate mt-0.5">{t.assignedBy?.name || 'Admin'}</p>
+                </div>
+                <div className={`rounded-xl border p-3 ${due.style}`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Due</p>
+                  <p className="text-sm font-bold truncate mt-0.5">{due.text}</p>
+                  {due.tag && <p className="text-[10px] font-black uppercase">{due.tag}</p>}
+                </div>
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reviewer</p>
+                  <p className="text-sm font-bold text-slate-800 truncate mt-0.5">{t.reviewer?.name || 'No review needed'}</p>
+                </div>
+              </div>
+
+              <div className="px-6 py-5 space-y-5">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5">What needs to be done</p>
+                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{t.taskDescription || 'No description.'}</div>
+                </div>
+
+                {t.pendingReason && ['Pending Client', 'Pending Internal'].includes(t.currentStatus) && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 font-semibold flex flex-wrap gap-x-4 gap-y-1">
+                    <span>⏳ Waiting: {t.pendingReason}</span>
+                    {t.nextFollowUpDate && <span>Next follow-up: {formatIstDate(t.nextFollowUpDate)}{t.followUpMode ? ` (${t.followUpMode})` : ''}</span>}
+                  </div>
+                )}
+
+                {t.outputFileUrl && (
+                  <a href={t.outputFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold hover:bg-emerald-100">
+                    <FileText size={14}/> View attached output
+                  </a>
+                )}
+
+                {/* Seedha update likhna */}
+                {canUpdateTask(t) && (
+                  <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-3">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-blue-800 mb-2">Post an update</p>
+                    <div className="flex items-end gap-2">
+                      <textarea rows={2} value={viewNote} onChange={(e) => setViewNote(e.target.value)} placeholder={isMyTask(t) ? 'e.g. Called the client, documents coming by evening…' : 'Write a comment for the team member…'} className="flex-1 text-sm bg-white border border-slate-200 rounded-xl p-2.5 resize-none outline-none focus:ring-2 focus:ring-blue-500/20" />
+                      <button type="button" onClick={postViewNote} disabled={!viewNote.trim() || postingNote} className="h-10 px-4 inline-flex items-center gap-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl disabled:opacity-50">
+                        {postingNote ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Post
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Timeline */}
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">Activity ({timeline.length})</p>
+                  {timeline.length === 0 ? (
+                    <p className="text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-4 text-center">No updates yet.</p>
+                  ) : (
+                    <div className="relative pl-5 space-y-3 before:absolute before:left-[7px] before:top-1 before:bottom-1 before:w-0.5 before:bg-slate-200">
+                      {timeline.map((r, i) => (
+                        <div key={i} className="relative">
+                          <span className={`absolute -left-5 top-1 h-3.5 w-3.5 rounded-full border-2 border-white ${i === 0 ? 'bg-blue-500' : 'bg-slate-300'}`}></span>
+                          <p className="text-[11px] text-slate-400"><span className="font-bold text-slate-600">{r.who || 'Note'}</span>{r.when ? ` · ${r.when}` : ''}</p>
+                          <p className="text-sm text-slate-700 whitespace-pre-wrap">{r.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer: agla step / review / poora update */}
+            <div className="flex flex-wrap items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button onClick={() => setIsViewModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl">Close</button>
+              {canUpdateTask(t) && (
+                <button onClick={() => { setIsViewModalOpen(false); handleOpenUpdate(t); }} className="px-4 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl inline-flex items-center gap-1.5"><Play size={13} /> Full Update</button>
+              )}
+              {needsMyReview(t) && (
+                <button onClick={() => { setIsViewModalOpen(false); handleOpenUpdate(t); }} className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl inline-flex items-center gap-1.5"><UserCheck size={13} /> Review</button>
+              )}
+              {step && (
+                <button onClick={() => quickStatus(t, step.status)} disabled={busyTaskId === t._id} className={`px-4 py-2 text-xs font-bold text-white rounded-xl inline-flex items-center gap-1.5 disabled:opacity-60 ${step.tone}`}>
+                  {busyTaskId === t._id ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />} {step.label}
+                </button>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 🔴 MODAL: VIEW EOD DETAILS */}
       {isEodViewModalOpen && eodToView && (

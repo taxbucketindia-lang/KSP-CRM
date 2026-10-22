@@ -43,6 +43,9 @@ const ClientMaster = () => {
   const [monthFilter, setMonthFilter] = useState('All'); 
   const [yearFilter, setYearFilter] = useState('All');  
   const [duesFilter, setDuesFilter] = useState('All'); 
+  // 🔴 Workspace filter: ITR / GST / ROC / TDS / Audit / FSSAI / CFO / None
+  const [workspaceFilter, setWorkspaceFilter] = useState('All');
+  const [bas, setBas] = useState([]); // Business Associates (source = BA)
 
   // Pagination Variables (Now Server Side)
   const [currentPage, setCurrentPage] = useState(1);
@@ -72,7 +75,9 @@ const ClientMaster = () => {
     gstin: '', aadhaar: '', dob: '', fatherName: '', 
     status: 'Active', remarks: '', openingBalance: '',
     constitution: '', cin_llpin: '', date_of_incorporation: '', nature_of_business: '',
-    registered_office_address: '', books_kept_at: '', accounting_method: ''
+    registered_office_address: '', books_kept_at: '', accounting_method: '',
+    // Client kahan se aaya (Registrations jaisa)
+    leadSource: '', referredByBA: '', referenceName: '', otherSourceName: ''
   };
   
   const [formData, setFormData] = useState(initialForm);
@@ -91,7 +96,8 @@ const ClientMaster = () => {
         status: statusFilter,
         month: monthFilter,
         year: yearFilter,
-        dues: duesFilter
+        dues: duesFilter,
+        workspace: workspaceFilter
       }).toString();
 
       const [clientsRes, invoicesRes, gstRes] = await Promise.all([
@@ -153,12 +159,21 @@ const ClientMaster = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter, workspaceFilter]);
 
   // Reset to page 1 if any filter is changed
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter]);
+  }, [searchQuery, statusFilter, typeFilter, monthFilter, yearFilter, duesFilter, workspaceFilter]);
+
+  // BA list (source = Business Associate) form khulne par ek baar
+  useEffect(() => {
+    if (!isModalOpen || bas.length) return;
+    axios.get(`${import.meta.env.VITE_API_URL}/bas`, { headers: { Authorization: `Bearer ${user.token}` } })
+      .then(res => setBas(Array.isArray(res.data) ? res.data : (res.data?.data || [])))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen]);
 
   const handlePanChange = (e) => {
     const val = e.target.value.toUpperCase();
@@ -243,6 +258,7 @@ const ClientMaster = () => {
         month: monthFilter,
         year: yearFilter,
         dues: duesFilter,
+        workspace: workspaceFilter,
         fetchAll: 'true' 
       }).toString();
 
@@ -378,7 +394,12 @@ const ClientMaster = () => {
       gstin: service === 'GST Registration' && isGstin ? number : '',
       cin_llpin: service === 'Company Registration' ? number : '',
       clientType: service === 'Company Registration' ? 'Private Limited' : 'Individual',
-      remarks: `Imported from Registrations: ${service || 'Service'} (${reg.clientId || 'no ID'})`
+      remarks: `Imported from Registrations: ${service || 'Service'} (${reg.clientId || 'no ID'})`,
+      // Registration me jo source bhara tha wahi
+      leadSource: reg.leadSource && reg.leadSource !== 'Manual Entry' ? reg.leadSource : '',
+      referredByBA: reg.referredByBA ? String(reg.referredByBA._id || reg.referredByBA) : '',
+      referenceName: reg.referenceName || '',
+      otherSourceName: reg.otherSourceName || ''
     });
     setImportedFrom(reg);
     toast.success(`Details of ${reg.assesseeName} filled. Check and save.`);
@@ -430,7 +451,11 @@ const ClientMaster = () => {
       constitution: client.constitution || '', cin_llpin: client.cin_llpin || '',
       date_of_incorporation: parseDate(client.date_of_incorporation), nature_of_business: client.nature_of_business || '',
       registered_office_address: client.registered_office_address || '', books_kept_at: client.books_kept_at || '',
-      accounting_method: client.accounting_method || ''
+      accounting_method: client.accounting_method || '',
+      leadSource: client.leadSource || '',
+      referredByBA: client.referredByBA ? String(client.referredByBA._id || client.referredByBA) : '',
+      referenceName: client.referenceName || '',
+      otherSourceName: client.otherSourceName || ''
     });
     setIsModalOpen(true);
   };
@@ -723,6 +748,13 @@ const ClientMaster = () => {
                 <option value="Has Dues">Has Pending Dues</option>
                 <option value="Clear">Fully Paid / Clear</option>
                 <option value="No Invoice">No Invoice Yet</option>
+              </select>
+
+              {/* 🔴 WORKSPACE FILTER */}
+              <select value={workspaceFilter} onChange={(e) => setWorkspaceFilter(e.target.value)} title="Workspace" className={`w-full sm:w-auto text-xs font-bold rounded-xl px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer border ${workspaceFilter !== 'All' ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-700'}`}>
+                <option value="All">All Workspaces</option>
+                {WORKSPACES.map(ws => <option key={ws.key} value={ws.key}>{ws.label}</option>)}
+                <option value="None">No Workspace Linked</option>
               </select>
             </div>
           </div>
@@ -1053,7 +1085,12 @@ const ClientMaster = () => {
                         ['Nature of Business', clientToView.nature_of_business],
                         ['Accounting Method', clientToView.accounting_method],
                         ['Opening Balance', Number(clientToView.openingBalance) ? `₹${Number(clientToView.openingBalance).toLocaleString('en-IN')}` : ''],
-                        ['Client Since', clientToView.createdAt ? new Date(clientToView.createdAt).toLocaleDateString('en-IN') : '']
+                        ['Client Since', clientToView.createdAt ? new Date(clientToView.createdAt).toLocaleDateString('en-IN') : ''],
+                        // 🔴 Client kahan se aaya + kisne bheja (Reference naam / BA partner / Other)
+                        ['Acquisition Source', ({ Google: 'Google Ads', FB: 'Facebook', Insta: 'Instagram', BA: 'Business Associate (BA)', Website: 'Website Form' })[clientToView.leadSource] || clientToView.leadSource],
+                        ...(clientToView.leadSource === 'Reference' ? [['Reference Name', clientToView.referenceName]] : []),
+                        ...(clientToView.leadSource === 'BA' ? [['BA Partner', clientToView.referredByBA?.baName || clientToView.referredByBA?.name || '']] : []),
+                        ...(clientToView.leadSource === 'Other' ? [['Other Source', clientToView.otherSourceName]] : [])
                       ].map(([label, value]) => (
                         <div key={label} className="min-w-0">
                           <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">{label}</p>
@@ -1482,6 +1519,51 @@ const ClientMaster = () => {
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Full Communication Address</label>
                       <textarea rows="2" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold resize-none focus:ring-2 focus:ring-blue-500/20"/>
                     </div>
+                  </div>
+                </div>
+
+                {/* 🔴 CLIENT ACQUISITION SOURCE (Registrations jaisa) */}
+                <div className="md:col-span-4 mt-2">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-2xl border border-emerald-100 bg-emerald-50/30">
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Client Acquisition Source</label>
+                      <select value={formData.leadSource} onChange={(e) => {
+                        const value = e.target.value;
+                        setFormData(prev => ({ ...prev, leadSource: value, referredByBA: value === 'BA' ? prev.referredByBA : '', referenceName: value === 'Reference' ? prev.referenceName : '', otherSourceName: value === 'Other' ? prev.otherSourceName : '' }));
+                      }} className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white focus:ring-2 focus:ring-emerald-500/20">
+                        <option value="">-- Select Source --</option>
+                        <option value="Google">Google Ads</option>
+                        <option value="FB">Facebook</option>
+                        <option value="Insta">Instagram</option>
+                        <option value="Walk-in">Walk-in</option>
+                        <option value="Reference">Reference</option>
+                        <option value="BA">Business Associate (BA)</option>
+                        <option value="Website">Website Form</option>
+                        <option value="WhatsApp">WhatsApp</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    {formData.leadSource === 'BA' && (
+                      <div className="md:col-span-2">
+                        <label className="block text-[11px] font-bold uppercase text-indigo-600 mb-1">Select BA Partner <span className="text-rose-500">*</span></label>
+                        <select required value={formData.referredByBA} onChange={(e) => setFormData({ ...formData, referredByBA: e.target.value })} className="w-full p-2.5 border border-indigo-200 rounded-xl text-sm font-semibold bg-indigo-50/50 focus:ring-2 focus:ring-indigo-500/20">
+                          <option value="">-- Choose Partner --</option>
+                          {bas.map(ba => <option key={ba._id} value={ba._id}>{ba.baName || ba.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {formData.leadSource === 'Reference' && (
+                      <div className="md:col-span-2">
+                        <label className="block text-[11px] font-bold uppercase text-emerald-700 mb-1">Reference Name <span className="text-rose-500">*</span></label>
+                        <input type="text" required maxLength={100} value={formData.referenceName} onChange={(e) => setFormData({ ...formData, referenceName: e.target.value })} placeholder="Who referred them?" className="w-full p-2.5 border border-emerald-200 rounded-xl text-sm font-semibold bg-white focus:ring-2 focus:ring-emerald-500/20" />
+                      </div>
+                    )}
+                    {formData.leadSource === 'Other' && (
+                      <div className="md:col-span-2">
+                        <label className="block text-[11px] font-bold uppercase text-orange-600 mb-1">Other Source <span className="text-rose-500">*</span></label>
+                        <input type="text" required maxLength={100} value={formData.otherSourceName} onChange={(e) => setFormData({ ...formData, otherSourceName: e.target.value })} placeholder="Specify the source..." className="w-full p-2.5 border border-orange-200 rounded-xl text-sm font-semibold bg-white focus:ring-2 focus:ring-orange-500/20" />
+                      </div>
+                    )}
                   </div>
                 </div>
 

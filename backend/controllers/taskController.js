@@ -368,13 +368,23 @@ export const deleteTask = async (req, res) => {
 // @route   GET /api/tasks/paginated
 export const getPaginatedTasks = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, status, priority, employee, startDate, endDate } = req.query;
+    const { page = 1, limit = 10, search, status, priority, employee, startDate, endDate, scope } = req.query;
 
     let query = {};
     // Role based check
     if (!canManageTasks(req.user)) {
       query.assignedTo = req.user._id;
+    } else if (scope === 'mine') {
+      // 🔴 Tabs: "My Tasks" = mujhe mile hue, "Assigned by Me" = maine diye hue
+      query.assignedTo = req.user._id;
+    } else if (scope === 'byMe') {
+      query.assignedBy = req.user._id;
     }
+
+    // Aaj (India) ki shuruaat aur agla din: "Due Today" ke liye
+    const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const todayStart = new Date(`${todayKey}T00:00:00+05:30`);
+    const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
     // Filters
     if (search) {
@@ -388,6 +398,9 @@ export const getPaginatedTasks = async (req, res) => {
     if (status && status !== 'ALL') {
       if (status === 'OVERDUE') {
          query.dueDate = { $lt: new Date() };
+         query.currentStatus = { $nin: ['Completed', 'Cancelled'] };
+      } else if (status === 'DUE_TODAY') {
+         query.dueDate = { $gte: todayStart, $lt: tomorrowStart };
          query.currentStatus = { $nin: ['Completed', 'Cancelled'] };
       } else {
          query.currentStatus = status;
@@ -428,7 +441,8 @@ export const getPaginatedTasks = async (req, res) => {
       pendingClient: countIf({ $eq: ['$currentStatus', 'Pending Client'] }),
       underReview: countIf({ $eq: ['$currentStatus', 'Under Review'] }),
       completed: countIf({ $eq: ['$currentStatus', 'Completed'] }),
-      overdue: countIf({ $and: [{ $lt: ['$dueDate', new Date()] }, { $not: [{ $in: ['$currentStatus', ['Completed', 'Cancelled']] }] }] })
+      overdue: countIf({ $and: [{ $lt: ['$dueDate', new Date()] }, { $not: [{ $in: ['$currentStatus', ['Completed', 'Cancelled']] }] }] }),
+      dueToday: countIf({ $and: [{ $gte: ['$dueDate', todayStart] }, { $lt: ['$dueDate', tomorrowStart] }, { $not: [{ $in: ['$currentStatus', ['Completed', 'Cancelled']] }] }] })
     };
     const filterForStats = { ...query };
     // Aggregate me id apne aap ObjectId nahi banti (find me banti hai)
