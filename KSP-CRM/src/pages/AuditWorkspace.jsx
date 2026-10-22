@@ -6,9 +6,30 @@ import toast, { Toaster } from 'react-hot-toast';
 import { 
   Briefcase, Search, Plus, X, FileText, CheckCircle2, AlertCircle, 
   RefreshCw, Eye, Building2, Calendar, FileDigit, UploadCloud, Users, 
-  Settings, CheckSquare, Pencil, Trash2, Loader2, Link, MessageSquare 
+  Settings, CheckSquare, Pencil, Trash2, Loader2, Link, MessageSquare,
+  IndianRupee, Hourglass, Clock, ChevronLeft, ChevronRight, Layers
 } from 'lucide-react';
 import { can } from '../utils/permissions';
+
+// 🔴 Audit ke 9 step (kram me) aur unka rang
+const AUDIT_STAGES = ['Data pending', 'Data received', 'Audit in progress', 'Queries with client', 'Draft report ready', 'Client approved', 'Report signed (UDIN done)', 'Filed', 'Closed'];
+const AUDIT_TYPES = ['Tax Audit', 'Statutory Audit', 'LLP Audit', 'GST Audit / Reconciliation', 'Internal Audit', 'Stock Audit', 'Concurrent Audit', 'Other'];
+const STAGE_STYLE = {
+  'Data pending': { pill: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', bar: 'bg-amber-400' },
+  'Data received': { pill: 'bg-sky-50 text-sky-700 border-sky-200', dot: 'bg-sky-500', bar: 'bg-sky-400' },
+  'Audit in progress': { pill: 'bg-blue-50 text-blue-700 border-blue-200', dot: 'bg-blue-500', bar: 'bg-blue-500' },
+  'Queries with client': { pill: 'bg-orange-50 text-orange-700 border-orange-200', dot: 'bg-orange-500', bar: 'bg-orange-400' },
+  'Draft report ready': { pill: 'bg-violet-50 text-violet-700 border-violet-200', dot: 'bg-violet-500', bar: 'bg-violet-500' },
+  'Client approved': { pill: 'bg-indigo-50 text-indigo-700 border-indigo-200', dot: 'bg-indigo-500', bar: 'bg-indigo-500' },
+  'Report signed (UDIN done)': { pill: 'bg-teal-50 text-teal-700 border-teal-200', dot: 'bg-teal-500', bar: 'bg-teal-500' },
+  Filed: { pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', bar: 'bg-emerald-500' },
+  Closed: { pill: 'bg-slate-100 text-slate-700 border-slate-300', dot: 'bg-slate-500', bar: 'bg-slate-500' }
+};
+const IN_PROGRESS = AUDIT_STAGES.slice(1, 7);
+const isDoneStatus = (s) => s === 'Filed' || s === 'Closed';
+const feeNumber = (v) => Number(v?.$numberDecimal ?? v ?? 0) || 0; // Decimal128 server se {$numberDecimal} aata hai
+const shortDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : '');
+const daysFromToday = (d) => Math.round((new Date(new Date(d).toDateString()) - new Date(new Date().toDateString())) / 86400000);
 
 const AuditWorkspace = () => {
   const { user } = useContext(AuthContext);
@@ -23,6 +44,7 @@ const AuditWorkspace = () => {
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [auditTypeFilter, setAuditTypeFilter] = useState('ALL');
   
   const [fetchingPan, setFetchingPan] = useState(false);
   const [panSuggestions, setPanSuggestions] = useState([]);
@@ -32,6 +54,7 @@ const AuditWorkspace = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [stats, setStats] = useState(null); // cards: { byStatus, overdue }
   const itemsPerPage = 10;
 
   // Modals
@@ -105,7 +128,8 @@ const AuditWorkspace = () => {
         page: currentPage,
         limit: itemsPerPage,
         search: searchQuery,
-        status: statusFilter
+        status: statusFilter,
+        auditType: auditTypeFilter
       }).toString();
 
       const [clientsRes, auditsRes, auditorsRes] = await Promise.all([
@@ -121,6 +145,7 @@ const AuditWorkspace = () => {
         setAudits(auditsRes.data.data);
         setTotalPages(auditsRes.data.totalPages || 1);
         setTotalRecords(auditsRes.data.totalCount || 0);
+        setStats(auditsRes.data.stats || null);
       } else {
         setAudits(auditsRes.data || []);
       }
@@ -135,12 +160,12 @@ const AuditWorkspace = () => {
     }, 500); 
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line
-  }, [user.token, currentPage, searchQuery, statusFilter]);
+  }, [user.token, currentPage, searchQuery, statusFilter, auditTypeFilter]);
 
   // Reset page to 1 if any filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, auditTypeFilter]);
 
 
   const loadChildData = async (auditId, tabName) => {
@@ -459,123 +484,179 @@ const AuditWorkspace = () => {
     <div className="max-w-7xl mx-auto p-4 md:p-6 flex flex-col h-[calc(100vh-80px)] gap-4">
       <Toaster position="top-right" />
 
-      {/* HEADER & METRICS */}
-      <div className="flex-none space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div><h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3"><Briefcase size={28} className="text-blue-600" /> Audit Master Workspace</h1></div>
-          <button onClick={() => setIsAddModalOpen(true)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20"><Plus size={18} strokeWidth={2.5} /> Onboard New Audit</button>
+      {/* HEADER */}
+      <div className="flex-none bg-white rounded-3xl border border-slate-200 shadow-sm p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="h-11 w-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20"><Briefcase size={20} /></span>
+          <div>
+            <h1 className="text-xl font-black text-slate-800 tracking-tight">Audit Master Workspace</h1>
+            <p className="text-xs text-slate-500">Tax, statutory and other audits: status, due dates, fees and filings in one place.</p>
+          </div>
         </div>
+        <button onClick={() => setIsAddModalOpen(true)} className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20"><Plus size={18} strokeWidth={2.5} /> Onboard New Audit</button>
       </div>
+
+      {/* CARDS: click = wahi list (search aur audit type ke hisaab se ginti) */}
+      {(() => {
+        const by = stats?.byStatus || {};
+        const total = Object.values(by).reduce((sum, n) => sum + n, 0);
+        const inProgress = IN_PROGRESS.reduce((sum, k) => sum + (by[k] || 0), 0);
+        const done = (by.Filed || 0) + (by.Closed || 0);
+        const cards = [
+          { key: 'ALL', label: 'Total Audits', value: total, icon: Layers, tone: 'bg-slate-100 text-slate-600', ring: 'ring-slate-400' },
+          { key: 'Data pending', label: 'Data Pending', value: by['Data pending'] || 0, icon: Hourglass, tone: 'bg-amber-50 text-amber-600', ring: 'ring-amber-400' },
+          { key: 'IN_PROGRESS', label: 'In Progress', value: inProgress, icon: Loader2, tone: 'bg-blue-50 text-blue-600', ring: 'ring-blue-400' },
+          { key: 'DONE', label: 'Filed / Closed', value: done, icon: CheckCircle2, tone: 'bg-emerald-50 text-emerald-600', ring: 'ring-emerald-400' },
+          { key: 'OVERDUE', label: 'Overdue', value: stats?.overdue || 0, icon: Clock, tone: 'bg-rose-50 text-rose-600', ring: 'ring-rose-400', hint: 'Due date passed, not filed yet' }
+        ];
+        return (
+          <div className="flex-none grid grid-cols-2 md:grid-cols-5 gap-3">
+            {cards.map(c => {
+              const active = statusFilter === c.key;
+              return (
+                <button key={c.key} type="button" onClick={() => setStatusFilter(c.key)} title={c.hint || `Show ${c.label.toLowerCase()}`}
+                  className={`text-left bg-white rounded-2xl border border-slate-200 shadow-sm px-4 py-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${active ? `ring-2 ${c.ring}` : ''}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">{c.label}</p>
+                    <span className={`h-8 w-8 rounded-xl flex items-center justify-center shrink-0 ${c.tone}`}><c.icon size={15} /></span>
+                  </div>
+                  <p className={`text-2xl font-black mt-0.5 ${c.key === 'OVERDUE' && c.value ? 'text-rose-600' : 'text-slate-900'}`}>{stats ? c.value : '—'}</p>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* MAIN WORKSPACE AREA */}
       <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-0">
-        <div className="flex-none bg-slate-50/95 backdrop-blur-md z-20 shadow-sm border-b border-slate-200">
-          <div className="p-4 flex flex-col md:flex-row gap-4 items-center justify-between bg-white border-b border-slate-100">
-            <div className="relative w-full md:w-1/3">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input type="text" placeholder="Search by Client Name or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2.5 text-sm font-medium bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
-            </div>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full md:w-48 text-sm font-bold border border-slate-200 rounded-xl p-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-              <option value="ALL">All Statuses</option><option value="Data pending">Data pending</option><option value="Audit in progress">Audit in progress</option><option value="Client approved">Client approved</option><option value="Filed">Filed</option>
-            </select>
+        {/* Search + filters */}
+        <div className="flex-none p-4 flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between border-b border-slate-100">
+          <div className="relative w-full lg:max-w-sm">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input type="text" placeholder="Search by client name, ID or PAN..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3.5 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
           </div>
-          <div className="w-full text-left bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-wider flex pr-4">
-             <div className="py-3 px-6 w-[35%]">Audit Details (A1)</div><div className="py-3 px-5 w-[20%]">Financial Year</div><div className="py-3 px-5 w-[25%]">Current Status</div><div className="py-3 px-5 flex-1 text-right">Actions</div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Engagement Status" className={`w-full sm:w-56 text-sm font-bold border rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${statusFilter !== 'ALL' ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-700'}`}>
+              <option value="ALL">All Engagement Status</option>
+              <optgroup label="Groups">
+                <option value="IN_PROGRESS">In Progress (all steps)</option>
+                <option value="DONE">Filed / Closed</option>
+                <option value="OVERDUE">Overdue</option>
+              </optgroup>
+              <optgroup label="Status">
+                {AUDIT_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
+              </optgroup>
+            </select>
+            <select value={auditTypeFilter} onChange={(e) => setAuditTypeFilter(e.target.value)} title="Audit Type" className={`w-full sm:w-52 text-sm font-bold border rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${auditTypeFilter !== 'ALL' ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-700'}`}>
+              <option value="ALL">All Audit Types</option>
+              {AUDIT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {(statusFilter !== 'ALL' || auditTypeFilter !== 'ALL' || searchQuery) && (
+              <button type="button" onClick={() => { setStatusFilter('ALL'); setAuditTypeFilter('ALL'); setSearchQuery(''); }} className="inline-flex items-center justify-center gap-1 px-3 py-2.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl whitespace-nowrap"><X size={13} /> Clear</button>
+            )}
           </div>
         </div>
 
+        {/* List */}
         <div className="flex-1 overflow-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse min-w-[900px]">
-            <thead className="hidden"><tr><th className="w-[35%]"></th><th className="w-[20%]"></th><th className="w-[25%]"></th><th className="flex-1"></th></tr></thead>
-            <tbody className="divide-y divide-slate-100 text-sm font-medium text-slate-700">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 text-[10px] font-black uppercase tracking-wider shadow-[0_1px_0_0_#e2e8f0]">
+              <tr>
+                <th className="py-3 px-5">Client & Audit</th>
+                <th className="py-3 px-4">Financial Year</th>
+                <th className="py-3 px-4">Due Date</th>
+                <th className="py-3 px-4 text-right">Audit Fee</th>
+                <th className="py-3 px-4 w-[230px]">Status</th>
+                <th className="py-3 px-5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
               {loading ? (
-                <tr><td colSpan="4" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading Audits...</td></tr>
+                <tr><td colSpan="6" className="text-center py-16 text-slate-400"><RefreshCw className="animate-spin inline-block mr-2" size={18}/> Loading audits...</td></tr>
               ) : filteredAudits.length === 0 ? (
-                <tr><td colSpan="4" className="text-center py-16 text-slate-400 flex flex-col items-center"><AlertCircle size={36} className="mb-3 text-slate-300"/> No active audits found.</td></tr>
+                <tr><td colSpan="6" className="py-16">
+                  <div className="flex flex-col items-center text-center text-slate-400">
+                    <AlertCircle size={36} className="mb-3 text-slate-300"/>
+                    <p className="font-bold text-slate-500">No audits found</p>
+                    <p className="text-xs mt-1">{statusFilter !== 'ALL' || auditTypeFilter !== 'ALL' || searchQuery ? 'Try clearing the filters.' : 'Press "Onboard New Audit" to add one.'}</p>
+                  </div>
+                </td></tr>
               ) : (
-                filteredAudits.map((a) => (
-                  <tr key={a._id} className="hover:bg-blue-50/30 transition-colors group">
-                    <td className="py-4 px-6 w-[35%]">
-                      <div className="flex items-center gap-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-slate-800 text-base">{a.client_id?.name || 'Unknown Client'}</span>
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
-                            <span className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded tracking-wider" title="Client ID">
-                              {a.client_id?.clientId || a.client_id?.pan || 'NO ID'}
-                            </span>
-                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{a.audit_type}</span>
-                            
-                            {/* Short Preview of Remarks */}
-                            {a.remarks && (
-                                <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 truncate max-w-[120px]" title="Latest Remark">
-                                  {a.remarks.split('\n')[0]} 
-                                </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-5 w-[20%]">
-                      <p className="font-mono font-bold text-slate-700">{a.financial_year}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">AY: {a.assessment_year}</p>
-                    </td>
-                    <td className="py-4 px-5 w-[25%]">
-                      <span className={`px-2 py-1 border rounded-md text-[10px] font-bold uppercase tracking-wider ${getStatusBadge(a.engagement_status)}`}>{a.engagement_status}</span>
-                    </td>
-                    <td className="py-4 px-5 flex-1 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        
-                        {/* 🔴 NAYA BUTTON: QUICK REMARKS */}
-                        <button onClick={() => openQuickRemarks(a)} className="p-2 text-amber-500 hover:bg-amber-50 border border-transparent hover:border-amber-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Update Quick Remarks">
-                          <MessageSquare size={16} strokeWidth={2.5}/>
+                filteredAudits.map((a) => {
+                  const style = STAGE_STYLE[a.engagement_status] || STAGE_STYLE['Data pending'];
+                  const done = isDoneStatus(a.engagement_status);
+                  const days = a.due_date ? daysFromToday(a.due_date) : null;
+                  const fee = feeNumber(a.audit_fee);
+                  return (
+                    <tr key={a._id} className="hover:bg-blue-50/30 transition-colors group">
+                      <td className="py-3.5 px-5">
+                        <button type="button" onClick={() => handleOpenView(a)} className="text-left">
+                          <span className="block font-bold text-slate-800 group-hover:text-blue-700 leading-snug">{a.client_id?.name || 'Unknown Client'}</span>
                         </button>
-                        
-                        {/* Only Admin can delete an audit engagement entirely */}
-                        {canDelete && (
-                          <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition-colors shadow-sm hidden group-hover:flex" title="Delete Audit">
-                            <Trash2 size={16} strokeWidth={2.5}/>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                          <span className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded tracking-wider" title="Client ID">{a.client_id?.clientId || a.client_id?.pan || 'NO ID'}</span>
+                          <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{a.audit_type}</span>                        </div>
+                        {a.remarks && <p className="text-[11px] text-amber-700 mt-1 truncate max-w-[340px]" title={a.remarks}>💬 {a.remarks.split('\n')[0]}</p>}
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <p className="font-mono font-bold text-slate-700">{a.financial_year}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">AY {a.assessment_year || '—'}</p>
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        {a.due_date ? (
+                          <>
+                            <p className="font-semibold text-slate-700">{shortDate(a.due_date)}</p>
+                            {done ? <p className="text-[10px] font-bold text-slate-400 mt-0.5">Completed</p>
+                              : days < 0 ? <p className="text-[10px] font-black text-rose-600 mt-0.5">Overdue by {-days} day{days === -1 ? '' : 's'}</p>
+                                : days <= 15 ? <p className="text-[10px] font-black text-amber-600 mt-0.5">{days === 0 ? 'Due today' : `${days} day${days === 1 ? '' : 's'} left`}</p>
+                                  : <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{days} days left</p>}
+                          </>
+                        ) : <span className="text-xs text-slate-300">Not set</span>}
+                      </td>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        {fee ? <p className="font-bold text-slate-800 inline-flex items-center gap-0.5"><IndianRupee size={12} />{fee.toLocaleString('en-IN')}</p> : <p className="text-xs text-slate-300">—</p>}
+                        {a.fee_status && <p className={`text-[10px] font-bold mt-0.5 ${a.fee_status === 'Received' ? 'text-emerald-600' : a.fee_status === 'Partly received' ? 'text-amber-600' : 'text-slate-400'}`}>{a.fee_status}</p>}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-1 border rounded-lg text-[11px] font-bold ${style.pill}`}><span className={`h-1.5 w-1.5 rounded-full ${style.dot}`}></span>{a.engagement_status}</span>
+                      </td>
+                      <td className="py-3.5 px-5">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button onClick={() => openQuickRemarks(a)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors" title="Remarks">
+                            <MessageSquare size={16} strokeWidth={2.2}/>
                           </button>
-                        )}
-
-                        <button onClick={() => handleOpenView(a)} className="px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl transition-colors border border-blue-200 text-xs font-bold flex items-center gap-2 shadow-sm inline-flex">
-                          <Eye size={16} strokeWidth={2.5}/> Open Workspace
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          {canDelete && (
+                            <button onClick={() => handleDeleteMainAudit(a._id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors" title="Delete Audit">
+                              <Trash2 size={16} strokeWidth={2.2}/>
+                            </button>
+                          )}
+                          <button onClick={() => handleOpenView(a)} className="ml-1 px-3.5 py-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl transition-colors border border-blue-200 text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap">
+                            <Eye size={15} strokeWidth={2.4}/> Open
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
 
-        {/* SERVER-SIDE PAGINATION CONTROLS */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
-            <span className="text-xs font-bold text-slate-500">
-              Showing Page {currentPage} of {totalPages} (Total {totalRecords} records)
-            </span>
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                disabled={currentPage === 1 || loading}
-                className="px-4 py-2 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-colors shadow-sm"
-              >
-                Previous
-              </button>
-              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
-                {currentPage} / {totalPages}
-              </span>
-              <button 
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
-                disabled={currentPage === totalPages || loading}
-                className="px-4 py-2 text-xs font-bold bg-blue-600 text-white border border-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
-              >
-                Next
-              </button>
+        {/* PAGINATION */}
+        <div className="flex-none flex flex-col sm:flex-row items-center justify-between gap-2 px-5 py-3 bg-slate-50 border-t border-slate-200">
+          <span className="text-xs font-semibold text-slate-500">
+            {totalRecords ? <>Showing <b className="text-slate-700">{(currentPage - 1) * itemsPerPage + 1}–{Math.min(currentPage * itemsPerPage, totalRecords)}</b> of <b className="text-slate-700">{totalRecords}</b> audits</> : 'No audits'}
+          </span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className="p-2 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-40" title="Previous"><ChevronLeft size={16} /></button>
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 tabular-nums">{currentPage} / {totalPages}</span>
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className="p-2 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-40" title="Next"><ChevronRight size={16} /></button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* 🔴 NAYA MODAL: QUICK REMARKS HISTORY MODAL */}

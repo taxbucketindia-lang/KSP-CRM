@@ -66,7 +66,7 @@ const FIELDS = {
   audit: (r) => ({
     heading: `${r.audit_type || 'Audit'} · FY ${r.financial_year || '-'}`, status: r.engagement_status,
     fields: [
-      ['Audit ID', r.auditId], ['Assessment Year', r.assessment_year], ['Applicable Section', r.applicable_section], ['Turnover / Gross Receipts', money(r.turnover_gross_receipts)],
+      ['Assessment Year', r.assessment_year], ['Applicable Section', r.applicable_section], ['Turnover / Gross Receipts', money(r.turnover_gross_receipts)],
       ['Books Period', r.books_period_from ? `${date(r.books_period_from)} to ${date(r.books_period_to)}` : ''], ['Data Received', date(r.data_received_date)], ['Audit Started', date(r.audit_start_date)], ['Draft Report', date(r.draft_report_date)],
       ['Report Signed', date(r.report_signing_date)], ['Due Date', date(r.due_date)], ['Audit Fee', money(r.audit_fee)], ['Fee Status', r.fee_status],
       ['Assigned To', r.assigned_executive_id?.name]

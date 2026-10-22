@@ -135,17 +135,38 @@ const collectEvents = async (months) => {
     if (t.isActive !== false && !TDS_DONE.includes(t.status)) push({ line: 'tds', kind: 'pending', month: monthOf(t.dueDate || t.createdAt), date: t.dueDate || t.createdAt, name, detail: `${detail}${t.dueDate ? ` · due ${istKey(t.dueDate)}` : ''}`, status: t.status });
   });
 
-  // Audit: form file hua = kaam; naya audit (engagement) = naya
-  const filings = await AuditFiling.find({ filed_date: range, is_active: { $ne: false } }).select('audit_id form_name filed_date filing_status').lean();
-  const engagements = await AuditEngagement.find({ $or: [{ _id: { $in: filings.map(f => f.audit_id) } }, { createdAt: range }, { due_date: range }] }).select('client_id audit_type financial_year engagement_status audit_fee due_date is_active createdAt').lean();
-  const auditClients = Object.fromEntries((await ClientMaster.find({ _id: { $in: engagements.map(e => e.client_id) } }).select('name tradeName').lean()).map(c => [String(c._id), c.tradeName || c.name]));
-  const engagementById = Object.fromEntries(engagements.map(e => [String(e._id), e]));
-  filings.forEach(f => {
-    const e = engagementById[String(f.audit_id)] || {};
-    push({ line: 'audit', kind: 'done', month: monthOf(f.filed_date), date: f.filed_date, name: auditClients[String(e.client_id)] || 'Audit client', detail: `${f.form_name || 'Audit form'}${e.audit_type ? ` · ${e.audit_type}` : ''}${e.financial_year ? ` · FY ${e.financial_year}` : ''}`, status: f.filing_status, amount: num(e.audit_fee) });
+  // Audit (Audit list jaisa): ek audit = ek kaam. "Work done" = status Filed / Closed, ya koi filing form Filed.
+  // Kaam ki date: filing form ki filed date -> warna report signing date -> warna audit ka aakhri update.
+  // Delete kiye (inactive) audit nahi gine jaate.
+  const allFilings = await AuditFiling.find({ is_active: { $ne: false } }).select('audit_id form_name filed_date filing_status').lean();
+  const filedFormsOf = {};
+  allFilings.filter(x => x.filing_status === 'Filed' || x.filed_date).forEach(x => { (filedFormsOf[String(x.audit_id)] = filedFormsOf[String(x.audit_id)] || []).push(x); });
+  const engagements = await AuditEngagement.find({
+    is_active: { $ne: false },
+    $or: [{ engagement_status: { $in: AUDIT_DONE } }, { _id: { $in: Object.keys(filedFormsOf) } }, { createdAt: range }, { due_date: range }]
+  }).select('auditId client_id audit_type financial_year engagement_status audit_fee due_date report_signing_date createdAt updatedAt').lean();
+  const auditClientDocs = await ClientMaster.find({ _id: { $in: engagements.map(e => e.client_id) } }).select('name tradeName clientId').lean();
+  const auditClients = Object.fromEntries(auditClientDocs.map(c => [String(c._id), c.tradeName || c.name]));
+  const auditClientIds = Object.fromEntries(auditClientDocs.map(c => [String(c._id), c.clientId]));
+  engagements.forEach(e => {
+    const name = auditClients[String(e.client_id)] || 'Audit client';
+    // Client Master wala ID (TB-...), audit ka apna AUD- number nahi
+    const clientCode = auditClientIds[String(e.client_id)];
+    const base = `${e.audit_type || 'Audit'}${e.financial_year ? ` · FY ${e.financial_year}` : ''}${clientCode ? ` · ${clientCode}` : ''}`;
+    const forms = filedFormsOf[String(e._id)] || [];
+    const filedForms = forms.filter(x => x.filing_status === 'Filed');
+    const isDone = AUDIT_DONE.includes(e.engagement_status) || filedForms.length > 0;
+    if (isDone) {
+      const formDates = forms.map(x => x.filed_date).filter(Boolean).map(d => new Date(d)).sort((a, b) => b - a);
+      const when = formDates[0] || e.report_signing_date || e.updatedAt;
+      const dateFrom = formDates[0] ? 'filed date' : e.report_signing_date ? 'report signing date' : 'last updated';
+      const formNames = forms.map(x => x.form_name).filter(Boolean);
+      push({ line: 'audit', kind: 'done', month: monthOf(when), date: when, name, detail: `${formNames.length ? `${formNames.join(', ')} · ` : ''}${base} · date: ${dateFrom}`, status: e.engagement_status, amount: num(e.audit_fee) });
+    } else {
+      push({ line: 'audit', kind: 'pending', month: monthOf(e.due_date || e.createdAt), date: e.due_date || e.createdAt, name, detail: `${base}${e.due_date ? ` · due ${istKey(e.due_date)}` : ''}`, status: e.engagement_status, amount: num(e.audit_fee) });
+    }
+    push({ line: 'audit', kind: 'added', month: monthOf(e.createdAt), date: e.createdAt, name, detail: base, status: e.engagement_status, amount: num(e.audit_fee) });
   });
-  engagements.filter(e => e.is_active !== false && !AUDIT_DONE.includes(e.engagement_status)).forEach(e => push({ line: 'audit', kind: 'pending', month: monthOf(e.due_date || e.createdAt), date: e.due_date || e.createdAt, name: auditClients[String(e.client_id)] || 'Audit client', detail: `${e.audit_type || 'Audit'}${e.financial_year ? ` · FY ${e.financial_year}` : ''}${e.due_date ? ` · due ${istKey(e.due_date)}` : ''}`, status: e.engagement_status, amount: num(e.audit_fee) }));
-  engagements.forEach(e => push({ line: 'audit', kind: 'added', month: monthOf(e.createdAt), date: e.createdAt, name: auditClients[String(e.client_id)] || 'Audit client', detail: `${e.audit_type || 'Audit'}${e.financial_year ? ` · FY ${e.financial_year}` : ''}`, status: e.engagement_status, amount: num(e.audit_fee) }));
 
   // FSSAI
   const fssais = await FssaiWorkspace.find({ $or: [{ filingDate: range }, { createdAt: range }, { dueDate: range }] }).select('assesseeName fssaiLicenseNo returnType financialYear fssaiStatus filingDate dueDate createdAt feeAmount').lean();

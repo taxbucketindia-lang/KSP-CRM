@@ -85,6 +85,10 @@ export const deleteAuditor = async (req, res) => {
 // ==========================================
 // 📄 AUDIT ENGAGEMENT (A1) CONTROLLERS WITH PAGINATION
 // ==========================================
+// Audit ke status ke group (list ke cards / filter)
+const AUDIT_DONE_STATUS = ['Filed', 'Closed'];
+const AUDIT_IN_PROGRESS = ['Data received', 'Audit in progress', 'Queries with client', 'Draft report ready', 'Client approved', 'Report signed (UDIN done)'];
+
 export const getAllAudits = async (req, res) => {
   try {
     const { 
@@ -100,8 +104,16 @@ export const getAllAudits = async (req, res) => {
     // Search Feature Logic based on populated client
     // Since search runs on populated fields easily using MongoDB aggregation/lookup or we prefetch.
     // A simpler text match if needed for direct fields:
-    if (status && status !== 'ALL') {
+    // Status: ek status, ya group (cards se): IN_PROGRESS / DONE / OVERDUE
+    if (status === 'IN_PROGRESS') filter.engagement_status = { $in: AUDIT_IN_PROGRESS };
+    else if (status === 'DONE') filter.engagement_status = { $in: AUDIT_DONE_STATUS };
+    else if (status === 'OVERDUE') { filter.engagement_status = { $nin: AUDIT_DONE_STATUS }; filter.due_date = { $lt: new Date() }; }
+    else if (status && status !== 'ALL') {
       filter.engagement_status = status;
+    }
+    // 🔴 Audit Type filter (Tax Audit, Statutory Audit ...)
+    if (req.query.auditType && req.query.auditType !== 'ALL') {
+      filter.audit_type = String(req.query.auditType);
     }
 
     let audits = [];
@@ -155,12 +167,22 @@ export const getAllAudits = async (req, res) => {
         .limit(parseInt(limit))
         .lean();
     }
-      
+
+    // 🔴 Cards ke numbers: search + audit type ke hisaab se (status / overdue ke bina, taaki har card ki ginti dikhe)
+    // eslint-disable-next-line no-unused-vars
+    const { engagement_status, due_date, ...statsFilter } = filter;
+    const [byStatus, overdue] = await Promise.all([
+      AuditEngagement.aggregate([{ $match: statsFilter }, { $group: { _id: '$engagement_status', n: { $sum: 1 } } }]),
+      AuditEngagement.countDocuments({ ...statsFilter, engagement_status: { $nin: AUDIT_DONE_STATUS }, due_date: { $lt: new Date() } })
+    ]);
+    const stats = { byStatus: Object.fromEntries(byStatus.map(s => [s._id, s.n])), overdue };
+
     res.status(200).json({
       data: audits,
       currentPage: parseInt(page),
       totalPages,
-      totalCount
+      totalCount,
+      stats
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
