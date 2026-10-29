@@ -86,7 +86,9 @@ const leadSchema = new mongoose.Schema({
   priority: { type: String, enum: ['Hot', 'Warm', 'Cold'], default: 'Warm' },
   nextFollowUpDate: { type: Date }, 
   remarks: { type: String },
-  
+  // Website se apne aap aayi lead (jaise taxbucket.in ka Free GST Health Check): "Created By" me yahi naam dikhta hai
+  createdVia: { type: String, default: null },
+
   // 🔴 NAYA FIELD: Lead create karne wale ka record
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }

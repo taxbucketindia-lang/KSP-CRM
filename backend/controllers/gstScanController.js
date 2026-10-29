@@ -170,7 +170,9 @@ const getSandboxToken = async () => {
 
 export const runGstHealthScan = async (req, res) => {
   try {
-    const { action, reportData, gstin, mobile, email, businessName } = req.body;
+    const { action, reportData, gstin, mobile, email, businessName, createdVia } = req.body;
+    // Sirf jaani-pehchani websites ka naam lead par lagta hai
+    const WEBSITE_SOURCES = ['taxbucket.in'];
 
     if (action === 'save' && reportData) {
       let gstLeadId = 'GUEST-LEAD-' + Date.now();
@@ -201,7 +203,8 @@ Lead generated manually via Free GST Health Scan.
           status: 'New', 
           priority: 'Warm',
           remarks: detailedRemarks, 
-          createdBy: req.user ? req.user._id : undefined
+          createdBy: req.user ? req.user._id : undefined,
+          createdVia: WEBSITE_SOURCES.includes(createdVia) ? createdVia : null
         });
         const savedLead = await newLead.save();
         gstLeadId = savedLead._id;

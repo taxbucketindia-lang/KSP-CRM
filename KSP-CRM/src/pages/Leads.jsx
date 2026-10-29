@@ -605,11 +605,11 @@ const Leads = () => {
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-2">
                           <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isGstScanLead ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>
-                            {isGstScanLead ? 'SYS' : (lead.createdBy?.name ? lead.createdBy.name.charAt(0).toUpperCase() : 'A')}
+                            {lead.createdVia ? 'TB' : isGstScanLead ? 'SYS' : (lead.createdBy?.name ? lead.createdBy.name.charAt(0).toUpperCase() : 'A')}
                           </div>
                           <div className="flex flex-col">
                             <span className={`text-xs font-bold ${isGstScanLead ? 'text-emerald-700' : 'text-slate-700'}`}>
-                              {isGstScanLead ? 'Auto-Scan' : (lead.createdBy?.name || 'System / Admin')}
+                              {lead.createdVia || (isGstScanLead ? 'Auto-Scan' : (lead.createdBy?.name || 'System / Admin'))}
                             </span>
                             {lead.createdBy?.empId && !isGstScanLead && (
                               <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">

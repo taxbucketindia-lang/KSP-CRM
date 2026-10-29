@@ -70,6 +70,11 @@ const TdsWorkspace = () => {
   const [selectedReturn, setSelectedReturn] = useState(null);
   const [entries, setEntries] = useState([]);
   const [entryForm, setEntryForm] = useState({ tdsDeducteeId: '', tdsChallanId: '', sectionCode: '194C', paymentDate: '', deductionDate: '', amountPaid: '', tdsRate: '', tdsDeducted: '', tdsDeposited: '' });
+  // 🔴 EDIT: kaunsa record badal rahe hain (null = naya)
+  const [editingDeducteeId, setEditingDeducteeId] = useState(null);
+  const [editingChallanId, setEditingChallanId] = useState(null);
+  const [editingEntryId, setEditingEntryId] = useState(null);
+  const [returnEdit, setReturnEdit] = useState(null); // { _id, status, returnType, dueDate, filedDate, tokenNoRrr, acknowledgementNo }
 
   const initialWorkspaceForm = {
     pan: '', companyName: '', tan: '',
@@ -298,9 +303,12 @@ const TdsWorkspace = () => {
     e.preventDefault();
     try {
       const payload = { ...deducteeForm, tdsWorkspaceId: viewingData._id };
-      await axios.post(`${import.meta.env.VITE_API_URL}/tds/workspaces/${viewingData._id}/deductees`, payload, { headers: { Authorization: `Bearer ${user.token}` } });
-      toast.success("Deductee added successfully!");
+      const headers = { Authorization: `Bearer ${user.token}` };
+      if (editingDeducteeId) await axios.put(`${import.meta.env.VITE_API_URL}/tds/deductees/${editingDeducteeId}`, payload, { headers });
+      else await axios.post(`${import.meta.env.VITE_API_URL}/tds/workspaces/${viewingData._id}/deductees`, payload, { headers });
+      toast.success(editingDeducteeId ? "Deductee updated!" : "Deductee added successfully!");
       setIsDeducteeModalOpen(false);
+      setEditingDeducteeId(null);
       setDeducteeForm({ deducteeName: '', pan: '', panStatus: 'Valid', deducteeType: 'Company', residentialStatus: 'Resident', mobile: '', email: '' });
       loadTabSpecificData(viewingData._id, 'deductees');
     } catch (error) {
@@ -315,9 +323,12 @@ const TdsWorkspace = () => {
     e.preventDefault();
     try {
       const payload = { ...challanForm, tdsWorkspaceId: viewingData._id };
-      await axios.post(`${import.meta.env.VITE_API_URL}/tds/workspaces/${viewingData._id}/challans`, payload, { headers: { Authorization: `Bearer ${user.token}` } });
-      toast.success("Challan added successfully!");
+      const headers = { Authorization: `Bearer ${user.token}` };
+      if (editingChallanId) await axios.put(`${import.meta.env.VITE_API_URL}/tds/challans/${editingChallanId}`, payload, { headers });
+      else await axios.post(`${import.meta.env.VITE_API_URL}/tds/workspaces/${viewingData._id}/challans`, payload, { headers });
+      toast.success(editingChallanId ? "Challan updated!" : "Challan added successfully!");
       setIsChallanModalOpen(false);
+      setEditingChallanId(null);
       setChallanForm({ challanSerialNo: '', bsrCode: '', depositDate: '', tdsAmount: '', interestAmount: 0, lateFeeAmount: 0, otherAmount: 0, depositMode: 'Online', sectionCode: '194C', quarter: 'Q1', financialYear: '2026-27' });
       loadTabSpecificData(viewingData._id, 'challans');
     } catch (error) {
@@ -363,8 +374,10 @@ const TdsWorkspace = () => {
     e.preventDefault();
     try {
       const payload = { ...entryForm, tdsReturnId: selectedReturn._id, tdsWorkspaceId: viewingData._id };
-      await axios.post(`${import.meta.env.VITE_API_URL}/tds/returns/${selectedReturn._id}/entries`, payload, { headers: { Authorization: `Bearer ${user.token}` } });
-      toast.success("Entry added successfully!");
+      if (editingEntryId) await axios.put(`${import.meta.env.VITE_API_URL}/tds/entries/${editingEntryId}`, payload, { headers: { Authorization: `Bearer ${user.token}` } });
+      else await axios.post(`${import.meta.env.VITE_API_URL}/tds/returns/${selectedReturn._id}/entries`, payload, { headers: { Authorization: `Bearer ${user.token}` } });
+      toast.success(editingEntryId ? "Entry updated!" : "Entry added successfully!");
+      setEditingEntryId(null);
       
       // Reload Entries
       const res = await axios.get(`${import.meta.env.VITE_API_URL}/tds/returns/${selectedReturn._id}/entries`, { headers: { Authorization: `Bearer ${user.token}` } });
@@ -376,6 +389,74 @@ const TdsWorkspace = () => {
       toast.error(error.response?.data?.message || "Error adding entry");
     }
   };
+
+  // ==========================================
+  // ✏️ EDIT / 🗑️ DELETE (edit sab, delete sirf "Delete Records" right)
+  // ==========================================
+  const dayInput = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+  const openNewDeductee = () => { setEditingDeducteeId(null); setDeducteeForm({ deducteeName: '', pan: '', panStatus: 'Valid', deducteeType: 'Company', residentialStatus: 'Resident', mobile: '', email: '' }); setIsDeducteeModalOpen(true); };
+  const openEditDeductee = (d) => {
+    setEditingDeducteeId(d._id);
+    setDeducteeForm({ deducteeName: d.deducteeName || '', pan: d.pan || '', panStatus: d.panStatus || 'Valid', deducteeType: d.deducteeType || 'Company', residentialStatus: d.residentialStatus || 'Resident', mobile: d.mobile || '', email: d.email || '' });
+    setIsDeducteeModalOpen(true);
+  };
+  const openNewChallan = () => { setEditingChallanId(null); setChallanForm({ challanSerialNo: '', bsrCode: '', depositDate: '', tdsAmount: '', interestAmount: 0, lateFeeAmount: 0, otherAmount: 0, depositMode: 'Online', sectionCode: '194C', quarter: 'Q1', financialYear: '2026-27' }); setIsChallanModalOpen(true); };
+  const openEditChallan = (c) => {
+    setEditingChallanId(c._id);
+    setChallanForm({ challanSerialNo: c.challanSerialNo || '', bsrCode: c.bsrCode || '', depositDate: dayInput(c.depositDate), tdsAmount: c.tdsAmount ?? '', interestAmount: c.interestAmount || 0, lateFeeAmount: c.lateFeeAmount || 0, otherAmount: c.otherAmount || 0, depositMode: c.depositMode || 'Online', sectionCode: c.sectionCode || '194C', quarter: c.quarter || 'Q1', financialYear: c.financialYear || '2026-27' });
+    setIsChallanModalOpen(true);
+  };
+  const startEditEntry = (ent) => {
+    setEditingEntryId(ent._id);
+    setEntryForm({
+      tdsDeducteeId: ent.tdsDeducteeId?._id || ent.tdsDeducteeId || '', tdsChallanId: ent.tdsChallanId?._id || ent.tdsChallanId || '',
+      sectionCode: ent.sectionCode || '', paymentDate: dayInput(ent.paymentDate), deductionDate: dayInput(ent.deductionDate),
+      amountPaid: ent.amountPaid ?? '', tdsRate: ent.tdsRate ?? '', tdsDeducted: ent.tdsDeducted ?? '', tdsDeposited: ent.tdsDeposited ?? ''
+    });
+  };
+  const cancelEditEntry = () => { setEditingEntryId(null); setEntryForm({ tdsDeducteeId: '', tdsChallanId: '', sectionCode: '194C', paymentDate: '', deductionDate: '', amountPaid: '', tdsRate: '', tdsDeducted: '', tdsDeposited: '' }); };
+
+  // Ek hi delete sabke liye: kind = deductees | challans | entries
+  const deleteTdsItem = async (kind, id, label) => {
+    if (!window.confirm(`Delete ${label}? This cannot be undone from here.`)) return;
+    try {
+      const headers = { Authorization: `Bearer ${user.token}` };
+      await axios.delete(`${import.meta.env.VITE_API_URL}/tds/${kind}/${id}`, { headers });
+      toast.success('Deleted');
+      if (kind === 'entries') {
+        const res = await axios.get(`${import.meta.env.VITE_API_URL}/tds/returns/${selectedReturn._id}/entries`, { headers });
+        setEntries(res.data || []);
+        if (editingEntryId === id) cancelEditEntry();
+      } else {
+        loadTabSpecificData(viewingData._id, kind);
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not delete');
+    }
+  };
+
+  // Return (quarter) ki details badalna: status, type, dates, token
+  const RETURN_STATUSES = ['Data pending', 'Data received', 'Prepared', 'FVU validated', 'Filed', 'Processed', 'Default / notice', 'Closed'];
+  const openReturnEdit = (ret) => setReturnEdit({
+    _id: ret._id, label: `${ret.quarter} ${ret.formType} (${ret.financialYear})`, status: ret.status || 'Data pending', returnType: ret.returnType || 'Original',
+    dueDate: dayInput(ret.dueDate), filedDate: dayInput(ret.filedDate), tokenNoRrr: ret.tokenNoRrr || '', acknowledgementNo: ret.acknowledgementNo || ''
+  });
+  const saveReturnEdit = async (e) => {
+    e.preventDefault();
+    try {
+      const { _id, label, ...body } = returnEdit;
+      void label;
+      await axios.put(`${import.meta.env.VITE_API_URL}/tds/returns/${_id}/status`, { ...body, dueDate: body.dueDate || null, filedDate: body.filedDate || null }, { headers: { Authorization: `Bearer ${user.token}` } });
+      toast.success('Return updated!');
+      setReturnEdit(null);
+      loadTabSpecificData(viewingData._id, 'returns');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not update the return');
+    }
+  };
+  const returnStatusStyle = (st) => (['Filed', 'Processed', 'Closed'].includes(st) ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    : st === 'Default / notice' ? 'bg-rose-100 text-rose-700 border-rose-200'
+      : st === 'Data pending' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-blue-100 text-blue-700 border-blue-200');
 
   // ==========================================
   // HELPERS
@@ -760,8 +841,12 @@ const TdsWorkspace = () => {
                             </button>
                           )}
 
+                          {/* ✏️ EDIT RETURN (sab) */}
+                          <button onClick={() => openReturnEdit(ret)} className={`absolute top-3 ${canDelete ? 'right-10' : 'right-3'} text-slate-300 hover:text-indigo-600 transition-colors p-1`} title="Edit return details">
+                            <Pencil size={15}/>
+                          </button>
                           <div>
-                            <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3 pr-6">
+                            <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3 pr-14">
                               <div>
                                 <span className="text-[10px] font-black uppercase text-slate-400">{ret.financialYear}</span>
                                 <h4 className="text-lg font-black text-indigo-700 flex items-center gap-1">{ret.quarter} <span className="text-xs font-bold text-slate-500 bg-slate-100 px-1.5 rounded">{ret.formType}</span></h4>
@@ -770,7 +855,7 @@ const TdsWorkspace = () => {
                             <div className="space-y-2 mb-3">
                               <div className="flex justify-between items-center text-xs">
                                 <span className="font-bold text-slate-500">Status</span>
-                                <span className="text-[9px] font-bold uppercase bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200">{ret.status}</span>
+                                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${returnStatusStyle(ret.status)}`}>{ret.status}</span>
                               </div>
                               <div className="flex justify-between items-center text-xs">
                                 <span className="font-bold text-slate-500">Type</span>
@@ -782,6 +867,12 @@ const TdsWorkspace = () => {
                                   {ret.dueDate ? new Date(ret.dueDate).toLocaleDateString('en-IN') : 'N/A'}
                                 </span>
                               </div>
+                              {ret.filedDate && (
+                                <div className="flex justify-between items-center text-xs">
+                                  <span className="font-bold text-slate-500">Filed On</span>
+                                  <span className="font-semibold text-emerald-700">{new Date(ret.filedDate).toLocaleDateString('en-IN')}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                           
@@ -801,7 +892,7 @@ const TdsWorkspace = () => {
                   <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
                     <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2"><Users size={16} className="text-indigo-600"/> Master Deductee List</h3>
                     <div className="flex gap-2">
-                      <button onClick={() => setIsDeducteeModalOpen(true)} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm shrink-0"><Plus size={14}/> Add New Deductee</button>
+                      <button onClick={openNewDeductee} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm shrink-0"><Plus size={14}/> Add New Deductee</button>
                     </div>
                   </div>
                   {tabData.deductees.length === 0 ? (
@@ -817,6 +908,7 @@ const TdsWorkspace = () => {
                             <th className="py-3 px-4">PAN & Status</th>
                             <th className="py-3 px-4">Classification</th>
                             <th className="py-3 px-4">Contact</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
@@ -835,6 +927,10 @@ const TdsWorkspace = () => {
                                 <p>{d.mobile || '-'}</p>
                                 <p className="text-[10px] text-slate-500">{d.email || '-'}</p>
                               </td>
+                              <td className="py-3 px-4 text-right whitespace-nowrap">
+                                <button onClick={() => openEditDeductee(d)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50" title="Edit deductee"><Pencil size={14}/></button>
+                                {canDelete && <button onClick={() => deleteTdsItem('deductees', d._id, `deductee "${d.deducteeName}"`)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50" title="Delete deductee"><Trash2 size={14}/></button>}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -849,7 +945,7 @@ const TdsWorkspace = () => {
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-2 flex flex-col min-h-0 h-full">
                   <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
                     <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2"><Receipt size={16} className="text-indigo-600"/> Challan Repository</h3>
-                    <button onClick={() => setIsChallanModalOpen(true)} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm shrink-0"><Plus size={14}/> Add Challan</button>
+                    <button onClick={openNewChallan} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm shrink-0"><Plus size={14}/> Add Challan</button>
                   </div>
                   {tabData.challans.length === 0 ? (
                     <div className="text-center py-10">
@@ -865,6 +961,7 @@ const TdsWorkspace = () => {
                             <th className="py-3 px-4">Deposit Date</th>
                             <th className="py-3 px-4">Section & Quarter</th>
                             <th className="py-3 px-4 text-right">Total Amount (₹)</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
@@ -878,6 +975,10 @@ const TdsWorkspace = () => {
                                 <span className="ml-2 font-bold text-slate-500">{c.quarter} ({c.financialYear})</span>
                               </td>
                               <td className="py-3 px-4 text-right font-black text-emerald-600 text-sm">{c.totalAmount.toLocaleString('en-IN')}</td>
+                              <td className="py-3 px-4 text-right whitespace-nowrap">
+                                <button onClick={() => openEditChallan(c)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50" title="Edit challan"><Pencil size={14}/></button>
+                                {canDelete && <button onClick={() => deleteTdsItem('challans', c._id, `challan ${c.challanSerialNo}`)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50" title="Delete challan"><Trash2 size={14}/></button>}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1047,13 +1148,61 @@ const TdsWorkspace = () => {
         </div>
       )}
 
+      {/* ✏️ EDIT RETURN MODAL (M2) */}
+      {returnEdit && (
+        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="text-lg font-bold text-slate-800">Edit Return · {returnEdit.label}</h2>
+              <button onClick={() => setReturnEdit(null)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
+            </div>
+            <form onSubmit={saveReturnEdit} className="p-6 grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Status</label>
+                <select value={returnEdit.status} onChange={(e) => setReturnEdit({ ...returnEdit, status: e.target.value })} className="w-full p-2 border rounded-lg text-sm font-bold">
+                  {RETURN_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Return Type</label>
+                <select value={returnEdit.returnType} onChange={(e) => setReturnEdit({ ...returnEdit, returnType: e.target.value })} className="w-full p-2 border rounded-lg text-sm font-bold">
+                  <option value="Original">Original</option>
+                  <option value="Correction">Correction</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Due Date</label>
+                <input type="date" value={returnEdit.dueDate} onChange={(e) => setReturnEdit({ ...returnEdit, dueDate: e.target.value })} className="w-full p-2 border rounded-lg text-sm font-semibold"/>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Filed Date</label>
+                <input type="date" value={returnEdit.filedDate} onChange={(e) => setReturnEdit({ ...returnEdit, filedDate: e.target.value })} className="w-full p-2 border rounded-lg text-sm font-semibold"/>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Token / RRR No {returnEdit.status === 'Filed' && <span className="text-rose-500">*</span>}</label>
+                <input type="text" maxLength={20} required={returnEdit.status === 'Filed'} value={returnEdit.tokenNoRrr} onChange={(e) => setReturnEdit({ ...returnEdit, tokenNoRrr: e.target.value })} className="w-full p-2 border rounded-lg text-sm font-mono font-bold"/>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Acknowledgement No</label>
+                <input type="text" maxLength={30} value={returnEdit.acknowledgementNo} onChange={(e) => setReturnEdit({ ...returnEdit, acknowledgementNo: e.target.value })} className="w-full p-2 border rounded-lg text-sm font-mono font-bold"/>
+              </div>
+              <p className="col-span-2 text-[11px] text-slate-500">To mark a return as Filed, the Token / RRR number is required. The Filed Date is used in the Service Report.</p>
+              <div className="col-span-2 pt-4 border-t flex justify-end gap-2">
+                <button type="button" onClick={() => setReturnEdit(null)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg">Update Return</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ADD DEDUCTEE MODAL (M3) */}
       {isDeducteeModalOpen && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
-              <h2 className="text-lg font-bold text-slate-800">Add New Deductee</h2>
-              <button onClick={() => setIsDeducteeModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
+              <h2 className="text-lg font-bold text-slate-800">{editingDeducteeId ? 'Edit Deductee' : 'Add New Deductee'}</h2>
+              <button onClick={() => { setIsDeducteeModalOpen(false); setEditingDeducteeId(null); }} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
             </div>
             <form onSubmit={handleAddDeductee} className="p-6 grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -1098,7 +1247,7 @@ const TdsWorkspace = () => {
               </div>
               <div className="col-span-2 pt-4 border-t flex justify-end gap-2">
                 <button type="button" onClick={() => setIsDeducteeModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg">Save Deductee</button>
+                <button type="submit" className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg">{editingDeducteeId ? 'Update Deductee' : 'Save Deductee'}</button>
               </div>
             </form>
           </div>
@@ -1110,8 +1259,8 @@ const TdsWorkspace = () => {
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
-              <h2 className="text-lg font-bold text-slate-800">Add Challan Record</h2>
-              <button onClick={() => setIsChallanModalOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
+              <h2 className="text-lg font-bold text-slate-800">{editingChallanId ? 'Edit Challan Record' : 'Add Challan Record'}</h2>
+              <button onClick={() => { setIsChallanModalOpen(false); setEditingChallanId(null); }} className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50"><X size={18} /></button>
             </div>
             <form onSubmit={handleAddChallan} className="p-6 grid grid-cols-3 gap-4">
               <div>
@@ -1157,7 +1306,7 @@ const TdsWorkspace = () => {
 
               <div className="col-span-3 pt-4 border-t flex justify-end gap-2">
                 <button type="button" onClick={() => setIsChallanModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg">Save Challan</button>
+                <button type="submit" className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg">{editingChallanId ? 'Update Challan' : 'Save Challan'}</button>
               </div>
             </form>
           </div>
@@ -1174,7 +1323,7 @@ const TdsWorkspace = () => {
                   <FileDigit size={20}/> Return Editor: {selectedReturn.formType} ({selectedReturn.quarter} {selectedReturn.financialYear})
                 </h2>
               </div>
-              <button onClick={() => setIsEntryModalOpen(false)} className="p-2 rounded-xl bg-white/10 hover:bg-white/20"><X size={18} /></button>
+              <button onClick={() => { setIsEntryModalOpen(false); cancelEditEntry(); }} className="p-2 rounded-xl bg-white/10 hover:bg-white/20"><X size={18} /></button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50 flex flex-col gap-6 custom-scrollbar min-h-0">
@@ -1194,14 +1343,15 @@ const TdsWorkspace = () => {
                         <th className="py-2 px-4">Dates</th>
                         <th className="py-2 px-4 text-right">Amt Paid</th>
                         <th className="py-2 px-4 text-right">TDS (Ded/Dep)</th>
+                        <th className="py-2 px-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
                       {entries.length === 0 ? (
-                        <tr><td colSpan="6" className="text-center py-6 text-slate-400">No entries found for this return. Add below.</td></tr>
+                        <tr><td colSpan="7" className="text-center py-6 text-slate-400">No entries found for this return. Add below.</td></tr>
                       ) : (
                         entries.map(ent => (
-                          <tr key={ent._id} className="hover:bg-slate-50">
+                          <tr key={ent._id} className={editingEntryId === ent._id ? 'bg-amber-50' : 'hover:bg-slate-50'}>
                             <td className="py-2 px-4">
                               <span className="font-bold text-slate-800 block">{ent.tdsDeducteeId?.deducteeName}</span>
                               <span className="font-mono text-[9px]">{ent.tdsDeducteeId?.pan}</span>
@@ -1220,6 +1370,10 @@ const TdsWorkspace = () => {
                               <p className="font-bold text-rose-600">₹{ent.tdsDeducted} @ {ent.tdsRate}%</p>
                               <p className="font-bold text-emerald-600 text-[10px]">Dep: ₹{ent.tdsDeposited}</p>
                             </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap">
+                              <button onClick={() => startEditEntry(ent)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50" title="Edit entry"><Pencil size={14}/></button>
+                              {canDelete && <button onClick={() => deleteTdsItem('entries', ent._id, `this entry of ${ent.tdsDeducteeId?.deducteeName || 'deductee'}`)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50" title="Delete entry"><Trash2 size={14}/></button>}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -1229,8 +1383,11 @@ const TdsWorkspace = () => {
               </div>
 
               {/* Add New Entry Form */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 shrink-0">
-                <h3 className="text-xs font-bold text-indigo-800 uppercase tracking-wider mb-4 border-b pb-2">Add New Deduction Entry</h3>
+              <div className={`bg-white p-5 rounded-2xl shadow-sm border shrink-0 ${editingEntryId ? 'border-amber-300 ring-2 ring-amber-100' : 'border-slate-200'}`}>
+                <div className="flex items-center justify-between mb-4 border-b pb-2">
+                  <h3 className={`text-xs font-bold uppercase tracking-wider ${editingEntryId ? 'text-amber-700' : 'text-indigo-800'}`}>{editingEntryId ? 'Edit Deduction Entry' : 'Add New Deduction Entry'}</h3>
+                  {editingEntryId && <button type="button" onClick={cancelEditEntry} className="text-[11px] font-bold text-slate-500 hover:text-rose-600">Cancel edit</button>}
+                </div>
                 <form onSubmit={handleAddEntry} className="grid grid-cols-1 md:grid-cols-5 gap-4">
                   <div className="md:col-span-2">
                     <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Select Deductee *</label>
@@ -1279,7 +1436,7 @@ const TdsWorkspace = () => {
                   </div>
 
                   <div className="md:col-span-5 flex justify-end mt-2 pt-4 border-t border-slate-100">
-                    <button type="submit" className="bg-indigo-600 text-white text-xs font-bold px-6 py-2.5 rounded-lg hover:bg-indigo-700">Add Entry +</button>
+                    <button type="submit" className={`text-white text-xs font-bold px-6 py-2.5 rounded-lg ${editingEntryId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>{editingEntryId ? 'Update Entry' : 'Add Entry +'}</button>
                   </div>
                 </form>
               </div>

@@ -275,6 +275,8 @@ export const createTdsReturn = async (req, res) => {
 export const deleteTdsReturn = async (req, res) => {
   try {
     await TdsReturn.findByIdAndDelete(req.params.id);
+    // Us return ki entries bhi hisaab se bahar (warna bina return ke latki rehti)
+    await TdsDeductionEntry.updateMany({ tdsReturnId: req.params.id }, { isActive: false });
     res.status(200).json({ message: "Return deleted successfully" });
   } catch (error) { res.status(500).json({ message: error.message }); }
 };
@@ -387,6 +389,79 @@ export const addDeductionEntry = async (req, res) => {
   } catch (error) { res.status(400).json({ message: error.message }); }
 };
 
+
+// ==========================================
+// ✏️ EDIT / 🗑️ DELETE: Deductee (M3), Challan (M4), Deduction Entry (M5)
+// Edit har TDS user kar sakta hai; delete sirf "Delete Records" right wala (route par check).
+// Jo deductee / challan kisi entry me laga hai use delete nahi karte (entry adhuri reh jaati).
+// ==========================================
+const pick = (body, fields) => Object.fromEntries(fields.filter(f => body[f] !== undefined).map(f => [f, body[f]]));
+
+export const updateDeductee = async (req, res) => {
+  try {
+    const deductee = await TdsDeductee.findOne({ _id: req.params.id, isActive: true });
+    if (!deductee) return res.status(404).json({ message: 'Deductee not found' });
+    const data = pick(req.body, ['deducteeName', 'pan', 'panStatus', 'deducteeType', 'residentialStatus', 'mobile', 'email']);
+    if (data.pan) {
+      data.pan = String(data.pan).toUpperCase();
+      const dup = await TdsDeductee.findOne({ _id: { $ne: deductee._id }, tdsWorkspaceId: deductee.tdsWorkspaceId, pan: data.pan, isActive: true });
+      if (dup && !['PANNOTAVBL', 'PANAPPLIED', 'PANINVALID'].includes(data.pan)) {
+        return res.status(400).json({ message: 'Another deductee with this PAN already exists in this workspace.' });
+      }
+    }
+    Object.assign(deductee, data, { updatedBy: req.user._id });
+    await deductee.save();
+    res.status(200).json(deductee);
+  } catch (error) { res.status(400).json({ message: error.message }); }
+};
+
+export const deleteDeductee = async (req, res) => {
+  try {
+    const used = await TdsDeductionEntry.countDocuments({ tdsDeducteeId: req.params.id, isActive: true });
+    if (used) return res.status(400).json({ message: `This deductee is used in ${used} deduction entr${used === 1 ? 'y' : 'ies'}. Delete or change those entries first.` });
+    const deductee = await TdsDeductee.findByIdAndUpdate(req.params.id, { isActive: false, updatedBy: req.user._id }, { new: true });
+    if (!deductee) return res.status(404).json({ message: 'Deductee not found' });
+    res.status(200).json({ message: 'Deductee deleted' });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+export const updateChallan = async (req, res) => {
+  try {
+    const challan = await TdsChallan.findOne({ _id: req.params.id, isActive: true });
+    if (!challan) return res.status(404).json({ message: 'Challan not found' });
+    Object.assign(challan, pick(req.body, ['challanSerialNo', 'bsrCode', 'depositDate', 'tdsAmount', 'interestAmount', 'lateFeeAmount', 'otherAmount', 'depositMode', 'sectionCode', 'quarter', 'financialYear']), { updatedBy: req.user._id });
+    await challan.save(); // total amount dobara ban jata hai (pre save)
+    res.status(200).json(challan);
+  } catch (error) { res.status(400).json({ message: error.message }); }
+};
+
+export const deleteChallan = async (req, res) => {
+  try {
+    const used = await TdsDeductionEntry.countDocuments({ tdsChallanId: req.params.id, isActive: true });
+    if (used) return res.status(400).json({ message: `This challan is used in ${used} deduction entr${used === 1 ? 'y' : 'ies'}. Delete or change those entries first.` });
+    const challan = await TdsChallan.findByIdAndUpdate(req.params.id, { isActive: false, updatedBy: req.user._id }, { new: true });
+    if (!challan) return res.status(404).json({ message: 'Challan not found' });
+    res.status(200).json({ message: 'Challan deleted' });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+export const updateDeductionEntry = async (req, res) => {
+  try {
+    const entry = await TdsDeductionEntry.findOne({ _id: req.params.id, isActive: true });
+    if (!entry) return res.status(404).json({ message: 'Entry not found' });
+    Object.assign(entry, pick(req.body, ['tdsDeducteeId', 'tdsChallanId', 'sectionCode', 'paymentDate', 'deductionDate', 'amountPaid', 'tdsRate', 'tdsDeducted', 'tdsDeposited']), { updatedBy: req.user._id });
+    await entry.save();
+    res.status(200).json(entry);
+  } catch (error) { res.status(400).json({ message: error.message }); }
+};
+
+export const deleteDeductionEntry = async (req, res) => {
+  try {
+    const entry = await TdsDeductionEntry.findByIdAndUpdate(req.params.id, { isActive: false, updatedBy: req.user._id }, { new: true });
+    if (!entry) return res.status(404).json({ message: 'Entry not found' });
+    res.status(200).json({ message: 'Entry deleted' });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
 
 // ==========================================
 // 📚 M6: REFERENCE MASTERS

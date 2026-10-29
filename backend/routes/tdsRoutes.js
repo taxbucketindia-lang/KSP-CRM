@@ -7,6 +7,7 @@ import {
   getChallans, addChallan,
   getDeductionEntries, addDeductionEntry,
   getTdsSections, updateTdsWorkspace, deleteTdsReturn, deleteTdsWorkspace,
+  updateDeductee, deleteDeductee, updateChallan, deleteChallan, updateDeductionEntry, deleteDeductionEntry,
 } from '../controllers/tdsController.js';
 
 import { requirePermission } from '../utils/permissions.js';
@@ -35,6 +36,11 @@ router.route('/workspaces/:workspaceId/challans').get(protect, getChallans).post
 
 // M5: Deduction Entries (Return level)
 router.route('/returns/:returnId/entries').get(protect, getDeductionEntries).post(protect, addDeductionEntry);
+
+// ✏️ Edit (har TDS user) / 🗑️ Delete (sirf "Delete Records" right)
+router.route('/deductees/:id').put(protect, updateDeductee).delete(protect, canDelete, deleteDeductee);
+router.route('/challans/:id').put(protect, updateChallan).delete(protect, canDelete, deleteChallan);
+router.route('/entries/:id').put(protect, updateDeductionEntry).delete(protect, canDelete, deleteDeductionEntry);
 
 // M6: Master Data
 router.route('/masters/sections').get(protect, getTdsSections);

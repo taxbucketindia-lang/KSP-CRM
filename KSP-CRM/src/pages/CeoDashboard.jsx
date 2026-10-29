@@ -1561,7 +1561,7 @@ const handleOpenEmployeeDetail = (empStat) => {
                 id: `lead-${l._id}`,
                 action: isCreation ? 'added a new Lead:' : `updated Lead status to [${l.status}]:`,
                 subject: l.name,
-                user: l.createdBy?.name || 'An Employee',
+                user: l.createdBy?.name || l.createdVia || 'An Employee',
                 time: time,
                 icon: UserCheck,
                 color: 'text-purple-600', bg: 'bg-purple-100'
