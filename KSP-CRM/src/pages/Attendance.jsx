@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import toast, { Toaster } from 'react-hot-toast';
-import { computeMonthAttendance, computePay, computeOpeningLeaves, dateKey } from '../utils/payroll';
+import { computeMonthAttendance, computePay, computeOpeningLeaves, dateKey, lateCutoff } from '../utils/payroll';
 import { 
   CalendarDays, Search, Building2, UserCircle, Save, 
   Clock, CheckCircle2, AlertCircle, RefreshCw, CheckSquare, MapPin, ExternalLink, Users, AlertTriangle, UserMinus, Award
@@ -158,7 +158,7 @@ const Attendance = () => {
           }
         }
         
-        const policyEnforcedSheet = enforceLatePolicy(generatedSheet, shiftStartTime);
+        const policyEnforcedSheet = enforceLatePolicy(generatedSheet, lateCutoff(empDetails));
         setSheetData(policyEnforcedSheet);
 
       } catch (error) {
@@ -235,7 +235,7 @@ const Attendance = () => {
       }
     }
 
-    updatedSheet = enforceLatePolicy(updatedSheet, shiftStartTime);
+    updatedSheet = enforceLatePolicy(updatedSheet, lateCutoff(empDetails));
     setSheetData(updatedSheet);
 
     if (field === 'inTime' && value !== '') {
@@ -282,7 +282,7 @@ const Attendance = () => {
       return row;
     });
 
-    updated = enforceLatePolicy(updated, shiftStartTime);
+    updated = enforceLatePolicy(updated, lateCutoff(empDetails));
     setSheetData(updated);
     toast.success("Remaining days marked as Present");
   };
@@ -325,7 +325,7 @@ const Attendance = () => {
         ...empRecords.filter(r => !dateKey(r.date).startsWith(selectedMonth)),
         ...sheetData.filter(row => row.status)
       ],
-      shiftStartTime: activeEmployeeData?.shiftStartTime || '09:30',
+      shiftStartTime: lateCutoff(activeEmployeeData), // shift + late allowance
       joiningDate: activeEmployeeData?.joiningDate,
       lastWorkingDate: isOffboarded ? activeEmployeeData.lastWorkingDate : null
     });
@@ -490,7 +490,7 @@ const Attendance = () => {
                 </select>
                 {activeEmployeeData && (
                   <div className="bg-blue-50 border border-blue-100 text-blue-700 text-[10px] font-bold px-3 py-2 rounded-xl whitespace-nowrap" title="Shift Start Time">
-                    Shift: {activeEmployeeData.shiftStartTime || '09:30'}
+                    Shift: {activeEmployeeData.shiftStartTime || '09:30'}{Number(activeEmployeeData.lateAllowance) ? ` + ${activeEmployeeData.lateAllowance} min (late after ${lateCutoff(activeEmployeeData)})` : ''}
                   </div>
                 )}
               </div>

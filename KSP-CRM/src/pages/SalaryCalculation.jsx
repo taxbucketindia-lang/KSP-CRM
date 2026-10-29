@@ -679,7 +679,7 @@ import {
 // IMPORT PDF LIBRARIES
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { computeMonthAttendance, computePay, computeOpeningLeaves } from '../utils/payroll';
+import { computeMonthAttendance, computePay, computeOpeningLeaves, lateCutoff } from '../utils/payroll';
 import { can } from '../utils/permissions';
 import { BadgeCheck, MessageSquareText, X as CloseIcon, Wallet as WalletIcon } from 'lucide-react';
 
@@ -754,7 +754,7 @@ const SalaryCalculation = () => {
         const calc = computeMonthAttendance({
           monthStr: selectedMonth,
           records: empAtt,
-          shiftStartTime: emp.shiftStartTime || '09:30',
+          shiftStartTime: lateCutoff(emp), // shift + late allowance
           joiningDate: emp.joiningDate,
           lastWorkingDate: ['Resigned', 'Terminated', 'Absconded'].includes(emp.status) ? emp.lastWorkingDate : null
         });

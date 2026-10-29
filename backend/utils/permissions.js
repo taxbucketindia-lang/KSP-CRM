@@ -15,7 +15,7 @@ export const PERMISSION_GROUPS = {
   'Executive': ['CEO_DASHBOARD', 'BUSINESS_HEALTH', 'SERVICE_REPORT'],
   // Tab nahi, khaas kaam: Client Master, ITR, GST, ROC, TDS, Audit, FSSAI, Leads, Registrations, Invoices ka data delete karna
   // SALARY_PAYMENT: salary Paid mark karna + remarks (sirf CEO de sakta hai)
-  'Special Rights': ['DELETE_RECORDS', 'SALARY_PAYMENT']
+  'Special Rights': ['DELETE_RECORDS', 'SALARY_PAYMENT', 'LATE_ALLOWANCE']
 };
 
 // 🔴 Ye rights sirf CEO deta hai: Admin ke "Full access" se apne aap nahi milte, aur Admin aage kisi ko nahi de sakta

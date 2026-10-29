@@ -24,6 +24,16 @@ const toMinutes = (timeStr) => {
   return (h * 60) + m;
 };
 
+// 🔴 LATE KI SEEMA: shift time + Employee Master ka late allowance (jaise 09:30 + 10 min = 09:40 tak late nahi)
+export const LATE_ALLOWANCES = [0, 5, 10, 15, 20];
+export const lateCutoff = (emp) => {
+  const base = emp?.shiftStartTime || '09:30';
+  const extra = Number(emp?.lateAllowance) || 0;
+  if (!extra) return base;
+  const total = toMinutes(base) + extra;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
+
 export const isLateEntry = (inTime, shiftStartTime) => {
   if (!inTime || !shiftStartTime) return false;
   return toMinutes(inTime) > toMinutes(shiftStartTime);
@@ -199,7 +209,7 @@ export const computeOpeningLeaves = ({ emp, records = [], salaries = [], monthSt
 
   const monthAttendance = (m) => computeMonthAttendance({
     monthStr: m, records, todayKey,
-    shiftStartTime: emp?.shiftStartTime || '09:30',
+    shiftStartTime: lateCutoff(emp), // shift + late allowance
     joiningDate: emp?.joiningDate,
     lastWorkingDate: isOffboarded ? emp?.lastWorkingDate : null
   });
@@ -247,7 +257,7 @@ export const computeLeaveStatus = ({ emp, records = [], salaries = [], monthStr,
   const openingLeaves = computeOpeningLeaves({ emp, records, salaries, monthStr, todayKey });
   const att = computeMonthAttendance({
     monthStr, records, todayKey,
-    shiftStartTime: emp?.shiftStartTime || '09:30',
+    shiftStartTime: lateCutoff(emp), // shift + late allowance
     joiningDate: emp?.joiningDate,
     lastWorkingDate: isOffboarded ? emp?.lastWorkingDate : null
   });

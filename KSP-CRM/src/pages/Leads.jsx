@@ -45,8 +45,10 @@ const Leads = () => {
   const initialForm = {
     name: '', mobile: '', email: '', 
     source: 'Google', referredByBA: '', referenceName: '', otherSourceName: '', 
-    status: 'New', priority: 'Warm', queryService: '', remarks: '', nextFollowUpDate: '' 
+    status: 'New', priority: 'Warm', queryService: '', otherService: '', remarks: '', nextFollowUpDate: '' 
   };
+  // Required Service ki list. Isme na ho toh "Other" + likha hua naam
+  const STANDARD_SERVICES = ['ITR Filing', 'GST Registration', 'Company Registration', 'Trademark Registration', 'Accounting'];
   const [formData, setFormData] = useState(initialForm);
 
   const fetchData = async () => {
@@ -253,7 +255,11 @@ const Leads = () => {
       otherSourceName: lead.otherSourceName || '',
       status: lead.status || 'New',
       priority: lead.priority || 'Warm',
-      queryService: Array.isArray(lead.queryService) ? (lead.queryService[0] || '') : (lead.queryService || ''),
+      // List me na ho (Other me likha tha) toh dropdown "Other" aur box me wahi naam
+      ...(() => {
+        const current = Array.isArray(lead.queryService) ? (lead.queryService[0] || '') : (lead.queryService || '');
+        return !current || STANDARD_SERVICES.includes(current) ? { queryService: current, otherService: '' } : { queryService: 'Other', otherService: current };
+      })(),
       remarks: lead.remarks || '',
       nextFollowUpDate: formattedDate 
     });
@@ -291,6 +297,7 @@ const Leads = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.queryService === 'Other' && !formData.otherService.trim()) return toast.error('Please write the service name');
     try {
       const payloadDate = formData.status === 'Follow-up' && formData.nextFollowUpDate ? formData.nextFollowUpDate : null;
       let finalRemarks = formData.remarks || '';
@@ -334,7 +341,9 @@ const Leads = () => {
       const payload = {
         ...formData,
         remarks: finalRemarks,
-        queryService: [formData.queryService],
+        // "Other" chuna ho toh jo naam likha wahi service ban kar save hota hai
+        queryService: formData.queryService === 'Other' ? [formData.otherService.trim()] : (formData.queryService ? [formData.queryService] : []),
+        otherService: undefined,
         nextFollowUpDate: payloadDate,
         referredByBA: formData.source === 'BA' ? formData.referredByBA : null,
         referenceName: formData.source === 'Reference' ? formData.referenceName : '',
@@ -388,6 +397,7 @@ const Leads = () => {
       case 'Converted': return 'bg-emerald-50 text-emerald-700 border-emerald-200/60 ring-emerald-500/10';
       case 'Follow-up': return 'bg-purple-50 text-purple-700 border-purple-200/60 ring-purple-500/10';
       case 'Interested': return 'bg-cyan-50 text-cyan-700 border-cyan-200/60 ring-cyan-500/10';
+      case 'Not Interested': return 'bg-rose-50 text-rose-700 border-rose-200/60 ring-rose-500/10';
       default: return 'bg-slate-100 text-slate-700 border-slate-200/60 ring-slate-500/10';
     }
   };
@@ -483,6 +493,7 @@ const Leads = () => {
                 <option value="Follow-up">Follow-up</option>
                 <option value="Proposal">Proposal</option>
                 <option value="Converted">Converted</option>
+                <option value="Not Interested">Not Interested</option>
               </select>
             </div>
 
@@ -922,6 +933,7 @@ const Leads = () => {
                     <option value="Follow-up">Follow-up</option>
                     <option value="Proposal">Proposal</option>
                     <option value="Converted">✅ Converted (Client)</option>
+                    <option value="Not Interested">❌ Not Interested</option>
                   </select>
                 </div>
 
@@ -947,7 +959,13 @@ const Leads = () => {
                     <option value="Company Registration">Company Registration</option>
                     <option value="Trademark Registration">Trademark Registration</option>
                     <option value="Accounting">Accounting & Audit</option>
+                    <option value="Other">Other</option>
                   </select>
+                  {formData.queryService === 'Other' && (
+                    <input type="text" name="otherService" required maxLength={100} value={formData.otherService} onChange={handleChange}
+                      disabled={editMode && !isAdmin} placeholder="Write the service, e.g. FSSAI Licence, MSME Registration..."
+                      className={`mt-2 w-full text-sm border rounded-lg p-2.5 font-medium ${editMode && !isAdmin ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed' : 'bg-orange-50/50 border-orange-200 focus:ring-2 focus:ring-orange-500/20'}`} />
+                  )}
                 </div>
                 
                 {/* REMARKS INPUT */}

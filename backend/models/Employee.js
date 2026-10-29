@@ -20,6 +20,8 @@ const employeeSchema = new mongoose.Schema({
     type: String, 
     default: '09:30'
   },
+  // 🔴 LATE ALLOWANCE: shift time ke baad itne minute tak late nahi maana jata (0 / 5 / 10 / 15 / 20)
+  lateAllowance: { type: Number, enum: [0, 5, 10, 15, 20], default: 0 },
   joiningDate: { type: Date },
   probationPeriod: { type: String },
   confirmationDate: { type: Date },

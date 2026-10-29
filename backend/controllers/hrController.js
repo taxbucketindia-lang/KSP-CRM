@@ -12,6 +12,11 @@ export const createEmployee = async (req, res) => {
   try {
     // 🔴 NAYA: empId ab frontend se aayega
     const { email, password, role, empId, userId, ...hrData } = req.body;
+    // 🔴 Late allowance sirf CEO / Admin / jise "Late Allowance" right mila
+    if (hrData.lateAllowance !== undefined && Number(hrData.lateAllowance) !== 0 && !can(req.user, 'LATE_ALLOWANCE')) {
+      return res.status(403).json({ message: 'You do not have permission to set a late allowance.' });
+    }
+    if (hrData.lateAllowance !== undefined) hrData.lateAllowance = Number(hrData.lateAllowance) || 0;
 
     if (!empId) return res.status(400).json({ message: 'Employee ID is required.' });
     if (!canGrantRole(req.user, role)) return res.status(403).json({ message: 'Only the CEO can create a CEO account.' });
@@ -88,6 +93,13 @@ export const updateEmployee = async (req, res) => {
     });
     // Salary finalize hone par sirf leave balance update hota hai, use CEO ke record par bhi chalne do
     const isLeaveBalanceOnly = Object.keys(req.body).every(key => ['paidLeaveBalance', 'leaveBalanceAsOf'].includes(key));
+    // 🔴 Late allowance badalna sirf CEO / Admin / jise right mila (wahi value dobara aaye toh koi baat nahi)
+    if (employeeData.lateAllowance !== undefined) {
+      employeeData.lateAllowance = Number(employeeData.lateAllowance) || 0;
+      if (employeeData.lateAllowance !== (existingEmp.lateAllowance || 0) && !can(req.user, 'LATE_ALLOWANCE')) {
+        return res.status(403).json({ message: 'You do not have permission to change the late allowance.' });
+      }
+    }
 
     // 🔴 HR ne Employee Master se carry forward leaves badli: yeh pichle month ke end ka balance maana jayega,
     // taaki is month ki +1 uske upar jude

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { isCeoRole } from '../utils/roles';
-import { computeLeaveStatus, localTodayKey } from '../utils/payroll';
+import { computeLeaveStatus, localTodayKey, LATE_ALLOWANCES, lateCutoff } from '../utils/payroll';
+import { can } from '../utils/permissions';
 import toast, { Toaster } from 'react-hot-toast';
 import { 
   Users, Search, Plus, X, Briefcase, Mail, Phone, 
@@ -12,6 +13,8 @@ import {
 
 const EmployeeMaster = () => {
   const { user } = useContext(AuthContext);
+  // 🔴 Late allowance sirf CEO / Admin / jise "Late Allowance" right mila
+  const canSetLateAllowance = can(user, 'LATE_ALLOWANCE');
   
   const [employees, setEmployees] = useState([]);
   // 🔴 Har employee ki is month ki paid leave (total / used / remaining), attendance se calculate hoti hai
@@ -42,6 +45,7 @@ const EmployeeMaster = () => {
     designation: '', department: '', 
     employmentType: 'Full Time', joiningDate: '', probationPeriod: '', confirmationDate: '',
     shiftStartTime: '09:30',
+    lateAllowance: 0, // shift ke baad itne minute tak late nahi
     salaryType: 'Salary', basic: 0, hra: 0, otherAllowance: 0,
     paidLeaveBalance: 0, // 🔴 NAYA: Initial Balance Field
     pan: '', uanEsi: '', 
@@ -168,6 +172,7 @@ const EmployeeMaster = () => {
       probationPeriod: emp.probationPeriod || '',
       confirmationDate: emp.confirmationDate ? emp.confirmationDate.split('T')[0] : '',
       shiftStartTime: emp.shiftStartTime || '09:30', 
+      lateAllowance: Number(emp.lateAllowance) || 0,
       salaryType: emp.salaryType || 'Salary',
       basic: emp.salaryStructure?.basic || 0,
       hra: emp.salaryStructure?.hra || 0,
@@ -472,6 +477,7 @@ const EmployeeMaster = () => {
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Shift Time</p>
                       <p className="text-sm font-bold text-purple-700 flex items-center gap-1"><Clock size={12}/> {viewingEmployee.shiftStartTime || 'N/A'}</p>
+                      {Number(viewingEmployee.lateAllowance) > 0 && <p className="text-[11px] font-semibold text-purple-500">+ {viewingEmployee.lateAllowance} min allowed (late after {lateCutoff(viewingEmployee)})</p>}
                     </div>
                     {/* 🔴 NAYA: LEAVE BALANCE IN PROFILE VIEW */}
                     <div>
@@ -696,6 +702,25 @@ const EmployeeMaster = () => {
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-purple-600 mb-1 flex items-center gap-1"><Clock size={12}/> Shift Time (In)</label>
                       <input type="time" value={formData.shiftStartTime} onChange={(e) => setFormData({...formData, shiftStartTime: e.target.value})} className="w-full p-2.5 border border-purple-200 bg-purple-50/50 rounded-xl text-sm font-bold text-purple-700"/>
+                    </div>
+                    {/* 🔴 LATE ALLOWANCE: shift ke baad kitne minute tak late nahi (sirf CEO / Admin / jise right mila) */}
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-bold uppercase text-purple-600 mb-1 flex items-center gap-1"><Clock size={12}/> Late Allowance (after shift time)</label>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {LATE_ALLOWANCES.map(min => {
+                          const on = Number(formData.lateAllowance || 0) === min;
+                          return (
+                            <label key={min} className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold select-none ${canSetLateAllowance ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'} ${on ? 'bg-purple-600 border-purple-600 text-white' : 'bg-white border-purple-200 text-purple-700 hover:bg-purple-50'}`}>
+                              <input type="checkbox" className="accent-white" checked={on} disabled={!canSetLateAllowance} onChange={() => setFormData({ ...formData, lateAllowance: on ? 0 : min })} />
+                              {min === 0 ? 'None' : `${min} min`}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        {Number(formData.lateAllowance) ? `Late only after ${lateCutoff(formData)} (shift ${formData.shiftStartTime || '09:30'} + ${formData.lateAllowance} min). The 3-free-lates rule then applies.` : 'Late right after shift time.'}
+                        {!canSetLateAllowance && ' Only the CEO, Admin or someone with the "Late Allowance" right can change this.'}
+                      </p>
                     </div>
                     {/* 🔴 NAYA: OPENING LEAVE BALANCE INPUT */}
                     <div>

@@ -71,6 +71,7 @@ export const PERMISSION_CATALOG = [
     group: 'Special Rights',
     items: [
       { key: 'DELETE_RECORDS', label: 'Delete Records', action: true, hint: 'Delete saved data in Client Master, ITR, GST, ROC, TDS, Audit, FSSAI, Leads, Registrations and Invoices. Without this right nobody can delete.' },
+      { key: 'LATE_ALLOWANCE', label: 'Late Allowance (Employee Master)', action: true, hint: 'Allow an employee to come 5 / 10 / 15 / 20 minutes after shift time without being marked late. Attendance and salary use shift time + this allowance.' },
       { key: 'SALARY_PAYMENT', label: 'Salary Payment (mark Paid + remarks)', action: true, ceoOnly: true, hint: 'Mark salary as Paid / Unpaid and write remarks in Salary Calculation, and see those remarks. Only the CEO can give this right; Full access does not include it.' }
     ]
   }
