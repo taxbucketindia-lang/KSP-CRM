@@ -279,7 +279,9 @@ const GstReturns = () => {
       worksheet.columns = [
         { header: 'Master Client ID', key: 'clientId', width: 20 },
         { header: 'PAN', key: 'pan', width: 15 },
-        { header: 'Client / Trade Name', key: 'assesseeName', width: 30 },
+        // 🔴 Naam aur Trade Name alag columns (pehle ek me jud kar jate the, import par Client Name me dono aa jate the)
+        { header: 'Client Name', key: 'assesseeName', width: 30 },
+        { header: 'Trade Name', key: 'tradeName', width: 30 },
         { header: 'GSTIN', key: 'gstin', width: 20 },
         { header: 'Taxpayer Type', key: 'taxpayerType', width: 15 },
         { header: 'Aadhaar KYC', key: 'aadhaarKycStatus', width: 15 },
@@ -318,7 +320,8 @@ const GstReturns = () => {
         worksheet.addRow({
           clientId: client.clientMasterId?.clientId || 'Pending',
           pan: client.pan || '',
-          assesseeName: client.tradeName ? `${client.assesseeName} (${client.tradeName})` : client.assesseeName,
+          assesseeName: client.assesseeName || '',
+          tradeName: client.tradeName || '',
           gstin: client.gstin || '',
           taxpayerType: client.taxpayerType || '',
           aadhaarKycStatus: client.aadhaarKycStatus || '',
@@ -388,10 +391,20 @@ const GstReturns = () => {
           return '';
         };
 
+        // 🔴 Naam + Trade Name: nayi file me alag columns. Purani file me "Client / Trade Name" = "Naam (Trade Name)" ek saath, use tod do
+        // Trade Name khaali ho aur naam ke aakhir me (bracket) ho: bracket wala hissa Trade Name.
+        // "(HUF)", "(OPC)" jaise naam ka hi hissa hote hain, unhe nahi todte.
+        const splitNames = (row) => {
+          const name = String(getVal(row, ['Client Name', 'Assessee Name', 'assesseeName', 'Client / Trade Name']) || '').trim();
+          const trade = String(getVal(row, ['Trade Name', 'tradeName']) || '').trim();
+          const m = name.match(/^(.*\S)\s*\(([^()]+)\)\s*$/);
+          if (m && !trade && !/^(HUF|OPC)$/i.test(m[2].trim())) return { assesseeName: m[1].trim(), tradeName: m[2].trim() };
+          return { assesseeName: name, tradeName: trade };
+        };
+
         const formattedRecords = data.map(row => ({
           pan: String(getVal(row, ['PAN', 'pan', 'Pan', 'PAN Number', 'PAN No'])).toUpperCase(), 
-          assesseeName: getVal(row, ['Client / Trade Name', 'Assessee Name', 'assesseeName']) || '',
-          tradeName: row['Trade Name'] || row['tradeName'] || '',
+          ...splitNames(row),
           gstin: row['GSTIN'] || row['gstin'] || '',
           taxpayerType: row['Taxpayer Type'] || row['taxpayerType'] || 'Regular',
           aadhaarKycStatus: row['Aadhaar KYC'] || row['aadhaarKycStatus'] || 'No',
@@ -919,7 +932,7 @@ const GstReturns = () => {
                     className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
                   />
                 </th>
-                <th className="py-4 px-5">Client / Trade Name</th>
+                <th className="py-4 px-5">Client Name / Trade Name</th>
                 <th className="py-4 px-5">PAN Number</th>
                 <th className="py-4 px-5">GSTIN</th>
                 <th className="py-4 px-5">Taxpayer Type</th>
@@ -953,16 +966,18 @@ const GstReturns = () => {
 
                       <td className="py-4 px-5">
                         <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                           {client.tradeName || client.assesseeName}
+                           {client.assesseeName || client.tradeName}
                            {client.clientMasterId?.clientId && (
                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-slate-200/70 text-slate-600 tracking-wider">
                                {client.clientMasterId.clientId}
                              </span>
                            )}
                         </div>
-                        <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1.5 mt-1">
-                          <User size={10} className="text-slate-400"/> {client.assesseeName}
-                        </div>
+                        {client.tradeName && client.tradeName !== client.assesseeName && (
+                          <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1.5 mt-1">
+                            <Building2 size={10} className="text-slate-400"/> {client.tradeName}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-4 px-5">

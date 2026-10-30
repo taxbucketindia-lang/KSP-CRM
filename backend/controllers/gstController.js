@@ -244,7 +244,13 @@ export const importGstReturns = async (req, res) => {
     }
 
     for (let record of records) {
-      if (!record.gstin) continue; 
+      if (!record.gstin) continue;
+      // 🔴 "Naam (Trade Name)" ek saath aaya aur Trade Name khaali: alag karo ("(HUF)" / "(OPC)" naam ka hissa hai)
+      const joined = String(record.assesseeName || '').trim().match(/^(.*\S)\s*\(([^()]+)\)\s*$/);
+      if (joined && !String(record.tradeName || '').trim() && !/^(HUF|OPC)$/i.test(joined[2].trim())) {
+        record.assesseeName = joined[1].trim();
+        record.tradeName = joined[2].trim();
+      }
       
       const uppercaseGstin = record.gstin.toUpperCase();
       const extractedPan = record.pan ? record.pan.toUpperCase() : uppercaseGstin.substring(2, 12);
@@ -255,6 +261,7 @@ export const importGstReturns = async (req, res) => {
       if (clientDoc) {
         let masterUpdates = {};
         if (record.assesseeName) masterUpdates.name = record.assesseeName;
+        if (record.tradeName) masterUpdates.tradeName = record.tradeName;
         if (record.mobile) masterUpdates.mobile = record.mobile;
         if (record.email) masterUpdates.email = record.email;
         if (record.state) masterUpdates.state = record.state;
@@ -273,6 +280,7 @@ export const importGstReturns = async (req, res) => {
           clientId: customClientId,
           pan: extractedPan,
           name: record.assesseeName,
+          tradeName: record.tradeName || '',
           mobile: record.mobile,
           email: record.email,
           state: record.state,
